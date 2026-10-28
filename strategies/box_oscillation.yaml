@@ -1,0 +1,25 @@
+# 箱体震荡 / Box Oscillation
+name: box_oscillation
+display_name: 箱体震荡
+description: 高抛低吸区间策略，箱体破位离场。
+category: range
+required_evidence: [daily_bars, technical]
+aliases: [高抛低吸, 区间震荡]
+default_priority: 55
+market_regimes: [range]
+
+instructions: |
+  **箱体震荡**
+
+  判定（读 technical 与近 10 根日 K）：
+
+  1. **箱体识别**：近 60 日高低点区间宽度 / 中轴 < 25%；当前价格在箱体内。
+  2. **低吸**：价格触及箱体下沿（距 52 周低 < 箱宽的 20%）且缩量 → buy。
+  3. **高抛**：价格触及箱体上沿（pct_from_52w_high > -3）且放量滞涨 → sell/减仓。
+  4. **破位规则**：放量跌破下沿 → sell（不做「箱底支撑」幻想）；放量突破上沿
+     → 交由 volume_breakout 接管，本策略让位。
+
+  评分调整：
+  - 箱体下沿缩量企稳 → buy（置信 0.65–0.75）。
+  - 箱体上沿滞涨 → sell。
+  - 箱体未成形（区间宽度 > 25%）→ hold 并注明「趋势市，本策略不适用」。

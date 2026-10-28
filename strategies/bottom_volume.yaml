@@ -1,0 +1,28 @@
+# 底部放量 / Bottom Volume
+name: bottom_volume
+display_name: 底部放量
+description: 长期下跌后底部放量企稳，潜在反转信号。
+category: reversal
+required_evidence: [daily_bars, technical, chip]
+aliases: [底部反转, 地量见底]
+default_priority: 55
+market_regimes: [trending_down]
+
+instructions: |
+  **底部放量**
+
+  判定（读 technical、近 10 根日 K 与 chip 块）：
+
+  1. **持续下跌确认**：pct_from_52w_low < 20（仍处低位区）；近 60 日
+     主基调为下行（ma60 在价格上方且下倾）。
+  2. **量能异动**：当日 vol_ratio_5 > 3，且此前一段为地量（前期
+     vol_ratio_5 曾 < 0.6）。
+  3. **价格企稳**：当日收阳、守住近期低点；长下影线加分。
+  4. **筹码确认**（A 股专属，chip 块）：获利比例 < 20%（上方套牢盘轻）
+     且平均成本接近现价（成本收敛）。chip 为 not_supported（港股）时
+     仅按价格量能判，置信降 0.1。
+
+  评分调整：
+  - 下跌充分 + 地量后放量 + 收阳企稳 → buy（置信 0.65–0.75；反转风险高，
+    仓位 2–3 成，止损近期低点下方）。
+  - 放量但收阴破位 → sell（下跌中继）。

@@ -1,0 +1,23 @@
+# 缩量回踩 / Shrink Pullback
+name: shrink_pullback
+display_name: 缩量回踩
+description: 上升趋势中缩量回调至均线支撑，低吸点。
+category: pullback
+required_evidence: [daily_bars, technical]
+aliases: [回踩低吸, 缩量回调]
+default_priority: 65
+market_regimes: [trending_up]
+
+instructions: |
+  **缩量回踩**
+
+  判定（读 technical 与近 10 根日 K）：
+
+  1. **前提趋势**：ma20 上行，现价曾连续 5 日以上站上 ma20。
+  2. **回踩形态**：近 3 日回调，累计跌幅 3%–8%，vol_ratio_5 < 0.8（缩量）。
+  3. **支撑验证**：回踩至 ma10 或 ma20 附近获得支撑（当日下影线或收平）。
+  4. **排除破位**：若收盘跌破 ma20 超过 2%，本策略失效（转交给趋势策略判）。
+
+  评分调整：
+  - 缩量回踩 ma20 不破 + 缩量止跌 → buy（置信 0.7–0.8）。
+  - 回踩中仍无止跌信号 → hold（等待企稳，注明「右侧确认」）。

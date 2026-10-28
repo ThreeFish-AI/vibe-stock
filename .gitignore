@@ -1,0 +1,6 @@
+__pycache__/
+.venv/
+.vs/
+*.local.json
+.DS_Store
+.vs*

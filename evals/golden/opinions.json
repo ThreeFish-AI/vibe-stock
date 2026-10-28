@@ -1,0 +1,7 @@
+[
+  {"source": "strategy:bull_trend", "signal": "strong_buy", "confidence": 0.85, "rationale": "多头排列且 MACD 金叉放大（金叉案例）"},
+  {"source": "strategy:ma_golden_cross", "signal": "hold", "confidence": 0.5, "rationale": "金叉已过窗口"},
+  {"source": "strategy:emotion_cycle", "signal": "hold", "confidence": 0.5, "rationale": "rsi 78 过热区非冰点"},
+  {"source": "role:技术", "signal": "buy", "confidence": 0.7, "rationale": "趋势完好"},
+  {"source": "role:风险", "signal": "hold", "confidence": 0.9, "rationale": "rsi 78 过热"}
+]

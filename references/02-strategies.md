@@ -1,0 +1,34 @@
+# 02 · 策略层：说明书形态与信号资格分选（SSOT）
+
+策略库在 [strategies/](../strategies/)；执法在 [scripts/adjudicate.py](../scripts/adjudicate.py)
+（`partition`）。
+
+## 五个标准信号（唯一合法输出词）
+
+`strong_buy / buy / hold / sell / strong_sell`
+
+别名归一表（收英文变体与本表中文交易术语；**表外自由文本一律判无效**）：
+strong buy / strong-buy / strongbuy / 加仓买入 → strong_buy；buy / long / 买入 /
+增持 → buy；hold / neutral / 持有 / 观望 → hold；sell / short / 卖出 / 减持 →
+sell；strong sell / 清仓卖出 → strong_sell。
+
+## 验票门（互斥且穷尽）
+
+每个意见（角色与策略一视同仁）恰好落进二者之一：
+
+- **过门** → 进意见链参与聚合；
+- **不过门**（表外信号 / 置信出界）→ 移入诊断记录留档，**绝不进意见链**、
+  不静默删除、不修正为中性。
+
+条件：所有外来意见（策略 YAML、自定义策略）；做法：代码执法（partition）；
+坑位：LLM 产意见必须写五标准信号**原词**——「看多!!!」「大概能买」这类表达
+会整条进诊断，等于该策略本轮弃权（这是特性不是 bug：先保证进门的可计算，
+再谈观点对错）。
+
+## 角色 vs 策略的待遇
+
+- 内置三角色（技术 / 情报 / 风险）与策略意见走**同一道验票门**；差异在
+  角色还能给 risk.json（veto / downgrade / severity 建议，供 RiskGuard 消费）。
+- 策略说明书 = 数据：`name/display_name/category/required_evidence/aliases/
+  default_priority/market_regimes` + `instructions`（自然语言交易逻辑）。
+  required_evidence 的块缺失时策略须降置信并注明，不得假装看得到。

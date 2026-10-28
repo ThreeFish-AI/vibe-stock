@@ -1,0 +1,26 @@
+# 情绪周期 / Emotion Cycle
+name: emotion_cycle
+display_name: 情绪周期
+description: 市场情绪由冰点到修复的拐点交易，逆向布局。
+category: sentiment
+required_evidence: [daily_bars, technical, news]
+aliases: [情绪拐点, 冰点布局]
+default_priority: 50
+market_regimes: [trending_down, range]
+
+instructions: |
+  **情绪周期**
+
+  判定（读 technical、近 10 根日 K 与 news 块；港股 news 为 not_supported
+  时按价格情绪近似）：
+
+  1. **冰点识别**：rsi14 < 30，且近 10 日累计跌幅 > 12%，量能萎缩
+     （vol_ratio_5 < 0.7）。
+  2. **修复信号**：出现放量阳线或长下影，vol_ratio_5 回到 1 以上。
+  3. **左侧/右侧**：仅见冰点无修复 → hold（左侧太早）；冰点 + 修复信号
+     → buy（右侧拐点）。
+  4. **风控**：本策略天然逆势，止损必须严格（冰点低点下方 5%），仓位轻。
+
+  评分调整：
+  - 冰点 + 放量修复 → buy（置信 0.65–0.75，仓位提示 2–3 成）。
+  - 持续阴跌无修复 → hold 或 sell（不接飞刀）。

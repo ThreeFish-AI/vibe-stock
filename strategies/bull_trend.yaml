@@ -1,0 +1,27 @@
+# 多头趋势跟踪 / Bull Trend
+# 蓝本：DSA strategies/bull_trend.yaml（结构借鉴、口径按 vibe-stock 证据包重写）
+
+name: bull_trend
+display_name: 多头趋势
+description: 均线多头排列下的趋势跟随，回调不破趋势则持有。
+category: trend
+required_evidence: [daily_bars, technical]
+aliases: [趋势跟踪, 多头排列]
+default_priority: 80
+market_regimes: [trending_up]
+
+instructions: |
+  **多头趋势（趋势跟随）**
+
+  判定（读证据包 technical 与近 10 根日 K）：
+
+  1. **多头排列**：ma5 > ma10 > ma20，且 ma60 在最下方或走平。
+  2. **趋势有效**：现价在 ma20 上方；pct_from_52w_high > -20（未深陷回撤）。
+  3. **量能健康**：vol_ratio_5 在 0.8–2.5 之间（过热 >3 警惕）。
+  4. **出场信号**：收盘跌破 ma20，或 rsi14 > 78（过热，减仓而非清仓）。
+
+  评分调整：
+  - 三线多头 + 现价 > ma20 → buy（趋势确立，置信 0.7–0.85）。
+  - 叠加 macd.dif > dea 且柱体放大 → strong_buy（置信 ≤0.9）。
+  - 证据块 daily_bars/technical 非 available/fallback → 置信减半并说明。
+  - 只在趋势在場时看多；跌破 ma20 当日给 hold 或 sell，禁止「再等等」。

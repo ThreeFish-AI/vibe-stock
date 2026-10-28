@@ -1,0 +1,25 @@
+# 放量突破 / Volume Breakout
+name: volume_breakout
+display_name: 放量突破
+description: 量价齐升突破平台/前高，动量启动。
+category: momentum
+required_evidence: [daily_bars, technical]
+aliases: [突破, 放量上攻]
+default_priority: 75
+market_regimes: [trending_up, range]
+
+instructions: |
+  **放量突破**
+
+  判定（读 technical 与近 10 根日 K）：
+
+  1. **量能异动**：vol_ratio_5 >= 2.0（当日量为 5 日均量 2 倍以上）。
+  2. **价格突破**：收盘创近 20 日新高，或突破箱体上沿（见 box_oscillation 判据）。
+  3. **持续性**：突破日 rsi14 在 55–75 区间；>80 视为末端冲高。
+  4. **假突破防范**：若突破当日 pct_from_52w_high > -2（逼近年内高点）且量能
+     衰竭（突破次日缩量），降一档并注明。
+
+  评分调整：
+  - 放量 + 创 20 日新高 → buy（置信 0.75–0.85）。
+  - 缩量回踩突破位不破 → 维持 buy。
+  - 跌回突破位下方 → sell（假突破止损）。

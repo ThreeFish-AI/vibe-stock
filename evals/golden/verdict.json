@@ -1,0 +1,89 @@
+{
+ "valid_opinions": [
+  {
+   "source": "strategy:bull_trend",
+   "signal": "strong_buy",
+   "confidence": 0.85,
+   "weight": 1.0
+  },
+  {
+   "source": "strategy:ma_golden_cross",
+   "signal": "hold",
+   "confidence": 0.5,
+   "weight": 1.0
+  },
+  {
+   "source": "strategy:emotion_cycle",
+   "signal": "hold",
+   "confidence": 0.5,
+   "weight": 1.0
+  },
+  {
+   "source": "role:技术",
+   "signal": "buy",
+   "confidence": 0.7,
+   "weight": 1.0
+  },
+  {
+   "source": "role:风险",
+   "signal": "hold",
+   "confidence": 0.9,
+   "weight": 1.0
+  }
+ ],
+ "diagnostics": [],
+ "aggregate": {
+  "final_signal": "strong_buy",
+  "confidence": 0.9,
+  "consensus_level": "medium",
+  "conflicts": [
+   {
+    "type": "spread",
+    "severity": "medium"
+   },
+   {
+    "type": "high_conf_dissent",
+    "severity": "medium"
+   }
+  ]
+ },
+ "disagreement": {
+  "buckets": {
+   "bullish": [
+    "strategy:bull_trend",
+    "role:技术"
+   ],
+   "bearish": [],
+   "neutral": [
+    "strategy:ma_golden_cross",
+    "strategy:emotion_cycle",
+    "role:风险"
+   ]
+  },
+  "conflicts": [
+   {
+    "type": "spread",
+    "severity": "medium"
+   },
+   {
+    "type": "high_conf_dissent",
+    "severity": "medium"
+   }
+  ]
+ },
+ "risk_guard": {
+  "initial": "strong_buy",
+  "final_before_cap": "hold",
+  "final": "hold",
+  "log": [
+   "veto strong_buy->hold",
+   "no-op"
+  ]
+ },
+ "evidence_quality": {
+  "score": 89,
+  "tier": "good",
+  "confidence_cap": "high"
+ },
+ "executable": false
+}
