@@ -4,7 +4,7 @@ description: 给一只 A 股或港股做全面诊股并产出专业决策报告�
 license: MIT
 compatibility: 联网模式需 uv 与 PyPI 可达（akshare/efinance/yfinance 经 uv run --with 临时依赖，绝不装全局）；快照模式零依赖零网络；宿主须能执行 Bash。
 metadata:
-  version: "0.1.2"
+  version: "0.2.0"
   author: "ThreeFish-AI"
   source: "机制蓝本 ZhuLinsen/daily_stock_analysis（MIT）+ negentropy 178 精读"
 allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch

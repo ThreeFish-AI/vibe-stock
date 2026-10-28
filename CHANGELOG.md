@@ -2,6 +2,46 @@
 
 本文件只登记版本级变化；条目遵循 Keep a Changelog、[SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-10-28
+
+### Added
+
+- 九扩展证据块（零权重纯情报面，不进六块质量分与置信帽）：moneyflow（新浪直连
+  60 日四档净额，主力=超大单+大单自算+四档和自洽校验）/notices（em_notice→cninfo
+  双源）/research（研报列表+评级共识机构目标价直连）/forecast（业绩预告+披露
+  日历，空结果=available 语义钉）/unlock（解禁批次）/holder（emweb F10 股东户数
+  近 8 期）/market（qt 指数快照零额外调用）/industry（申万归属+同花顺板块匹配，
+  三口径标注）/valuation（qt 快照+百度 5 年分位）。
+- CLUSTERS 扩容 6→15 簇，簇判定规则成文（主机/服务族粒度故障域：同厂商不同
+  服务族分簇、同子域多端点合簇）。
+- 港股 news 解除 not_supported（qq_news 单源）；quote 实时叠加 qt 快照与换手率。
+- technical 派生扩容：20 日新高/新低、60 日箱体、近 10 日量比序列、K 线形态、
+  连续收涨天数、MACD hist_rising——修复 pack 只渲染收盘价导致 volume_breakout/
+  box_oscillation/bottom_volume 等策略判据失明的消费矩阵缺陷。
+- money_flow 策略（十策略）；事件风险类维度走风险角色 risk.json 通道。
+- L0 情报兜底：allowed-tools 增 WebSearch/WebFetch，情报角色 fetch 失败时可补
+  线索（rationale 标注「web-search 兜底」降置信一档，不回写证据包）。
+- adjudicate E4/E5 破坏性实验钉：扩展块零权重、未知块前向兼容。
+
+### Changed
+
+- 命令面统一锁 `akshare==1.20.*`（minor 锁防上游接口迁移断链，升版流程见
+  PIPELINE.md）；postmortem 命令补 `--with efinance`。
+- context-pack：近 10 根 K 改 OHLCV+涨跌幅七列；报价节键位修复（price/
+  change_pct 原挂 technical 白名单恒不渲染）；扩展块有界渲染（EXT_PACK_BUDGET
+  每块预算+16k 全局护栏）；报告证据状态表全块化+近期事件节。
+- fundamentals 链首插 em_datacenter（近 4 报告期全量指标：毛利率/净利率/ROIC/
+  归母净利/同比）；AGENTS/PIPELINE/README 三件 selftest 口径统一。
+
+### Fixed
+
+- sina 财务源「每股收益(元)」键名错位恒 None（实为「摊薄每股收益(元)」，
+  RSI-20261028-03）；sina 毛利率 2025 起停更恒 NaN，禁取。
+- chip 改本地自算（CYQ 三角分布换手衰减，与官方接口同口径列名全同，状态
+  estimated 如实），em_quote 源降为复活回退位；volume 手/股单位按源判定。
+- datacenter 侧 RPT_HOLDERNUM_DET 数据集停在 2022（服务端排序亦不生效），
+  股东户数事实源切 emweb F10 gdrs。
+
 ## [0.1.2] - 2026-10-28
 
 ### Changed
