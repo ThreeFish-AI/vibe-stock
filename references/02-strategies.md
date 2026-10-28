@@ -32,3 +32,6 @@ sell；strong sell / 清仓卖出 → strong_sell。
 - 策略说明书 = 数据：`name/display_name/category/required_evidence/aliases/
   default_priority/market_regimes` + `instructions`（自然语言交易逻辑）。
   required_evidence 的块缺失时策略须降置信并注明，不得假装看得到。
+- 事件风险类扩展块（forecast 业绩预告/unlock 解禁/notices 公告）走**风险
+  角色 risk.json 通道**（veto/downgrade 线索，非对称闸门只降不升），不做
+  投票策略——中性场景不贡献噪音票。

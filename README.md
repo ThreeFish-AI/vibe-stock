@@ -17,7 +17,9 @@
 | 分歧显式化（三桶 + 冲突分级） | `adjudicate.py aggregate/disagreement` |
 | RiskGuard 只降不升 | `adjudicate.py risk_guard`（veto/单向降档/永不升级） |
 | 决策信号八态 + 对立失效 + 后验 | `diagnose.py register_signal` + `postmortem.py` |
-| 策略 YAML 说明书（策略即数据） | `strategies/` 九策略 + 自定义扩展位 |
+| 策略 YAML 说明书（策略即数据） | `strategies/` 十策略 + 自定义扩展位 |
+| 扩展证据块（0.2.0） | 九块零权重情报面（资金流/公告/研报/预告/解禁/股东
+| | 户数/大盘/行业/估值），不进质量分与置信帽；簇级熔断 15 簇 |
 
 ## 快速开始
 
@@ -26,7 +28,7 @@
 ln -s <clone 路径> ~/.claude/skills/vibe-stock
 
 # CLI 直用（不依赖宿主）：
-uv run --no-project --with akshare --with efinance --with yfinance \
+uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
   scripts/diagnose.py prepare --stock 600519 --workdir .vs
 # 中段：按 SKILL.md 工作流产意见（opinions.json / risk.json）
 uv run --no-project scripts/adjudicate.py --opinions .vs/opinions.json \

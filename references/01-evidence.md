@@ -26,9 +26,9 @@
 | quote | 25 | 日 K 推导（或源实时） | 同左 |
 | daily_bars | 25 | em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq)→yfinance | em_quote(akshare)→yfinance |
 | technical | 25 | 由日 K 纯标准库推导（MA/RSI/MACD/量比/52 周位置） | 同左 |
-| news | 10 | em_search（东财搜索，独立计账） | not_supported（v1） |
-| fundamentals | 10 | sina(财务指标)→ths(财务摘要) | not_supported（v1） |
-| chip | 5 | em_quote（唯一上游，akshare 全包无第二筹码接口） | not_supported |
+| news | 10 | em_search→qq_news（腾讯资讯）→sina_flow（个股资讯页）；港股 qq_news 单源 | qq_news（腾讯资讯） |
+| fundamentals | 10 | em_datacenter(主指标全量)→sina(财务指标)→ths(财务摘要) | not_supported（v1） |
+| chip | 5 | 本地自算 derive（日K+qt 流通股本，CYQ 同口径，标 estimated）→em_quote 复活位 | not_supported |
 
 - 总分 → 档位：≥85 good / ≥70 usable / ≥55 limited / 更低 poor。
 - **核心块降级禁高置信**：quote/daily_bars/technical 任一非 available/fallback →
@@ -43,8 +43,12 @@
   sina→ths；坑位：新浪 stock_zh_a_daily 实测不复权，不入链（不复权数据禁混入
   qfq 链）；news=em_search、chip=em_quote 天然单源，失败如实 fetch_failed。
 - **熔断**：持续失败——单簇连续 3 败停 300s（半开放行单次探测）；状态持久化
-  `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（em_quote/
-  em_search/sina/ths/qq/yf——akshare 单库内含多簇上游，同簇共享故障域）；坑位：
+  `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（15 簇：
+  em_quote/em_search/em_datacenter/em_notice/em_report/emweb/cninfo/sina/
+  sina_flow/ths/qq/qt/qq_news/baidu_gushitong/yf）；簇判定规则（无条件全局规则：
+  簇=主机/服务族粒度的故障域）——同厂商不同服务族分簇（东财先例：push2* 行情
+  簇死而 datacenter/np-anotice/reportapi 同期活，2026-10-28 实证），同子域多
+  端点合簇（sina_flow 三源共担）；坑位：
   按库名计账会让东财行情簇故障连坐 em_search/sina/ths 存活源（2026-10-28 实跑
   实证，news/fundamentals 被连坐成 skipped_open 而上游实测 200）；旧库名熔断键
   自然过期、不迁移不删除（不删既有状态数据）。
@@ -65,11 +69,67 @@
 </untrusted_external>
 ```
 
-条件：凡外部抓取内容进入 LLM 可见面；做法：包裹 + 声明 + 报告不复述；
+条件：凡外部抓取内容进入 LLM 可见面（news/notices/research 三块的外部文本）；
+做法：包裹 + 声明 + 报告不复述；
 坑位：哨兵声明写在外层、不进外文正文，报告引用新闻事实时不得携带哨兵标记。
+
+## 扩展证据块（0.2.0 · 九块零权重）
+
+扩展块是**信息面不是裁决面**：不进六块质量分与置信帽（置信帽只反映核心行情链
+可用性，与情报丰富度正交——资金流缺失不该压低 strong_sell 的可信度表达）。可见
+性由 context-pack 状态行与策略 required_evidence 承担；裁决器 EXT_BLOCKS 镜像
+声明零权重口径（selftest E4/E5 钉住）。某块要进权重属 0.3.0 级语义变更：须人工
+评审 + golden 重建。
+
+| 块 | 源链（主→回退） | 簇 | 港股 |
+| --- | --- | --- | --- |
+| moneyflow | 新浪直连 60 日四档净额（主力=r0_net+r1_net 自算） | sina_flow | not_supported |
+| notices | em_notice(8 类枚举)→cninfo(26 类，监管权威) | em_notice/cninfo | not_supported |
+| research | em_report(逐篇)+datacenter 直连(评级共识+目标价) | em_report/em_datacenter | not_supported |
+| forecast | datacenter 直连×2（预告+披露日历） | em_datacenter | not_supported |
+| unlock | datacenter 直连（解禁批次） | em_datacenter | not_supported |
+| holder | emweb F10 gdrs（近 8 期） | emweb | not_supported |
+| market | qt 指数快照（与个股快照共用调用） | qt | qt 港股指数 |
+| industry | 申万归属(新浪 F10)+同花顺板块表 | sina_flow/ths | not_supported |
+| valuation | qt 快照→baidu 历史分位 | qt/baidu_gushitong | not_supported |
+
+规约句（三属性）：
+- **qt 位序双路校验**（无条件全局规则：qt.gtimg 无官方文档、~ 分隔字段序随版本
+  漂移）：流通股本以 市值/现价 与 成交量/换手率 双路推导互验，相对误差 >2% 弃
+  字段（chip 自算随之降级），绝不硬编码信任单一位序。
+- **forecast 空结果语义**：无业绩预告是事实不是失败——空结果标 available 且
+  字段 null；只有网络/解析失败才 fetch_failed。
+- **行业三口径**（申万/东财/同花顺）：排名数字不可跨口径混用；申万↔同花顺板块
+  匹配置信不足时只给归属不带板块统计，taxonomy_note 如实标注。
+- **单厂商依赖如实标注**：forecast/unlock（em_datacenter）、research 共识
+  （em_datacenter）无同级回退——失败如实 fetch_failed，零权重保证其失败不动摇
+  裁决核心，状态行可见。
+- **北向个股永不接入**（无条件全局规则：监管性终局）：2024-08-19 起港交所永久
+  停止披露沪深股通个股级成交与持股，冻结数据（止于 2024-08-16）只能标 stale 作
+  历史背景、**永不重试**——重试逻辑会把它误报为可恢复故障。
+- **股东户数事实源**：datacenter 侧 RPT_HOLDERNUM_DET 数据集停在 2022，事实源
+  在 emweb F10 gdrs（坑位：勿被同名 reportName 的「接口活着」误导——数据死了）。
+- **chip 自算口径**：CYQ 三角分布换手衰减（与 stock_cyq_em 同算法、列名全同），
+  标 estimated；坑位：历史换手按当前流通股本回溯，增发/解禁期误差放大；
+  volume 手/股单位按源判定（ak-em/ef-em=手，qq-tx/yf=股），判错方向会把换手率
+  放大百倍。
+
+backlog 插件位（未实现，reportName/簇已验证）：龙虎榜 RPT_DAILYBILLBOARD_
+DETAILSNEW、两融（sse/szse 官网直连）、十大股东/机构持仓（emweb F10）、大宗
+RPT_DATA_BLOCKTRADE、质押 RPT_CSDC_LIST、增减持 RPT_SHARE_HOLDER_INCREASE、
+增发回购、机构调研 RPT_ORG_SURVEYNEW、同行估值（cninfo_webapi 行业 PE+qt 批量）、
+舆情（emappdata 人气榜）、互动问答（irm.cninfo POST）。
+
+## L0 情报兜底（WebSearch）
+
+- 适用条件：fetch 层某关键情报块 fetch_failed/missing，且该块对当前判断重要。
+- 做法：情报角色可用宿主 WebSearch/WebFetch 补线索；rationale 必须标注
+  「web-search 兜底」并降置信一档；结论不得引用无出处的数字。
+- 坑位：兜底内容**不回写 evidence.json、不改变块状态与质量分**（八态只反映
+  取数层事实）；兜底摘要若进对话/报告，哨兵语义同样适用。
 
 ## 快照模式（无网兜底）
 
 `--snapshot-dir <dir>`：块文件 `quote.json/daily_bars.json/…`（可含 `"state"` 字段，
-缺省 estimated）。条件：联网全链失败或离线环境；坑位：快照不比实时——estimated/
+缺省 estimated）；扩展九块文件**可选**，缺失标 missing 如实可见。条件：联网全链失败或离线环境；坑位：快照不比实时——estimated/
 stale 状态如实进质量分，置信帽随之收紧，禁止把快照当 available。
