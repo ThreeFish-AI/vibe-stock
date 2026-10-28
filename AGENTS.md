@@ -23,7 +23,8 @@
 
 - `uv run --no-project scripts/adjudicate.py --selftest`：裁决器全绿（含破坏性实验）。
 - `uv run --no-project scripts/diagnose.py --selftest`：端到端合成流水线全绿。
-- 任何 `scripts/` 改动，上述两条全绿后才算完成。
+- `uv run --no-project scripts/postmortem.py --selftest`：后验自校准回归全绿。
+- 任何 `scripts/` 改动，上述三条全绿后才算完成（与 evals/README.md 口径一致，只收严）。
 
 ## 目录速查
 
