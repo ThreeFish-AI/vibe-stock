@@ -36,7 +36,10 @@ FETCH_STATE = os.path.join(STATE_DIR, "fetch_state.json")
 BREAKER_FAILS, BREAKER_COOLDOWN = 3, 300
 CONN_COOLDOWN = 15
 BARS_WINDOW = 250
-STALE_DAYS = {"quote": 1, "daily_bars": 5, "news": 3, "fundamentals": 120, "chip": 5}
+STALE_DAYS = {"quote": 1, "daily_bars": 5, "news": 3, "fundamentals": 120,
+              "chip": 5, "moneyflow": 1, "notices": 1, "research": 30,
+              "forecast": 1, "unlock": 1, "holder": 7, "market": 1,
+              "industry": 1, "valuation": 1}  # 声明式口径（过期判级参照）
 
 # 上游服务簇（熔断/冷却计账粒度）：同簇共享故障域，键为取数源名、值为簇名。
 # 簇判定规则：簇=主机/服务族粒度的故障域——同厂商不同服务族分簇（东财先例：
@@ -66,6 +69,8 @@ CLUSTERS = {
     "qt-snap": "qt",            # 腾讯快照簇 · qt.gtimg.cn 主机（与 qq 日K 主机粒度分簇）
     "qq-news": "qq_news",       # 腾讯资讯簇 · proxy.finance.qq.com 主机
     "baidu-val": "baidu_gushitong",  # 百度股市通 · 历史估值序列
+    "emweb-holder": "emweb",     # 东财 F10 簇 · 股东户数（emweb.securities 子域；
+                                 #  RPT_HOLDERNUM_DET 数据集实测停在 2022，弃用）
 }
 
 CHAINS = {
@@ -690,10 +695,482 @@ def fetch_chip(market, code, st, now, bars=None, float_shares=None,
                 "note": type(e).__name__}
 
 
-# ---------------------------------------------------------------- 质量分（与 adjudicate.evidence_cap 同源）
+# ---------------------------------------------------------------- 扩展证据块（0.2.0 · 九块零权重）
+
+_DC = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+
+
+def _dc_rows(report_name, code, st, now, src_key, page_size=20, sort=""):
+    """东财数据中心直连通用壳：reportName+SECURITY_CODE 过滤，返回 rows 或抛错。"""
+    cluster = CLUSTERS[src_key]
+    ok, why = source_allowed(st, cluster, now)
+    if not ok:
+        raise _Skip(why)
+    import urllib.parse
+    url = ("%s?reportName=%s&columns=ALL&filter=%s&pageNumber=1&pageSize=%d%s"
+           % (_DC, report_name, urllib.parse.quote('(SECURITY_CODE="%s")' % code),
+              page_size, sort))
+    data = json.loads(_http_text(url))
+    rows = (data.get("result") or {}).get("data") or []
+    if rows is None or data.get("success") is False:
+        raise ValueError("dc empty: %s" % data.get("message", ""))
+    record(st, cluster, True, "", now)
+    return rows
+
+
+class _Skip(Exception):
+    """簇熔断/冷却跳过（不计失败，透传 skip 原因）。"""
+
+
+def _ext_fail(name, e):
+    if isinstance(e, _Skip):
+        return {"state": "fetch_failed", "source": name, "note": str(e)}
+    return {"state": "fetch_failed", "source": name,
+            "note": type(e).__name__}
+
+
+def fetch_moneyflow(market, code, st, now):
+    """扩展块·资金流：新浪流量簇直连 60 日四档净额（主力净额=r0_net+r1_net 自算，
+    四档和=netamount 数值自洽校验防口径漂移）。东财族绑死 em_quote 死簇不入链、
+    同花顺全市场扫描 105 页 28s 不入链（调用预算红线）。港 not_supported。"""
+    if market == "hk":
+        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    try:
+        cluster = CLUSTERS["sina-flow"]
+        ok, why = source_allowed(st, cluster, now)
+        if not ok:
+            raise _Skip(why)
+        sym = ("sh" if code.startswith(("6", "9", "5")) else "sz") + code
+        text = _http_text(
+            "https://vip.stock.finance.sina.com.cn/quotes_service/api/"
+            "json_v2.php/MoneyFlow.ssl_qsfx_lscjfb?page=1&num=60&sort=opendate"
+            "&asc=0&daima=" + sym)
+        rows = _sina_json(text)
+        days = []
+        for r in rows:
+            try:
+                net = _num(r.get("netamount"))
+                parts = sum(_num(r.get(k)) or 0 for k in
+                            ("r0_net", "r1_net", "r2_net", "r3_net"))
+                if net is None or abs(parts - net) / max(abs(net), 1) > 0.01:
+                    raise ValueError("netamount mismatch")
+                days.append({
+                    "date": r["opendate"], "close": _num(r.get("trade")),
+                    "change_pct": round((_num(r.get("changeratio")) or 0) * 100, 2),
+                    "turnover_pct": round((_num(r.get("turnover")) or 0) / 100, 2),
+                    "main_net_yi": round(((_num(r.get("r0_net")) or 0)
+                                          + (_num(r.get("r1_net")) or 0)) / 1e8, 4),
+                    "super_net_yi": round((_num(r.get("r0_net")) or 0) / 1e8, 4),
+                    "big_net_yi": round((_num(r.get("r1_net")) or 0) / 1e8, 4)})
+            except KeyError:
+                continue
+        if not days:
+            raise ValueError("empty moneyflow")
+        record(st, cluster, True, "", now)
+        nets = [d["main_net_yi"] for d in days]
+        streak = 0
+        for n in nets:
+            if abs(n) < 1e-9:
+                break
+            if streak == 0 or (n > 0) == (nets[0] > 0):
+                streak += 1
+            else:
+                break
+        summary = {"main_net_yi": nets[0],
+                   "main_net_3d_yi": round(sum(nets[:3]), 4),
+                   "main_net_5d_yi": round(sum(nets[:5]), 4),
+                   "main_net_10d_yi": round(sum(nets[:10]), 4),
+                   "main_streak_days": streak,
+                   "streak_direction": ("inflow" if nets[0] > 0 else "outflow")}
+        return {"state": "available", "source": "sina-flow", "days": days,
+                "summary": summary, "note": "主力净额=超大单+大单（新浪口径）"}
+    except Exception as e:
+        if not isinstance(e, _Skip):
+            record(st, CLUSTERS["sina-flow"], False, str(e), now)
+        return _ext_fail("sina-flow", e)
+
+
+def _notices_via_em(code):
+    import akshare as ak
+    end = dt.date.today()
+    begin = end - dt.timedelta(days=90)
+    df = ak.stock_individual_notice_report(
+        security=code, symbol="全部",
+        begin_date=begin.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d"))
+    return [{"date": str(r["公告日期"])[:10], "type": str(r["公告类型"]),
+             "title": str(r["公告标题"]), "url": str(r["网址"])}
+            for _, r in df.head(30).iterrows()]
+
+
+def _notices_via_cninfo(code):
+    import akshare as ak
+    end = dt.date.today()
+    begin = end - dt.timedelta(days=90)
+    df = ak.stock_zh_a_disclosure_report_cninfo(
+        symbol=code, market="沪深京", keyword="", category="",
+        start_date=begin.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d"))
+    return [{"date": str(r["公告时间"])[:10], "type": "巨潮披露",
+             "title": str(r["公告标题"]), "url": str(r["公告链接"])}
+            for _, r in df.head(30).iterrows()]
+
+
+def fetch_notices(market, code, st, now):
+    """扩展块·公告：em_notice 簇（8 类枚举）→ cninfo 簇（监管权威回退），
+    近 90 天 ≤30 条；双源覆盖面不同（东财含 H 股镜像），条数差异属正常。"""
+    if market == "hk":
+        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    tried = []
+    for name, fn in (("em-notice", _notices_via_em),
+                     ("cninfo-disc", _notices_via_cninfo)):
+        cluster = CLUSTERS[name]
+        try:
+            ok, why = source_allowed(st, cluster, now)
+            if not ok:
+                raise _Skip(why)
+            items = fn(code)
+            if not items:
+                raise ValueError("empty notices")
+            record(st, cluster, True, "", now)
+            state = "available" if not tried else "fallback"
+            return {"state": state, "source": name, "items": items, "tried": tried}
+        except _Skip as e:
+            tried.append((name, str(e)))
+        except ImportError:
+            tried.append((name, "import_missing"))
+        except Exception as e:
+            record(st, cluster, False, str(e), now)
+            tried.append((name, "fail: %s" % type(e).__name__))
+    return {"state": "fetch_failed", "source": "", "note": "all_failed", "tried": tried}
+
+
+def _research_list(code):
+    import akshare as ak
+    df = ak.stock_research_report_em(symbol=code)  # 全历史最新在前
+    cutoff = (dt.date.today() - dt.timedelta(days=180)).isoformat()
+    out = []
+    for _, r in df.iterrows():
+        d = str(r.get("日期", ""))[:10]
+        if d >= cutoff:
+            out.append({"date": d, "org": str(r.get("机构", "")),
+                        "rating": str(r.get("东财评级", "")),
+                        "title": str(r.get("报告名称", ""))})
+        if len(out) >= 15:
+            break
+    return out
+
+
+def fetch_research(market, code, st, now):
+    """扩展块·研报与评级：em_report 簇逐篇列表 + datacenter 直连评级共识与
+    机构目标价（RPT_WEB_RESPREDICT——akshare 封装丢弃目标价列，必须直连）。
+    单边失败标 partial 不谎报全成。港 not_supported。"""
+    if market == "hk":
+        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    blk = {"state": "fetch_failed", "source": "", "note": "all_failed"}
+    reports, consensus, fails = None, None, []
+    try:
+        ok, why = source_allowed(st, CLUSTERS["em-report"], now)
+        if not ok:
+            raise _Skip(why)
+        reports = _research_list(code)
+        if not reports:
+            raise ValueError("empty research")
+        record(st, CLUSTERS["em-report"], True, "", now)
+    except _Skip as e:
+        fails.append("em-report:%s" % e)
+    except ImportError:
+        fails.append("em-report:import_missing")
+    except Exception as e:
+        record(st, CLUSTERS["em-report"], False, str(e), now)
+        fails.append("em-report:%s" % type(e).__name__)
+    try:
+        rows = _dc_rows("RPT_WEB_RESPREDICT", code, st, now, "dc-respredict")
+        r = rows[0]
+        consensus = {"org_num": r.get("RATING_ORG_NUM"),
+                     "buy": r.get("RATING_BUY_NUM"), "add": r.get("RATING_ADD_NUM"),
+                     "neutral": r.get("RATING_NEUTRAL_NUM"),
+                     "reduce": r.get("RATING_REDUCE_NUM"),
+                     "target_min": r.get("DEC_AIMPRICEMIN"),
+                     "target_max": r.get("DEC_AIMPRICEMAX")}
+    except Exception as e:
+        fails.append("dc-respredict:%s" % (str(e) if isinstance(e, _Skip)
+                                           else type(e).__name__))
+    if reports or consensus:
+        blk = {"state": "partial" if fails else "available",
+               "source": "em-report+dc-respredict",
+               "reports": (reports or [])[:15], "consensus": consensus}
+        if fails:
+            blk["note"] = "部分失败：%s" % ";".join(fails)
+    return blk
+
+
+def fetch_forecast(market, code, st, now):
+    """扩展块·业绩预告+披露日历（datacenter 直连两条 reportName）。
+    语义（无条件全局规则）：空结果=available 且字段 null——「无预告」是事实
+    不是失败；只有网络/解析失败才 fetch_failed。港 not_supported。"""
+    if market == "hk":
+        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    try:
+        rows = _dc_rows("RPT_PUBLIC_OP_NEWPREDICT", code, st, now, "dc-forecast",
+                        sort="&sortColumns=NOTICE_DATE&sortTypes=-1")
+        pf = None
+        if rows:
+            r = rows[0]
+            pf = {"report_date": str(r.get("REPORT_DATE", ""))[:10],
+                  "predict_type": r.get("PREDICT_TYPE"),
+                  "content": str(r.get("PREDICT_CONTENT", ""))[:120],
+                  "amt_lower_yi": _num(r.get("PREDICT_AMT_LOWER")),
+                  "amt_upper_yi": _num(r.get("PREDICT_AMT_UPPER")),
+                  "ratio_lower_pct": _num(r.get("PREDICT_RATIO_LOWER")),
+                  "ratio_upper_pct": _num(r.get("PREDICT_RATIO_UPPER")),
+                  "notice_date": str(r.get("NOTICE_DATE", ""))[:10]}
+        rows2 = _dc_rows("RPT_PUBLIC_BS_APPOIN", code, st, now, "dc-forecast",
+                         sort="&sortColumns=FIRST_APPOINT_DATE&sortTypes=-1")
+        nd = None
+        today = dt.date.today().isoformat()
+        for r in rows2 or []:  # 首条未来披露；无未来则取最近一条已披露
+            nd = {"report_date": str(r.get("REPORT_DATE", ""))[:10],
+                  "appoint_date": str(r.get("FIRST_APPOINT_DATE", ""))[:10],
+                  "actual_date": str(r.get("ACTUAL_PUBLISH_DATE") or "")[:10] or None}
+            if nd["appoint_date"] >= today:
+                break
+        return {"state": "available", "source": "dc-forecast",
+                "performance_forecast": pf, "next_disclosure": nd}
+    except Exception as e:
+        if not isinstance(e, _Skip):
+            record(st, CLUSTERS["dc-forecast"], False, str(e), now)
+        return _ext_fail("dc-forecast", e)
+
+
+def fetch_unlock(market, code, st, now):
+    """扩展块·限售解禁（RPT_LIFT_STAGE，列名 2026-10-28 探针实测）：
+    未来批次全列+过往近 24 月 ≤5 条。空 upcoming 是事实非失败。港 not_supported。"""
+    if market == "hk":
+        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    try:
+        rows = _dc_rows("RPT_LIFT_STAGE", code, st, now, "dc-unlock",
+                        page_size=50,
+                        sort="&sortColumns=FREE_DATE&sortTypes=-1")
+        today = dt.date.today()
+        cutoff = (today - dt.timedelta(days=730)).isoformat()
+        upcoming, past = [], []
+        for r in rows or []:
+            item = {"date": str(r.get("FREE_DATE", ""))[:10],
+                    "shares": r.get("FREE_SHARES"),
+                    "ratio_pct": _num(r.get("FREE_RATIO")),
+                    "type": str(r.get("FREE_SHARES_TYPE", ""))}
+            if item["date"] >= today.isoformat():
+                upcoming.append(item)
+            elif item["date"] >= cutoff and len(past) < 5:
+                past.append(item)
+        return {"state": "available", "source": "dc-unlock",
+                "upcoming": upcoming, "past": past}
+    except Exception as e:
+        if not isinstance(e, _Skip):
+            record(st, CLUSTERS["dc-unlock"], False, str(e), now)
+        return _ext_fail("dc-unlock", e)
+
+
+def fetch_holder(market, code, st, now):
+    """扩展块·股东户数（emweb F10 gdrs，季度披露，近 8 期）：户数环比是官方口径
+    的筹码集中/分散信号。坑位：datacenter 侧 RPT_HOLDERNUM_DET 数据集停在
+    2022（服务端排序亦不生效），股东户数事实源在 emweb F10。港 not_supported。"""
+    if market == "hk":
+        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    try:
+        cluster = CLUSTERS["emweb-holder"]
+        ok, why = source_allowed(st, cluster, now)
+        if not ok:
+            raise _Skip(why)
+        suf = "SH" if code.startswith(("6", "9", "5")) else (
+            "BJ" if code.startswith(("8", "4")) else "SZ")
+        data = json.loads(_http_text(
+            "https://emweb.securities.eastmoney.com/PC_HSF10/"
+            "ShareholderResearch/PageAjax?code=%s%s" % (suf, code)))
+        rows = data.get("gdrs") or []
+        if not rows:
+            raise ValueError("empty gdrs")
+        record(st, cluster, True, "", now)
+        records = [{"date": str(r.get("END_DATE", ""))[:10],
+                    "holder_num": r.get("HOLDER_TOTAL_NUM"),
+                    "pct_change": _num(r.get("TOTAL_NUM_RATIO")),
+                    "avg_mktcap": _num(r.get("AVG_MARKET_CAP"))}
+                   for r in rows[:8] if r.get("END_DATE")]
+        return {"state": "available", "source": "emweb-holder", "records": records}
+    except Exception as e:
+        if not isinstance(e, _Skip):
+            record(st, CLUSTERS["emweb-holder"], False, str(e), now)
+        return _ext_fail("emweb-holder", e)
+
+
+def market_block(qt_indices):
+    """扩展块·大盘指数：_qt_batch 已取的紧凑快照直接复用（零额外调用）。"""
+    if qt_indices:
+        return {"state": "available", "source": "qt-snap", "indices": qt_indices}
+    return {"state": "fetch_failed", "source": "qt-snap", "note": "qt 簇不可用"}
+
+
+def _sw_industry_via_sina(code):
+    text = _http_text("https://vip.stock.finance.sina.com.cn/corp/go.php/"
+                      "vCI_CorpOtherInfo/stockid/%s/menu_num/2.phtml" % code)
+    m = re.search(r"所属行业板块</td>.*?<td[^>]*>([^<]+)</td>\s*<td[^>]*><a",
+                  text, re.S)
+    if not m:
+        raise ValueError("no industry field")
+    return m.group(1).strip()
+
+
+def _match_board(sw_name, df):
+    """申万行业名 → 同花顺板块名匹配：核心词子串包含优先（『旅游』⊂『旅游及
+    酒店』），字符二元组 Jaccard ≥0.4 兜底；三套行业口径（申万/东财/同花顺）
+    不可混用排名数字，匹配置信不足宁缺。"""
+    def core(s):
+        return re.sub(r"[（(].*?[)）]|I{1,3}|Ⅱ|Ⅲ|综合|（申万）", "", str(s)).strip()
+    c = core(sw_name)
+    if not c:
+        return None, 0.0
+    for _, row in df.iterrows():
+        name = core(row["板块"])
+        if name and (c in name or name in c):  # 双向子串（空串免疫）
+            return row, 0.9
+    def grams(s):
+        s = core(s)
+        return {s[i:i + 2] for i in range(len(s) - 1)} | ({s} if len(s) > 2 else set())
+    g = grams(sw_name)
+    best, score = None, 0.0
+    for _, row in df.iterrows():
+        gb = grams(row["板块"])
+        if g and gb:
+            j = len(g & gb) / len(g | gb)
+            if j > score:
+                best, score = row, j
+    return (best, score) if score >= 0.4 else (None, score)
+
+
+def fetch_industry(market, code, st, now):
+    """扩展块·行业板块：申万归属（sina_flow 直连 GBK F10）+ 同花顺 90 板块表
+    （涨跌排名/净流入）。申万↔ths 名模糊匹配不足置信 → 只给归属不带板块统计
+    （taxonomy_note 标注口径）。ths 全表一次调用（单页）在预算内。"""
+    if market == "hk":
+        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    blk = {"state": "fetch_failed", "source": "", "note": "all_failed"}
+    sw, board, note = None, None, []
+    try:
+        ok, why = source_allowed(st, CLUSTERS["sina-industry"], now)
+        if not ok:
+            raise _Skip(why)
+        sw = _sw_industry_via_sina(code)
+        record(st, CLUSTERS["sina-industry"], True, "", now)
+    except _Skip as e:
+        note.append("sina-industry:%s" % e)
+    except Exception as e:
+        record(st, CLUSTERS["sina-industry"], False, str(e), now)
+        note.append("sina-industry:%s" % type(e).__name__)
+    try:
+        ok, why = source_allowed(st, CLUSTERS["ths-fin"], now)
+        if not ok:
+            raise _Skip(why)
+        import akshare as ak
+        df = ak.stock_board_industry_summary_ths()
+        board_row, score = _match_board(sw, df) if sw else (None, 0)
+        board = None
+        if board_row is not None:
+            board = {"name": str(board_row["板块"]),
+                     "rank": int(board_row["序号"]), "total": len(df),
+                     "change_pct": _num(board_row["涨跌幅"]),
+                     "net_inflow_yi": _num(board_row["净流入"]),
+                     "top": str(board_row["领涨股"]),
+                     "top_change_pct": _num(board_row["领涨股-涨跌幅"])}
+            note.append("匹配置信 %.2f（申万『%s』↔同花顺『%s』）"
+                        % (score, sw, board["name"]))
+        else:
+            note.append("申万『%s』与同花顺板块匹配置信不足，只给归属" % sw)
+        record(st, CLUSTERS["ths-fin"], True, "", now)
+    except _Skip as e:
+        note.append("ths-board:%s" % e)
+    except ImportError:
+        note.append("ths-board:import_missing")
+    except Exception as e:
+        record(st, CLUSTERS["ths-fin"], False, str(e), now)
+        note.append("ths-board:%s" % type(e).__name__)
+    if sw or board:
+        blk = {"state": ("partial" if len(note) > 1 or not board else "available"),
+               "source": "sina-industry+ths-board", "industry_sw": sw,
+               "board_ths": board, "taxonomy_note": "行业口径：申万（新浪 F10）"
+               "+同花顺二级板块；两口径排名不可混用"}
+        if note:
+            blk["note"] = "；".join(note)
+    return blk
+
+
+def _baidu_percentile(code, indicator):
+    """百度股市通历史估值序列（近五年）→ 当前值百分位 + 序列尾 5 点。"""
+    import akshare as ak
+    df = ak.stock_zh_valuation_baidu(symbol=code, indicator=indicator,
+                                     period="近五年")
+    vals = [(_num(v)) for v in df["value"]]
+    dates = [str(d) for d in df["date"]]
+    if not vals or vals[-1] is None:
+        raise ValueError("empty %s" % indicator)
+    cur = vals[-1]
+    below = sum(1 for v in vals if v is not None and v <= cur)
+    pct = round(100.0 * below / len([v for v in vals if v is not None]), 1)
+    tail = [{"date": dates[i], "value": vals[i]} for i in range(len(vals) - 5, len(vals))]
+    return pct, tail
+
+
+def fetch_valuation(market, code, st, now, qt_full):
+    """扩展块·估值：A 路=qt 快照（PE-TTM/PB/市值/股息率，双路校验后的字段），
+    B 路=百度股市通近五年历史分位（增强）。A 缺 B 在 → fallback；单路缺失如实
+    记 note 不谎报。港 not_supported（qt 港股字段位序未验证）。"""
+    if market == "hk":
+        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    a = None
+    if qt_full and qt_full.get("pe_ttm") and qt_full.get("pb"):
+        a = {"pe_ttm": qt_full["pe_ttm"], "pb": qt_full["pb"],
+             "mktcap_total_yi": qt_full.get("total_mv_yi"),
+             "mktcap_float_yi": qt_full.get("float_mv_yi"),
+             "dividend_yield_ttm": qt_full.get("dividend_yield_ttm"),
+             "dps_ttm": qt_full.get("dps_ttm")}
+    pe_pct = pb_pct = None
+    tail = []
+    try:
+        ok, why = source_allowed(st, CLUSTERS["baidu-val"], now)
+        if not ok:
+            raise _Skip(why)
+        pe_pct, tail = _baidu_percentile(code, "市盈率(TTM)")
+        pb_pct, _t = _baidu_percentile(code, "市净率")
+        record(st, CLUSTERS["baidu-val"], True, "", now)
+    except _Skip:
+        pass
+    except ImportError:
+        pass
+    except Exception as e:
+        record(st, CLUSTERS["baidu-val"], False, str(e), now)
+    if a and (pe_pct is not None or pb_pct is not None):
+        return {"state": "available", "source": "qt-snap+baidu-val", **a,
+                "pe_percentile_5y": pe_pct, "pb_percentile_5y": pb_pct,
+                "pe_series_tail": tail}
+    if a:
+        return {"state": "available", "source": "qt-snap", **a,
+                "note": "历史分位缺失（baidu 源不可用）"}
+    if pe_pct is not None or pb_pct is not None:
+        return {"state": "fallback", "source": "baidu-val",
+                "pe_percentile_5y": pe_pct, "pb_percentile_5y": pb_pct,
+                "note": "qt 快照缺失，仅历史分位"}
+    return {"state": "fetch_failed", "source": "",
+            "note": "qt 与 baidu 均不可用（或 qt 双路校验弃字段）"}
+
+
+
 
 BLOCK_WEIGHTS = [("quote", 25), ("daily_bars", 25), ("technical", 25),
                  ("news", 10), ("fundamentals", 10), ("chip", 5)]
+# 扩展块：不进 BLOCK_WEIGHTS 质量分（信息面不是裁决面——置信帽只反映核心行情
+# 链可用性，与情报丰富度正交），可见性由八态状态行与策略 required_evidence 承担。
+# 快照模式文件可选、缺省 missing。某块要进权重属 0.3.0 级语义变更（golden 重建）。
+EXT_BLOCKS = ["moneyflow", "notices", "research", "forecast", "unlock",
+              "holder", "market", "industry", "valuation"]
+ALL_BLOCKS = [n for n, _ in BLOCK_WEIGHTS] + EXT_BLOCKS
 STATE_SCORE = {"available": 100, "fallback": 85, "partial": 70, "stale": 60,
                "estimated": 55, "missing": 30, "not_supported": 30, "fetch_failed": 25}
 CORE_BLOCKS = {"quote", "daily_bars", "technical"}
@@ -714,7 +1191,7 @@ def quality(blocks):
 
 def snapshot_blocks(snapshot_dir):
     blocks = {}
-    for name, _w in BLOCK_WEIGHTS:
+    for name in ALL_BLOCKS:  # 扩展块快照文件可选，缺省 missing 如实标注
         path = os.path.join(snapshot_dir, name + ".json")
         if not os.path.exists(path):
             blocks[name] = {"state": "missing", "source": "snapshot",
@@ -742,7 +1219,7 @@ def fetch(symbol, snapshot_dir=None):
         market, code = detect_market(symbol)
         st = load_fetch_state()
         bars, bars_state, bars_src, tried = fetch_daily_bars(market, code, st, now)
-        qt_full, _ = _qt_batch(market, code, st, now)  # 指数部分 0.2.0 扩展块消费
+        qt_full, qt_indices = _qt_batch(market, code, st, now)
         save_fetch_state(st)
         blocks = {"daily_bars": {"state": bars_state, "source": bars_src,
                                  "tried": tried,
@@ -775,6 +1252,16 @@ def fetch(symbol, snapshot_dir=None):
         blocks["chip"] = fetch_chip(market, code, st, now, bars=bars,
                                     float_shares=(qt_full or {}).get("float_shares"),
                                     bars_source=bars_src)
+        # 扩展九块（零权重）：顺序执行预算 ~17 次 HTTP、15–25s；失败如实八态标注
+        blocks["moneyflow"] = fetch_moneyflow(market, code, st, now)
+        blocks["notices"] = fetch_notices(market, code, st, now)
+        blocks["research"] = fetch_research(market, code, st, now)
+        blocks["forecast"] = fetch_forecast(market, code, st, now)
+        blocks["unlock"] = fetch_unlock(market, code, st, now)
+        blocks["holder"] = fetch_holder(market, code, st, now)
+        blocks["market"] = market_block(qt_indices)
+        blocks["industry"] = fetch_industry(market, code, st, now)
+        blocks["valuation"] = fetch_valuation(market, code, st, now, qt_full)
         save_fetch_state(st)
         market_meta = {"symbol": symbol, "market": market, "code": code,
                        "tried": tried}
@@ -810,7 +1297,7 @@ def main():
     q = evidence["quality"]
     print("evidence -> %s · quality %s(%s) cap=%s" %
           (args.out, q["score"], q["tier"], q["confidence_cap"]))
-    for n, _w in BLOCK_WEIGHTS:
+    for n in ALL_BLOCKS:
         b = evidence["blocks"].get(n, {})
         print("  %-13s %-13s %s" % (n, b.get("state", "missing"), b.get("source", "")))
     if evidence["blocks"]["daily_bars"]["state"] == "fetch_failed":
