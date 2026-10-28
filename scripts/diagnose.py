@@ -397,7 +397,10 @@ def selftest():
     real_f = dict(fx.FUNDAMENTALS_FETCHERS)
     try:
         # 桩对齐真实 fetcher 契约：返回值已过 _num（NaN/float，非原始字符串）
+        def _boom_dc(c):
+            raise RuntimeError("dc down")
         fx.FUNDAMENTALS_FETCHERS.update({
+            "em-fin": _boom_dc,  # 0.2.0 链首：dc 簇故障路径
             "sina-fin": lambda c: dict.fromkeys(
                 ["净资产收益率(%)", "每股收益(元)", "主营业务收入增长率(%)",
                  "资产负债率(%)"], float("nan")),
@@ -407,7 +410,7 @@ def selftest():
                                   "资产负债率(%)": fx._num("40.19%")}})
         blk = fx.fetch_fundamentals("cn", "600519", st, t0 + 2)
         assert blk["state"] == "fallback" and blk["source"] == "ths-fin", blk
-        assert blk["tried"] and blk["tried"][0][0] == "sina-fin", blk["tried"]
+        assert blk["tried"] and blk["tried"][0][0] == "em-fin", blk["tried"]
         assert blk["data"]["净资产收益率(%)"] == 16.75, blk["data"]
         def _boom_fin(c):
             raise RuntimeError("ths down")
@@ -436,6 +439,55 @@ def selftest():
         del sys.modules["akshare"]
     print("  ok 熔断按簇计账：行情簇熔断不连坐 em_search/sina/ths；日K链跳过同簇源走腾讯")
     print("  ok 财务回退链 fallback/all_failed · _num 百分号与 NaN · 情报块成功重置簇计数")
+    # -- 0.2.0：qt/sina 解析器罐体（零网络）· derive_chip · 14 簇绑定 --
+    qf = [""] * 80
+    qf[1], qf[2], qf[3], qf[4] = "中国中免", "601888", "50.00", "50.18"
+    qf[6], qf[37], qf[38], qf[39] = "109420", "54702", "0.56", "25.38"
+    qf[44], qf[45], qf[46], qf[56], qf[64] = "976.24", "1038.90", "1.81", "0.70", "1.40"
+    snap = fx._parse_qt_full('v_sh601888="' + "~".join(qf) + '";\n')
+    assert snap["price"] == 50.0 and snap["pe_ttm"] == 25.38 and snap["pb"] == 1.81
+    # 双路交叉校验通过：市值/价 与 量/换手 相对误差 0.07% < 2%
+    assert snap["float_shares"] and abs(
+        snap["float_shares"] - 1.9532e9) / 1.9532e9 < 0.01, snap["float_shares"]
+    qf[44] = "500.00"  # 位序漂移罐体：市值路失配且 [72] 空 → 弃股本字段不虚构
+    assert fx._parse_qt_full('v_sh601888="' + "~".join(qf) + '";')["float_shares"] is None
+    idx = fx._parse_qt_s('v_s_sh601888="1~中国中免~601888~50.00~-0.18~-0.36~109420~'
+                         '54702~~1038.90~GP-A~";\nv_s_sh000001="1~上证指数~000001~'
+                         '3681.47~33.17~0.91~1~1~~1~ZS~";')
+    assert idx == [{"name": "中国中免", "price": 50.0, "change_pct": -0.36},
+                   {"name": "上证指数", "price": 3681.47, "change_pct": 0.91}], idx
+    rows = fx._sina_json('[{"opendate":"2026-10-28","netamount":"-131066956.86",'
+                         '"r0_net":"-75089215.00","r1_net":"-63729707.30",'
+                         '"r2_net":"2648760.31","r3_net":"5103205.13"}]')
+    assert rows and rows[0]["r0_net"] == "-75089215.00"
+    bare = fx._sina_json('[{opendate:"2026-10-28", netamount:-1.5}]')  # 裸键变体
+    assert bare[0]["opendate"] == "2026-10-28"
+    # derive_chip：常量序列获利比例 1.0；末根大跌序列获利比例落 (0, 0.5)
+    flat = [{"date": "2026-09-%02d" % d, "open": 10, "high": 10, "low": 10,
+             "close": 10, "volume": 1000} for d in range(1, 21)]
+    chip_flat = fx.derive_chip(flat, 1_000_000, bars_source="ak-em")
+    assert chip_flat["获利比例"] == 1.0 and chip_flat["平均成本"] == 10.0, chip_flat
+    crash = flat[:-1] + [{"date": "2026-09-30", "open": 10, "high": 10, "low": 5,
+                          "close": 6.5, "volume": 50000}]  # 末日巨量换手：旧筹码清空
+    chip_crash = fx.derive_chip(crash, 1_000_000, bars_source="ak-em")
+    assert 0 < chip_crash["获利比例"] < 0.5, chip_crash  # 左尾 ~14% 获利
+    assert abs(chip_crash["平均成本"] - 7.875) < 0.1, chip_crash  # 三角重心=均价
+    # 手→股单位陷阱：同一换手率下 em 系（手×100）与 yf（股）须同结果
+    hand = [{"date": "d", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 100}]
+    share = [{"date": "d", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 10000}]
+    assert (fx.derive_chip(hand, 1_000_000, "ak-em")["获利比例"]
+            == fx.derive_chip(share, 1_000_000, "yf")["获利比例"]
+            == fx.derive_chip(share, 1_000_000, "qq-tx")["获利比例"] == 1.0)  # qq-tx 亦为股
+    # 14 簇绑定：datacenter 家族合簇且独立于行情簇；腾讯三主机互异；新浪流量三源合簇
+    assert len(set(fx.CLUSTERS.values())) == 14, set(fx.CLUSTERS.values())
+    for k in ("em-fin", "dc-respredict", "dc-forecast", "dc-unlock", "dc-holder"):
+        assert fx.CLUSTERS[k] == "em_datacenter", k
+    assert fx.CLUSTERS["em-fin"] != fx.CLUSTERS["ak-em"]
+    assert len({fx.CLUSTERS[k] for k in ("qq-tx", "qt-snap", "qq-news")}) == 3
+    assert (fx.CLUSTERS["sina-flow"] == fx.CLUSTERS["sina-news"]
+            == fx.CLUSTERS["sina-industry"] == "sina_flow")
+    assert fx.CLUSTERS["sina-flow"] != fx.CLUSTERS["sina-fin"]  # 子域分簇
+    print("  ok qt/sina 解析罐体（双路校验两路径）· derive_chip 三态 · 14 簇绑定")
     evidence = {"meta": {"symbol": "TEST", "market": "cn", "code": "000001"},
                 "blocks": {"quote": {"state": "available", "price": 12.4},
                            "daily_bars": {"state": "available", "bars": bars},

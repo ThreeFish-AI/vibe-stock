@@ -39,17 +39,33 @@ BARS_WINDOW = 250
 STALE_DAYS = {"quote": 1, "daily_bars": 5, "news": 3, "fundamentals": 120, "chip": 5}
 
 # 上游服务簇（熔断/冷却计账粒度）：同簇共享故障域，键为取数源名、值为簇名。
-# akshare 单库内含多簇上游（东财行情/东财搜索/新浪/同花顺/腾讯），按库名计账
-# 会让东财行情簇故障连坐 em_search/sina/ths 存活源（2026-10-28 实跑实证）。
+# 簇判定规则：簇=主机/服务族粒度的故障域——同厂商不同服务族分簇（东财先例：
+# push2* 行情死而 datacenter/np-anotice/reportapi 同期活，2026-10-28 实证），
+# 同子域多端点合簇（vip.stock.finance.sina.com.cn 三源共担）。
 CLUSTERS = {
     "ak-em": "em_quote",     # 东财行情簇 · akshare 日K
     "ef-em": "em_quote",     # 东财行情簇 · efinance 日K（簇内次选，同端点冗余）
-    "em-chip": "em_quote",   # 东财行情簇 · 筹码（akshare 内无第二筹码接口）
+    "em-chip": "em_quote",   # 东财行情簇 · 筹码（0.2.0 起仅作 derive 无股本时的回退位）
     "em-search": "em_search",  # 东财搜索簇 · 逐股新闻（独立于行情簇）
-    "sina-fin": "sina",      # 新浪簇 · 财务指标（首选）
+    "sina-fin": "sina",      # 新浪簇 · 财务指标（money.finance F10，链末）
     "ths-fin": "ths",        # 同花顺簇 · 财务摘要（回退）
-    "qq-tx": "qq",           # 腾讯行情簇 · qfq 日K
+    "qq-tx": "qq",           # 腾讯行情簇 · qfq 日K（web.ifzq.gtimg.cn 主机）
     "yf": "yf",              # Yahoo Finance
+    # —— 0.2.0 扩容（六簇 → 十四簇）——
+    "em-fin": "em_datacenter",  # 东财数据中心簇 · 财务主指标（datacenter*/securities/api）
+    "em-notice": "em_notice",   # 东财公告簇 · np-anotice-stock 子域
+    "cninfo-disc": "cninfo",    # 巨潮簇 · 公告权威回退（www.cninfo.com.cn）
+    "em-report": "em_report",   # 东财研报簇 · reportapi 子域
+    "dc-respredict": "em_datacenter",   # 评级共识+目标价（datacenter-web 直连）
+    "dc-forecast": "em_datacenter",     # 业绩预告+披露日历（同簇两条 reportName）
+    "dc-unlock": "em_datacenter",       # 解禁批次
+    "dc-holder": "em_datacenter",       # 股东户数
+    "sina-flow": "sina_flow",   # 新浪行情流量簇 · 资金流/个股资讯/申万归属（vip.stock 子域）
+    "sina-news": "sina_flow",   # 新闻第三源（同子域，共担熔断）
+    "sina-industry": "sina_flow",  # 申万行业归属（同子域）
+    "qt-snap": "qt",            # 腾讯快照簇 · qt.gtimg.cn 主机（与 qq 日K 主机粒度分簇）
+    "qq-news": "qq_news",       # 腾讯资讯簇 · proxy.finance.qq.com 主机
+    "baidu-val": "baidu_gushitong",  # 百度股市通 · 历史估值序列
 }
 
 CHAINS = {
@@ -117,6 +133,101 @@ def record(st, name, ok, err, now):
 
 
 # ---------------------------------------------------------------- 各源取数（懒加载）
+
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+
+
+def _http_text(url, headers=None, timeout=10):
+    """直连取文本（urllib 标准库，零新增三方依赖）。GBK/UTF-8 自适应：
+    qt.gtimg 与新浪 F10 页面为 GBK——先按 UTF-8 严格解码，失败回落 GBK。"""
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        raw = r.read()
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("gbk", "replace")
+
+
+def _parse_qt_full(text):
+    """qt.gtimg 全量快照解析（q=sh601888，~分隔 88 字段，GBK）。
+    位序 2026-10-28 实测钉住（0 基）：1=名称 3=现价 4=昨收 5=今开 6=成交量(手)
+    37=成交额(万) 38=换手率% 39=PE(TTM) 44=流通市值(亿) 45=总市值(亿) 46=PB
+    56=每股股息TTM(元) 64=股息率TTM(%) 72=流通股本 73=总股本。
+    位序漂移防护（无条件全局规则：qt 无官方文档、字段序随版本漂移）：流通股本
+    双路推导交叉校验——市值/现价 与 成交量(手→股)/换手率 相对误差 >2% 即弃
+    股本字段（chip 自算随之降级），绝不硬编码信任单一位序。"""
+    body = text[text.index('"') + 1:text.rindex('"')]
+    f = body.split("~")
+
+    def num(i):
+        try:
+            return float(f[i])
+        except Exception:
+            return None
+
+    price, float_mv, turnover, vol = num(3), num(44), num(38), num(6)
+    float_shares = None
+    if price and float_mv and turnover and vol:
+        by_mv = float_mv * 1e8 / price
+        by_vol = vol * 100 / (turnover / 100) if turnover > 0 else None
+        if by_vol and abs(by_mv - by_vol) / by_mv <= 0.02:
+            float_shares = round((by_mv + by_vol) / 2)
+    return {"name": f[1], "price": price, "prev_close": num(4), "open": num(5),
+            "volume_hand": vol, "amount_wan": num(37), "turnover_pct": turnover,
+            "pe_ttm": num(39), "float_mv_yi": float_mv, "total_mv_yi": num(45),
+            "pb": num(46), "dps_ttm": num(56), "dividend_yield_ttm": num(64),
+            "float_shares": float_shares}
+
+
+def _parse_qt_s(text):
+    """qt.gtimg 紧凑快照解析（q=s_sh601888,...，GBK）：1=名称 3=点位 5=涨跌幅%。"""
+    out = []
+    for line in text.split(";"):
+        line = line.strip()
+        if '"' not in line:
+            continue
+        body = line[line.index('"') + 1:line.rindex('"')]
+        f = body.split("~")
+        try:
+            out.append({"name": f[1], "price": float(f[3]),
+                        "change_pct": float(f[5])})
+        except (IndexError, ValueError):
+            continue
+    return out
+
+
+def _qt_batch(market, code, st, now):
+    """qt 簇取齐快照数据：个股全量（quote 叠加/估值/股本消费，仅 A 股——港股
+    全量快照位序未验证，0.2.0 不取）+ 指数紧凑（market 消费）。
+    qt 簇熔断/失败返回 (None, None)，各消费方自行降级。"""
+    ok, why = source_allowed(st, CLUSTERS["qt-snap"], now)
+    if not ok:
+        return None, None
+    try:
+        full = None
+        if market == "cn":
+            sym = ("sh" if code.startswith(("6", "9", "5")) else "sz") + code
+            full = _parse_qt_full(_http_text("https://qt.gtimg.cn/q=" + sym))
+        idx = ("s_sh000001,s_sz399001,s_sz399006,s_sh000300,s_sh000688"
+               if market == "cn" else "s_hkHSI,s_hkHSCEI")
+        indices = _parse_qt_s(_http_text("https://qt.gtimg.cn/q=" + idx))
+        record(st, CLUSTERS["qt-snap"], True, "", now)
+        return full, indices
+    except Exception as e:
+        record(st, CLUSTERS["qt-snap"], False, str(e), now)
+        return None, None
+
+
+def _sina_json(text):
+    """新浪 json_v2 容错解析：返回值可为裸键 JSON 数组（无引号键），标准
+    json 失败时对键名补引号重试。"""
+    try:
+        return json.loads(text)
+    except Exception:
+        return json.loads(re.sub(r"([{,]\s*)([A-Za-z_]\w*)\s*:", r'\1"\2":', text))
+
 
 def _daily_via_akshare(market, code):
     import akshare as ak  # noqa: 延迟导入，缺库不致命
@@ -301,41 +412,119 @@ def derive_technical(bars):
     }
 
 
+# ---------------------------------------------------------------- 新闻（三簇链 + 港股解锁）
+
+def _news_via_em(code):
+    """东财搜索簇（主源，经 akshare）：标题+内容摘要。"""
+    import akshare as ak
+    df = ak.stock_news_em(symbol=code)
+    items = [{"title": str(r["新闻标题"]), "content": str(r["新闻内容"])[:200],
+              "time": str(r["发布时间"])} for _, r in df.head(10).iterrows()]
+    if not items:
+        raise ValueError("empty news")
+    return items
+
+
+def _news_via_qq(market, code):
+    """腾讯资讯簇（直连 proxy.finance.qq.com，A+港通吃——港股唯一源）：
+    data.data[] 含 time/title/src/summary；混有自媒体条目，靠 src 字段如实透出。"""
+    sym = ("hk" + code if market == "hk"
+           else ("sh" if code.startswith(("6", "9", "5")) else "sz") + code)
+    text = _http_text("https://proxy.finance.qq.com/ifzqgtimg/appstock/"
+                      "news/info/search?page=1&symbol=%s&n=20&type=2" % sym)
+    arr = (json.loads(text).get("data") or {}).get("data") or []
+    items = [{"title": str(a.get("title", "")), "content": str(
+        a.get("summary", ""))[:150], "time": str(a.get("time", "")),
+        "src": str(a.get("src", ""))} for a in arr if a.get("title")]
+    if not items:
+        raise ValueError("empty news")
+    return items[:10]
+
+
+def _news_via_sina(code):
+    """新浪流量簇（直连 F10 个股资讯页，GB2312 HTML，标题级末位回退）：
+    无内容摘要无来源名，仅 A 股；页面含弱相关条目，如实进包由意见层甄别。"""
+    sym = ("sh" if code.startswith(("6", "9", "5")) else "sz") + code
+    text = _http_text("https://vip.stock.finance.sina.com.cn/corp/go.php/"
+                      "vCB_AllNewsStock/symbol/%s.phtml" % sym)
+    rows = re.findall(
+        r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s*<a[^>]*href=\"([^\"]+)\"[^>]*>([^<]+)</a>",
+        text)
+    items = [{"title": t.strip(), "content": "", "time": tm, "url": u}
+             for tm, u, t in rows]
+    if not items:
+        raise ValueError("empty news")
+    return items[:10]
+
+
+NEWS_FETCHERS = {"em-search": _news_via_em, "qq-news": _news_via_qq,
+                 "sina-news": _news_via_sina}
+NEWS_CHAINS = {"cn": ["em-search", "qq-news", "sina-news"], "hk": ["qq-news"]}
+
+
 def fetch_news(market, code, st, now):
-    """新闻块：A 股 em_search 簇（独立计账，行情簇熔断不连坐）；
-    港股 not_supported（v1 诚实标注）。"""
-    if market == "hk":
-        return {"state": "not_supported", "source": "",
-                "note": "港股新闻源 v1 未接入"}
-    cluster = CLUSTERS["em-search"]
-    ok, why = source_allowed(st, cluster, now)
-    if not ok:
-        return {"state": "fetch_failed", "source": "em-search", "note": why}
-    try:
-        import akshare as ak
-        df = ak.stock_news_em(symbol=code)
-        items = [{"title": str(r["新闻标题"]), "content": str(r["新闻内容"])[:200],
-                  "time": str(r["发布时间"])} for _, r in df.head(10).iterrows()]
-        if not items:
-            raise ValueError("empty news")  # 空响应不算成功，不重置簇计数
-        record(st, cluster, True, "", now)
-        return {"state": "available", "source": "em-search", "items": items}
-    except ImportError:
-        return {"state": "fetch_failed", "source": "em-search", "note": "import_missing"}
-    except Exception as e:
-        record(st, cluster, False, str(e), now)
-        return {"state": "fetch_failed", "source": "em-search",
-                "note": type(e).__name__}
+    """新闻块：A 股三簇链 em_search→qq_news→sina_flow（异厂商互备）；
+    港股 qq-news 单源（0.2.0 解除 not_supported）。"""
+    tried = []
+    for name in NEWS_CHAINS[market]:
+        cluster = CLUSTERS[name]
+        ok, why = source_allowed(st, cluster, now)
+        if not ok:
+            tried.append((name, why))
+            continue
+        try:
+            items = (NEWS_FETCHERS[name](code) if name != "qq-news"
+                     else NEWS_FETCHERS[name](market, code))
+            record(st, cluster, True, "", now)
+            state = "available" if not tried else "fallback"
+            return {"state": state, "source": name, "items": items, "tried": tried}
+        except ImportError:
+            tried.append((name, "import_missing"))  # 缺库不记熔断（环境问题非源问题）
+        except Exception as e:
+            record(st, cluster, False, str(e), now)
+            tried.append((name, "fail: %s" % type(e).__name__))
+    return {"state": "fetch_failed", "source": "", "note": "all_failed", "tried": tried}
+
+
+def _fund_via_em(code):
+    """东财数据中心簇（0.2.0 链首，经 akshare）：一表全含——四概念键对齐既有
+    口径，另带扩展键（毛利率/净利率/ROIC/扣非/单季环比，近 4 报告期）。
+    列名为接口 raw 英文列（REPORT_DATE/EPSJB/ROEJQ/…），最新期在前。
+    SECUCODE 后缀：沪 6/9/5 → .SH，北交 8/4 → .BJ，其余 → .SZ。"""
+    import akshare as ak
+    suf = ".SH" if code.startswith(("6", "9", "5")) else (
+        ".BJ" if code.startswith(("8", "4")) else ".SZ")
+    df = ak.stock_financial_analysis_indicator_em(symbol=code + suf,
+                                                  indicator="按报告期")
+    out = {}
+    for _, row in df.head(4).iterrows():
+        period = str(row.get("REPORT_DATE", ""))[:10]
+        out[period] = {
+            "报告期": period,
+            "每股收益(元)": _num(row.get("EPSJB")),
+            "净资产收益率(%)": _num(row.get("ROEJQ")),
+            "主营业务收入增长率(%)": _num(row.get("TOTALOPERATEREVETZ")),
+            "资产负债率(%)": _num(row.get("ZCFZL")),
+            "毛利率(%)": _num(row.get("XSMLL")),
+            "净利率(%)": _num(row.get("XSJLL")),
+            "ROIC(%)": _num(row.get("ROIC")),
+            "归母净利润同比(%)": _num(row.get("PARENTNETPROFITTZ")),
+            "归母净利润(亿元)": (lambda v: None if v is None else round(v / 1e8, 2))(
+                _num(row.get("PARENTNETPROFIT")))}
+    return out  # {报告期: 指标 dict}，近 4 期；消费方取最新期为 data 主值
 
 
 def _fund_via_sina(code):
-    """新浪簇财务指标（首选）：值为 float，概念键四项。"""
+    """新浪簇财务指标（链末交叉源）：值为 float，概念键四项。
+    键名修正（原「每股收益(元)」接口列集不存在恒 None，实为「摊薄每股收益(元)」）；
+    毛利率 2025 起新浪停更恒 NaN，此源禁取毛利率。"""
     import akshare as ak
     df = ak.stock_financial_analysis_indicator(symbol=code, start_year="2024")
     row = df.iloc[-1] if len(df) else {}
-    keys = ["净资产收益率(%)", "每股收益(元)", "主营业务收入增长率(%)",
+    keys = ["净资产收益率(%)", "摊薄每股收益(元)", "主营业务收入增长率(%)",
             "资产负债率(%)"]
-    return {k: (None if k not in row else _num(row[k])) for k in keys}
+    return {("每股收益(元)" if k == "摊薄每股收益(元)" else k):
+            (None if k not in row else _num(row[k])) for k in keys}
 
 
 def _fund_via_ths(code):
@@ -345,15 +534,17 @@ def _fund_via_ths(code):
     row = df.iloc[-1] if len(df) else {}
     mapping = {"净资产收益率(%)": "净资产收益率", "每股收益(元)": "基本每股收益",
                "主营业务收入增长率(%)": "营业总收入同比增长率",
-               "资产负债率(%)": "资产负债率"}
+               "资产负债率(%)": "资产负债率", "毛利率(%)": "销售毛利率"}
     return {k: (None if c not in row else _num(row[c])) for k, c in mapping.items()}
 
 
-FUNDAMENTALS_FETCHERS = {"sina-fin": _fund_via_sina, "ths-fin": _fund_via_ths}
+FUNDAMENTALS_FETCHERS = {"em-fin": _fund_via_em, "sina-fin": _fund_via_sina,
+                         "ths-fin": _fund_via_ths}
 
 
 def fetch_fundamentals(market, code, st, now):
-    """财务指标：sina 簇 → ths 簇回退（簇级计账，任一簇熔断不牵连另一簇）。"""
+    """财务指标：em_datacenter → sina → ths（簇级计账，任一簇熔断不牵连另一簇）。
+    em-fin 返回 {报告期: 指标}，主值取最新期、近 4 期入 history（pack 渲染用）。"""
     if market == "hk":
         return {"state": "not_supported", "source": "",
                 "note": "港股财务指标 v1 未接入"}
@@ -366,12 +557,18 @@ def fetch_fundamentals(market, code, st, now):
             continue
         try:
             data = FUNDAMENTALS_FETCHERS[name](code)
+            history = None
+            if data and all(isinstance(v, dict) for v in data.values()):
+                history, data = data, data[max(data)]
             # v == v 滤 NaN：_num("--")→nan 非 None，全占位不算成功（勿重置簇计数）
             if not any(v is not None and v == v for v in data.values()):
                 raise ValueError("empty fundamentals")
             record(st, cluster, True, "", now)
             state = "available" if not tried else "fallback"
-            return {"state": state, "source": name, "data": data, "tried": tried}
+            blk = {"state": state, "source": name, "data": data, "tried": tried}
+            if history:
+                blk["history"] = history
+            return blk
         except ImportError:
             tried.append((name, "import_missing"))  # 缺库不记熔断（环境问题非源问题）
         except Exception as e:
@@ -387,12 +584,89 @@ def _num(v):
         return None
 
 
-def fetch_chip(market, code, st, now):
-    """筹码分布：A 股专属（唯一上游=em_quote 簇+本地 JS 换算，akshare 全包无第二
-    筹码接口——如实 fetch_failed，不虚构）；港股 not_supported（能力差异摆到明面上）。"""
+def derive_chip(bars, float_shares, bars_source=""):
+    """筹码分布本地自算（CYQ 三角分布换手衰减，与 akshare stock_cyq_em 同算法，
+    输出列名与官方接口全同）。状态由调用方标 estimated。
+    坑位：①volume 单位陷阱——yf 源为股、em/qq 系源为手，按 bars_source 判定
+    归一；②历史换手率以当前流通股本回溯，增发/解禁/回购期误差放大；③一字板
+    （high==low）单点全量堆积。"""
+    if not bars or not float_shares:
+        return None
+    # volume 单位陷阱：ak-em/ef-em 为手（×100），qq-tx/yf 为股（不换算）——
+    # 判错方向会把换手率放大百倍、每日全换手冲掉全部历史筹码
+    unit = 100 if any(s in (bars_source or "") for s in ("ak-em", "ef-em")) else 1
+    dist = {}
+    for bar in bars:  # 全窗口参与（250 根）：裁窗会切掉高位筹码档使 90 成本区间失真
+        h = min(bar["volume"] * unit / float_shares, 1.0)
+        lo, hi = bar["low"], bar["high"]
+        avg = (bar["open"] + bar["high"] + bar["low"] + bar["close"]) / 4
+        for k in dist:  # 旧筹码按当日换手率衰减
+            dist[k] *= (1 - h)
+        if hi <= lo:  # 一字板：单价位全量
+            key = round(avg, 2)
+            dist[key] = dist.get(key, 0) + h
+        else:  # 当日筹码以均价为顶点摊入 [low, high] 三角分布
+            steps = max(2, int(round((hi - lo) / 0.01)))
+            peak = max(avg - lo, hi - avg) or 1e-9
+            ws = []
+            for i in range(steps):
+                p = lo + (hi - lo) * (i + 0.5) / steps
+                w = max(0.0, 1 - abs(p - avg) / peak)
+                if w > 0:
+                    ws.append((round(p, 2), w))
+            wsum = sum(w for _, w in ws)
+            if wsum > 0:
+                for p, w in ws:
+                    dist[p] = dist.get(p, 0) + h * w / wsum
+    total = sum(dist.values())
+    if total <= 0:
+        return None
+    for k in [k for k, v in dist.items() if v < total * 1e-7]:  # 剪趋零档
+        del dist[k]
+    prices = sorted(dist)
+    close = bars[-1]["close"]
+    profit = sum(w for p, w in dist.items() if p <= close) / total
+    avg_cost = sum(p * w for p, w in dist.items()) / total
+
+    def band(frac):  # frac 成本区间（对称去尾）+ 集中度=(高-低)/(高+低)
+        tail = (1 - frac) / 2 * total
+        acc, lo_p = 0.0, prices[0]
+        for p in prices:
+            acc += dist[p]
+            if acc >= tail:
+                lo_p = p
+                break
+        acc, hi_p = 0.0, prices[-1]
+        for p in reversed(prices):
+            acc += dist[p]
+            if acc >= tail:
+                hi_p = p
+                break
+        return lo_p, hi_p
+
+    lo90, hi90 = band(0.9)
+    lo70, hi70 = band(0.7)
+    return {"获利比例": round(profit, 4), "平均成本": round(avg_cost, 2),
+            "90成本-低": round(lo90, 2), "90成本-高": round(hi90, 2),
+            "90集中度": round((hi90 - lo90) / (hi90 + lo90), 4),
+            "70成本-低": round(lo70, 2), "70成本-高": round(hi70, 2),
+            "70集中度": round((hi70 - lo70) / (hi70 + lo70), 4)}
+
+
+def fetch_chip(market, code, st, now, bars=None, float_shares=None,
+               bars_source=""):
+    """筹码分布（0.2.0 derive 优先）：本地自算（日K+qt 流通股本）→ estimated；
+    无输入或自算失败时探 em-chip 官方接口（em_quote 簇复活位）→ available；
+    港股 not_supported（能力差异摆到明面上）。"""
     if market == "hk":
         return {"state": "not_supported", "source": "",
                 "note": "筹码数据仅 A 股"}
+    if bars and float_shares:
+        data = derive_chip(bars, float_shares, bars_source)
+        if data:
+            return {"state": "estimated", "source": "derived:qt", "data": data,
+                    "note": "本地自算（CYQ 三角分布换手衰减），历史换手按当前"
+                            "流通股本回溯"}
     cluster = CLUSTERS["em-chip"]
     ok, why = source_allowed(st, cluster, now)
     if not ok:
@@ -468,15 +742,26 @@ def fetch(symbol, snapshot_dir=None):
         market, code = detect_market(symbol)
         st = load_fetch_state()
         bars, bars_state, bars_src, tried = fetch_daily_bars(market, code, st, now)
+        qt_full, _ = _qt_batch(market, code, st, now)  # 指数部分 0.2.0 扩展块消费
         save_fetch_state(st)
         blocks = {"daily_bars": {"state": bars_state, "source": bars_src,
                                  "tried": tried,
                                  "bars": bars[-BARS_WINDOW:]}}
         if bars:
             q = derive_quote(bars)
+            src_note = ""
+            if qt_full and qt_full.get("price"):  # qt 实时叠加（A股盘中新鲜度）
+                if abs(qt_full["price"] / q["price"] - 1) > 0.05:
+                    src_note = "实时价 %s 与日K收盘 %s 偏差>5%%" % (
+                        qt_full["price"], q["price"])
+                q = {**q, "price": qt_full["price"],
+                     "turnover_pct": qt_full.get("turnover_pct")}
+            qsrc = "derived:%s+qt" % bars_src if qt_full and qt_full.get(
+                "price") else "derived:" + bars_src
+            if src_note:
+                q["note"] = src_note
             blocks["quote"] = {"state": ("available" if bars_state == "available"
-                                         else bars_state),
-                               "source": "derived:" + bars_src, **q}
+                                         else bars_state), "source": qsrc, **q}
             blocks["technical"] = {"state": ("available" if bars_state == "available"
                                              else bars_state),
                                    "source": "derived", **derive_technical(bars)}
@@ -487,7 +772,9 @@ def fetch(symbol, snapshot_dir=None):
                                    "note": "日 K 缺失，指标无从而来"}
         blocks["news"] = fetch_news(market, code, st, now)
         blocks["fundamentals"] = fetch_fundamentals(market, code, st, now)
-        blocks["chip"] = fetch_chip(market, code, st, now)
+        blocks["chip"] = fetch_chip(market, code, st, now, bars=bars,
+                                    float_shares=(qt_full or {}).get("float_shares"),
+                                    bars_source=bars_src)
         save_fetch_state(st)
         market_meta = {"symbol": symbol, "market": market, "code": code,
                        "tried": tried}
