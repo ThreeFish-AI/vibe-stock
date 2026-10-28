@@ -54,21 +54,42 @@ def render_context_pack(evidence, workdir):
         "%s=%s" % (n, b.get(n, {}).get("state", "missing"))
         for n in ("quote", "daily_bars", "technical", "news", "fundamentals", "chip")))
     lines.append("")
+    quote = b.get("quote", {})
+    if quote:
+        # 键位修复：price/change_pct 在 quote 块（derive_quote 产物），不在 technical
+        lines.append("## 报价（%s）" % quote.get("state", "missing"))
+        lines.append(" ".join(
+            "%s=%s" % (k, quote.get(k)) for k in
+            ("price", "prev_close", "change_pct", "date", "turnover_pct")
+            if quote.get(k) is not None))
     if tech:
+        lines.append("")
         lines.append("## 技术指标（由日 K 推导，%s）" % tech.get("state", "missing"))
-        keys = ["price", "change_pct", "ma5", "ma10", "ma20", "ma60", "rsi14",
-                "vol_ratio_5", "pct_from_52w_high", "pct_from_52w_low"]
+        keys = ["ma5", "ma10", "ma20", "ma60", "rsi14", "vol_ratio_5",
+                "pct_from_52w_high", "pct_from_52w_low", "new_high_20d",
+                "new_low_20d", "consecutive_up_days"]
         lines.append(" ".join("%s=%s" % (k, tech.get(k)) for k in keys
                               if tech.get(k) is not None))
         if tech.get("macd"):
             lines.append("macd: %s" % tech["macd"])
+        if tech.get("box_60d"):
+            lines.append("box_60d: %s（hi/lo=箱体上下沿 width=宽度%% pos=现价位置%%）"
+                         % tech["box_60d"])
+        if tech.get("vol_series_10"):
+            lines.append("vol_series_10: %s（近 10 日逐日量比=当日量/前 5 日均量）"
+                         % tech["vol_series_10"])
+        if tech.get("last_bar_pattern"):
+            lines.append("last_bar_pattern: %s（yang=收阳 body=实体占比%% "
+                         "lower/upper_shadow=下上影线占比%%）" % tech["last_bar_pattern"])
     if bars:
         lines.append("")
-        lines.append("## 近 10 根日 K（日期 收盘 涨跌幅%）")
+        lines.append("## 近 10 根日 K（日期 开 高 低 收 量 涨跌幅%）")
         prev = None
         for bar in bars[-10:]:
             chg = "" if prev is None else round((bar["close"] / prev - 1) * 100, 2)
-            lines.append("%s %s %s" % (bar["date"], bar["close"], chg))
+            lines.append("%s %s %s %s %s %s %s" % (
+                bar["date"], bar.get("open"), bar.get("high"), bar.get("low"),
+                bar["close"], bar.get("volume"), chg))
             prev = bar["close"]
     news = b.get("news", {})
     if news.get("items"):
@@ -338,7 +359,7 @@ def selftest():
     print("  ok detect_market：7 位前导零剥零 · A/港既有形态 · 边界拒绝")
     bars = [{"date": "2026-10-%02d" % d, "open": 10 + d * 0.1, "high": 10.5 + d * 0.1,
              "low": 9.8 + d * 0.1, "close": 10.2 + d * 0.1, "volume": 1000 + d * 10}
-            for d in range(1, 25)]
+            for d in range(1, 45)]  # ≥35 根 MACD 才出值、≥15 根量比序列才出值
     # -- 熔断按簇计账回归（连坐修复；2026-10-28 实跑事故钉住） --
     t0 = 1793200000
     st = {"breakers": {}, "cooldowns": {}}
@@ -430,6 +451,19 @@ def selftest():
         text = open(pack, encoding="utf-8").read()
         assert "<untrusted_external" in text, "新闻须包不可信哨兵"
         assert "置信帽" in text
+        # 0.2.0：quote 键位修复 + 技术派生扩容 + 近 10 根 K OHLCV 渲染
+        t = evidence["blocks"]["technical"]
+        assert t["new_high_20d"] is True, "递增序列末根须判 20 日新高"
+        assert t["box_60d"] and t["box_60d"]["pos_pct"] >= 90, t["box_60d"]
+        assert t["vol_series_10"] and len(t["vol_series_10"]) == 10
+        assert t["last_bar_pattern"]["yang"] is True
+        assert "hist_rising" in t["macd"], "MACD 须含柱体放大判据"
+        assert "## 报价" in text and "price=" in text, "报价节须渲染（键位修复钉）"
+        for key in ("box_60d", "vol_series_10", "last_bar_pattern", "new_high_20d"):
+            assert key in text, "pack 缺技术扩容字段 %s" % key
+        bar_lines = [ln for ln in text.splitlines() if ln.startswith("2026-10-")]
+        assert bar_lines and len(bar_lines[-1].split()) == 7, \
+            "近 10 根 K 行须为 日期/开/高/低/收/量/涨跌幅 七列"
         opinions = [
             {"source": "strategy:ma_golden_cross", "signal": "buy", "confidence": 0.8,
              "rationale": "MA5 上穿 MA20"},

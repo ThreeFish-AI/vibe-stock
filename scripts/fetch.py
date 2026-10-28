@@ -230,11 +230,12 @@ def _rsi(closes, n=14):
 def _macd(closes, fast=12, slow=26, signal=9):
     if len(closes) < slow + signal:
         return None
-    ema = lambda k: _ema_series(closes, k)
     dif = [f - s for f, s in zip(_ema_series(closes, fast), _ema_series(closes, slow))]
-    dea = _ema_series(dif, signal)[-1]
-    return {"dif": round(dif[-1], 3), "dea": round(dea, 3),
-            "macd": round((dif[-1] - dea) * 2, 3)}
+    dea = _ema_series(dif, signal)
+    hist = [(d - e) * 2 for d, e in zip(dif, dea)]
+    return {"dif": round(dif[-1], 3), "dea": round(dea[-1], 3),
+            "macd": round(hist[-1], 3), "hist_prev": round(hist[-2], 3),
+            "hist_rising": bool(hist[-1] > hist[-2])}  # 柱体放大判据（bull_trend）
 
 
 def _ema_series(vals, n):
@@ -246,11 +247,45 @@ def _ema_series(vals, n):
     return out
 
 
+def _bar_pattern(bar):
+    """单根 K 线形态摘要：阴阳/实体占比/上下影线占比（high==low 一字板全 0）。"""
+    o, c, hi, lo = bar["open"], bar["close"], bar["high"], bar["low"]
+    span = hi - lo
+    if span <= 0:
+        return {"yang": bool(c >= o), "body_pct": 0.0, "lower_shadow_pct": 0.0,
+                "upper_shadow_pct": 0.0}
+    return {"yang": bool(c >= o),
+            "body_pct": round(abs(c - o) / span * 100, 1),
+            "lower_shadow_pct": round((min(o, c) - lo) / span * 100, 1),
+            "upper_shadow_pct": round((hi - max(o, c)) / span * 100, 1)}
+
+
 def derive_technical(bars):
     closes = [b["close"] for b in bars]
     vols = [b["volume"] for b in bars]
     hi52 = max(b["high"] for b in bars)
     lo52 = min(b["low"] for b in bars)
+    prev19 = closes[-20:-1] if len(closes) >= 20 else closes[:-1]
+    # 60 日箱体（不足 20 根不出，pos_pct=现价在箱体区间位置 0~100）
+    box = None
+    if len(bars) >= 20:
+        w = bars[-60:]
+        bhi, blo = max(b["high"] for b in w), min(b["low"] for b in w)
+        if bhi > blo:
+            box = {"hi": round(bhi, 3), "lo": round(blo, 3),
+                   "width_pct": round((bhi / blo - 1) * 100, 2),
+                   "pos_pct": round((closes[-1] - blo) / (bhi - blo) * 100, 1)}
+    # 近 10 日量比序列（当日量/前 5 日均量）：缩量/放量演化可见（box/bottom 判据）
+    vol_series = None
+    if len(vols) >= 15:
+        vol_series = [round(vols[i] / (sum(vols[i - 5:i]) / 5 + 1e-9), 2)
+                      for i in range(len(vols) - 10, len(vols))]
+    up_days = 0
+    for a, b in zip(reversed(closes[:-1]), reversed(closes[1:])):
+        if b > a:
+            up_days += 1
+        else:
+            break
     return {
         "ma5": _ma(closes, 5), "ma10": _ma(closes, 10), "ma20": _ma(closes, 20),
         "ma60": _ma(closes, 60), "rsi14": _rsi(closes), "macd": _macd(closes),
@@ -258,6 +293,11 @@ def derive_technical(bars):
         "pct_from_52w_high": round((closes[-1] / hi52 - 1) * 100, 2),
         "pct_from_52w_low": round((closes[-1] / lo52 - 1) * 100, 2),
         "bars_count": len(bars),
+        "new_high_20d": bool(prev19 and closes[-1] >= max(prev19)),
+        "new_low_20d": bool(prev19 and closes[-1] <= min(prev19)),
+        "consecutive_up_days": up_days,
+        "box_60d": box, "vol_series_10": vol_series,
+        "last_bar_pattern": _bar_pattern(bars[-1]),
     }
 
 
