@@ -145,6 +145,8 @@ def _daily_via_tencent(market, code):
     """腾讯行情簇（proxy.finance.qq.com）：qfq 日K，与东财行情簇独立故障域。
 
     新浪 stock_zh_a_daily 实测不复权，禁入链（不复权数据不得混入 qfq 链）。
+    volume 列要求 akshare ≥2025-10 版；单位为股（em 系源为手），仅用于源内
+    比值 vol_ratio_5，单位相消。
     """
     import akshare as ak  # noqa: 延迟导入，缺库不致命
     pfx = "sh" if code.startswith(("6", "9", "5")) else "sz"
@@ -174,7 +176,7 @@ DAILY_FETCHERS = {"ak-em": _daily_via_akshare,
 
 def fetch_daily_bars(market, code, st, now):
     """回退链取日 K。返回 (rows, state, source, tried)。全链失败 → fetch_failed。"""
-    tried, first_fail = [], None
+    tried = []
     for name in CHAINS[market]:
         cluster = CLUSTERS[name]
         ok, why = source_allowed(st, cluster, now)
@@ -186,15 +188,15 @@ def fetch_daily_bars(market, code, st, now):
             if not rows:
                 raise ValueError("empty bars")
             record(st, cluster, True, "", now)
-            state = "available" if first_fail is None else "fallback"
+            # 备选源取到即 fallback（01-evidence 八态口径）：先行源被熔断/冷却
+            # 跳过或失败，都如实压低状态，不因 skip 不计败而虚标 available。
+            state = "available" if not tried else "fallback"
             return rows, state, name, tried
         except ImportError as e:
-            tried.append((name, "import_missing"))
-            first_fail = first_fail or name  # 缺库不记熔断（环境问题非源问题）
+            tried.append((name, "import_missing"))  # 缺库不记熔断（环境问题非源问题）
         except Exception as e:
             record(st, cluster, False, str(e), now)
             tried.append((name, "fail: %s" % type(e).__name__))
-            first_fail = first_fail or name
     return [], "fetch_failed", "", tried
 
 
@@ -272,6 +274,8 @@ def fetch_news(market, code, st, now):
         df = ak.stock_news_em(symbol=code)
         items = [{"title": str(r["新闻标题"]), "content": str(r["新闻内容"])[:200],
                   "time": str(r["发布时间"])} for _, r in df.head(10).iterrows()]
+        if not items:
+            raise ValueError("empty news")  # 空响应不算成功，不重置簇计数
         record(st, cluster, True, "", now)
         return {"state": "available", "source": "em-search", "items": items}
     except ImportError:
@@ -320,7 +324,8 @@ def fetch_fundamentals(market, code, st, now):
             continue
         try:
             data = FUNDAMENTALS_FETCHERS[name](code)
-            if not any(v is not None for v in data.values()):
+            # v == v 滤 NaN：_num("--")→nan 非 None，全占位不算成功（勿重置簇计数）
+            if not any(v is not None and v == v for v in data.values()):
                 raise ValueError("empty fundamentals")
             record(st, cluster, True, "", now)
             state = "available" if not tried else "fallback"
@@ -355,9 +360,12 @@ def fetch_chip(market, code, st, now):
         df = ak.stock_cyq_em(symbol=code, adjust="qfq")
         row = df.iloc[-1] if len(df) else {}
         keys = ["获利比例", "平均成本", "90成本-低", "90成本-高"]
+        data = {k: (None if k not in row else _num(row[k])) for k in keys}
+        # 与 fundamentals 同式守卫：全空/NaN 占位不算成功，不重置簇计数
+        if not any(v is not None and v == v for v in data.values()):
+            raise ValueError("empty chip")
         record(st, cluster, True, "", now)
-        return {"state": "available", "source": "em-chip",
-                "data": {k: (None if k not in row else _num(row[k])) for k in keys}}
+        return {"state": "available", "source": "em-chip", "data": data}
     except ImportError:
         return {"state": "fetch_failed", "source": "em-chip", "note": "import_missing"}
     except Exception as e:

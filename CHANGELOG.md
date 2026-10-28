@@ -19,7 +19,17 @@
 ### Added
 
 - diagnose.py selftest 增熔断按簇计账回归断言：行情簇熔断不连坐 em_search/
-  sina/ths/qq/yf；日K链 em_quote 熔断时跳过同簇两源、自腾讯源取到数据。
+  sina/ths/qq/yf；日K链 em_quote 熔断时跳过同簇两源、自腾讯源取到数据；
+  补财务回退链（sina 占位→ths 接管标 fallback、双败 all_failed）、`_num`
+  百分号清洗与 NaN 形态、情报块成功重置簇计数断言。
+
+### Fixed
+
+- 日K链备选源取到的状态口径对齐八态 SSOT：先行源被熔断/冷却跳过或失败后由
+  备选源取到，一律标 fallback（原 skip 不计败误标 available，三核心块质量分
+  各虚高 15 分）。
+- fundamentals 空值守卫修 NaN 击穿（`--` 占位经 `_num` 成 NaN 而非 None）；
+  news/chip 空响应不再标 available 并重置簇失败计数（空数据不算成功）。
 
 ## [0.1.0] - 2026-10-28
 
