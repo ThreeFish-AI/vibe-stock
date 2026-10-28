@@ -21,14 +21,14 @@
 
 ## 六块质量分与四档
 
-| 块 | 权重 | A 股来源 | 港股来源 |
+| 块 | 权重 | A 股来源（簇口径） | 港股来源 |
 | --- | --- | --- | --- |
 | quote | 25 | 日 K 推导（或源实时） | 同左 |
-| daily_bars | 25 | akshare→efinance→yfinance | akshare→yfinance |
+| daily_bars | 25 | em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq)→yfinance | em_quote(akshare)→yfinance |
 | technical | 25 | 由日 K 纯标准库推导（MA/RSI/MACD/量比/52 周位置） | 同左 |
-| news | 10 | akshare 新闻 | not_supported（v1） |
-| fundamentals | 10 | akshare 财务指标 | not_supported（v1） |
-| chip | 5 | akshare 筹码分布 | not_supported |
+| news | 10 | em_search（东财搜索，独立计账） | not_supported（v1） |
+| fundamentals | 10 | sina(财务指标)→ths(财务摘要) | not_supported（v1） |
+| chip | 5 | em_quote（唯一上游，akshare 全包无第二筹码接口） | not_supported |
 
 - 总分 → 档位：≥85 good / ≥70 usable / ≥55 limited / 更低 poor。
 - **核心块降级禁高置信**：quote/daily_bars/technical 任一非 available/fallback →
@@ -37,10 +37,20 @@
 
 ## 三层防护（各拦一类故障）
 
-- **回退链**：临时失败——按链逐源换，成功即标 fallback 继续。
-- **熔断**：持续失败——单源连续 3 败停 300s（半开放单次探测）；状态持久化
-  `~/.vibe-stock/fetch_state.json`。
-- **冷却**：连接失败——15s 内不再试该源。
+- **回退链**：临时失败——按链逐源换，成功即标 fallback 继续。条件：同一块存在
+  多簇可选；做法：A 股日K链 em_quote(akshare→efinance，efinance 为簇内次选——
+  同端点冗余，簇熔断开启时两源一并跳过)→qq(腾讯 qfq)→yfinance，fundamentals 链
+  sina→ths；坑位：新浪 stock_zh_a_daily 实测不复权，不入链（不复权数据禁混入
+  qfq 链）；news=em_search、chip=em_quote 天然单源，失败如实 fetch_failed。
+- **熔断**：持续失败——单簇连续 3 败停 300s（半开放行单次探测）；状态持久化
+  `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（em_quote/
+  em_search/sina/ths/qq/yf——akshare 单库内含多簇上游，同簇共享故障域）；坑位：
+  按库名计账会让东财行情簇故障连坐 em_search/sina/ths 存活源（2026-10-28 实跑
+  实证，news/fundamentals 被连坐成 skipped_open 而上游实测 200）；旧库名熔断键
+  自然过期、不迁移不删除（不删既有状态数据）。
+- **冷却**：连接失败——15s 内不再试该源（同样按簇计账）；坑位：簇内任一源
+  连接失败即冷却全簇 15s（ak-em 失败时 ef-em 同被冷却——同故障域设计使然，
+  与簇熔断同一粒度语义）。
 - 全链失败：daily_bars 标 fetch_failed、报价与指标如实标 missing（无米之炊），
   提示走快照模式；**不虚构数据**。
 

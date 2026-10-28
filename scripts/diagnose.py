@@ -339,6 +339,82 @@ def selftest():
     bars = [{"date": "2026-10-%02d" % d, "open": 10 + d * 0.1, "high": 10.5 + d * 0.1,
              "low": 9.8 + d * 0.1, "close": 10.2 + d * 0.1, "volume": 1000 + d * 10}
             for d in range(1, 25)]
+    # -- 熔断按簇计账回归（连坐修复；2026-10-28 实跑事故钉住） --
+    t0 = 1793200000
+    st = {"breakers": {}, "cooldowns": {}}
+    for _ in range(3):
+        fx.record(st, "em_quote", False, "connection reset", t0)
+    assert fx.source_allowed(st, "em_quote", t0 + 1) == (False, "skipped_open")
+    for c in ("em_search", "sina", "ths", "qq", "yf"):
+        assert fx.source_allowed(st, c, t0 + 1) == (True, ""), "行情簇熔断不得连坐 %s" % c
+    # 簇绑定：东财两日K源与筹码同簇（efinance 为簇内次选），腾讯/雅虎/新浪/同花顺异簇
+    assert (fx.CLUSTERS["ak-em"] == fx.CLUSTERS["ef-em"]
+            == fx.CLUSTERS["em-chip"] == "em_quote")
+    assert fx.CLUSTERS["em-search"] == "em_search"
+    assert fx.CLUSTERS["sina-fin"] == "sina" and fx.CLUSTERS["ths-fin"] == "ths"
+    assert fx.CLUSTERS["qq-tx"] == "qq" and fx.CLUSTERS["yf"] == "yf"
+    # 行为级：em_quote 熔断开启时日K链跳过同簇两源、自腾讯源取到数据
+    def _boom(m, c):
+        raise RuntimeError("em_quote down")
+    real = dict(fx.DAILY_FETCHERS)
+    try:
+        fx.DAILY_FETCHERS.update({"ak-em": _boom, "ef-em": _boom,
+                                  "qq-tx": lambda m, c: bars,
+                                  "yf": lambda m, c: bars})
+        rows, state, src, tried = fx.fetch_daily_bars("cn", "601888", st, t0 + 1)
+        # 八态口径：先行源被熔断跳过（tried 如实记 skipped_open）后备选源取到 → fallback
+        assert state == "fallback" and src == "qq-tx" and len(rows) == len(bars)
+        assert [t[1] for t in tried] == ["skipped_open", "skipped_open"], tried
+        # 成功重置簇计数：qq 成功后同簇再失败不残留 em_quote 旧计数以外的状态
+        assert st["breakers"]["qq"]["fails"] == 0
+    finally:
+        fx.DAILY_FETCHERS.clear()
+        fx.DAILY_FETCHERS.update(real)
+    # -- 财务回退链与清洗守卫（sina→ths；空值/NaN 占位不算成功） --
+    import math
+    assert fx._num("7.89%") == 7.89 and math.isnan(fx._num("--"))
+    real_f = dict(fx.FUNDAMENTALS_FETCHERS)
+    try:
+        # 桩对齐真实 fetcher 契约：返回值已过 _num（NaN/float，非原始字符串）
+        fx.FUNDAMENTALS_FETCHERS.update({
+            "sina-fin": lambda c: dict.fromkeys(
+                ["净资产收益率(%)", "每股收益(元)", "主营业务收入增长率(%)",
+                 "资产负债率(%)"], float("nan")),
+            "ths-fin": lambda c: {"净资产收益率(%)": fx._num("16.75%"),
+                                  "每股收益(元)": fx._num("1.20"),
+                                  "主营业务收入增长率(%)": fx._num("5.30%"),
+                                  "资产负债率(%)": fx._num("40.19%")}})
+        blk = fx.fetch_fundamentals("cn", "600519", st, t0 + 2)
+        assert blk["state"] == "fallback" and blk["source"] == "ths-fin", blk
+        assert blk["tried"] and blk["tried"][0][0] == "sina-fin", blk["tried"]
+        assert blk["data"]["净资产收益率(%)"] == 16.75, blk["data"]
+        def _boom_fin(c):
+            raise RuntimeError("ths down")
+        fx.FUNDAMENTALS_FETCHERS["ths-fin"] = _boom_fin
+        blk2 = fx.fetch_fundamentals("cn", "600519", st, t0 + 3)
+        assert blk2["state"] == "fetch_failed" and blk2["note"] == "all_failed", blk2
+    finally:
+        fx.FUNDAMENTALS_FETCHERS.clear()
+        fx.FUNDAMENTALS_FETCHERS.update(real_f)
+    # -- 情报块成功重置簇计数（sys.modules 桩替 akshare，零依赖零网络） --
+    import sys
+    import types
+    class _NewsDF:
+        def head(self, n):
+            return self
+        def iterrows(self):
+            return iter([(0, {"新闻标题": "t", "新闻内容": "c", "发布时间": "2026-10-01"})])
+    sys.modules["akshare"] = types.SimpleNamespace(stock_news_em=lambda symbol: _NewsDF())
+    try:
+        st2 = {"breakers": {"em_search": {"fails": 2, "open_until": 0}},
+               "cooldowns": {}}
+        blk = fx.fetch_news("cn", "600519", st2, t0 + 2)
+        assert blk["state"] == "available" and blk["source"] == "em-search", blk
+        assert st2["breakers"]["em_search"]["fails"] == 0, "成功取数须重置簇失败计数"
+    finally:
+        del sys.modules["akshare"]
+    print("  ok 熔断按簇计账：行情簇熔断不连坐 em_search/sina/ths；日K链跳过同簇源走腾讯")
+    print("  ok 财务回退链 fallback/all_failed · _num 百分号与 NaN · 情报块成功重置簇计数")
     evidence = {"meta": {"symbol": "TEST", "market": "cn", "code": "000001"},
                 "blocks": {"quote": {"state": "available", "price": 12.4},
                            "daily_bars": {"state": "available", "bars": bars},
