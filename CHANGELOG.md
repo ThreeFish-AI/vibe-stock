@@ -2,6 +2,15 @@
 
 本文件只登记版本级变化；条目遵循 Keep a Changelog、[SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.1.1] - 2026-10-28
+
+### Fixed
+
+- `fetch.py` `detect_market` 接受 7 位前导零 A 股输入（0601888→601888），
+  部分行情系统导出沪市代码形态不再被误拒；其余格式行为不变
+  （A 股 6 位/sh|sz 前缀、港股 4–5 位/hk 前缀/.hk 后缀、7 位非 0 开头、
+  ≥8 位仍拒绝），回归断言并入 `diagnose.py --selftest`。
+
 ## [0.1.0] - 2026-10-28
 
 ### Added
