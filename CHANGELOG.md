@@ -2,6 +2,25 @@
 
 本文件只登记版本级变化；条目遵循 Keep a Changelog、[SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.1.2] - 2026-10-28
+
+### Changed
+
+- fetch.py 熔断/冷却计账从库名改为上游服务簇（em_quote/em_search/sina/ths/qq/yf）：
+  东财行情簇故障不再连坐新闻（em_search）与财务（sina/ths）取数（2026-10-28
+  实跑实证修复）；旧库名熔断键自然过期，不迁移不删除。
+- A 股日 K 回退链补腾讯源（qq 簇 qfq）：em_quote(akshare→efinance 簇内次选)→
+  腾讯→yfinance；新浪源实测不复权，不入链。
+- fundamentals 补同花顺簇回退（stock_financial_abstract_ths，概念键与新浪源对齐）；
+  情报块成功取数同步重置所属簇失败计数。
+- references/01-evidence.md 回退链与熔断口径同步为簇粒度；chip 单簇坑位注记
+  （唯一上游=em_quote 簇+本地 JS 换算，akshare 全包无第二筹码接口）。
+
+### Added
+
+- diagnose.py selftest 增熔断按簇计账回归断言：行情簇熔断不连坐 em_search/
+  sina/ths/qq/yf；日K链 em_quote 熔断时跳过同簇两源、自腾讯源取到数据。
+
 ## [0.1.0] - 2026-10-28
 
 ### Added

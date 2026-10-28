@@ -321,6 +321,38 @@ def selftest():
     bars = [{"date": "2026-10-%02d" % d, "open": 10 + d * 0.1, "high": 10.5 + d * 0.1,
              "low": 9.8 + d * 0.1, "close": 10.2 + d * 0.1, "volume": 1000 + d * 10}
             for d in range(1, 25)]
+    # -- 熔断按簇计账回归（连坐修复；2026-10-28 实跑事故钉住） --
+    t0 = 1793200000
+    st = {"breakers": {}, "cooldowns": {}}
+    for _ in range(3):
+        fx.record(st, "em_quote", False, "connection reset", t0)
+    assert fx.source_allowed(st, "em_quote", t0 + 1) == (False, "skipped_open")
+    for c in ("em_search", "sina", "ths", "qq", "yf"):
+        assert fx.source_allowed(st, c, t0 + 1) == (True, ""), "行情簇熔断不得连坐 %s" % c
+    # 簇绑定：东财两日K源与筹码同簇（efinance 为簇内次选），腾讯/雅虎/新浪/同花顺异簇
+    assert (fx.CLUSTERS["ak-em"] == fx.CLUSTERS["ef-em"]
+            == fx.CLUSTERS["em-chip"] == "em_quote")
+    assert fx.CLUSTERS["em-search"] == "em_search"
+    assert fx.CLUSTERS["sina-fin"] == "sina" and fx.CLUSTERS["ths-fin"] == "ths"
+    assert fx.CLUSTERS["qq-tx"] == "qq" and fx.CLUSTERS["yf"] == "yf"
+    # 行为级：em_quote 熔断开启时日K链跳过同簇两源、自腾讯源取到数据
+    def _boom(m, c):
+        raise RuntimeError("em_quote down")
+    real = dict(fx.DAILY_FETCHERS)
+    try:
+        fx.DAILY_FETCHERS.update({"ak-em": _boom, "ef-em": _boom,
+                                  "qq-tx": lambda m, c: bars,
+                                  "yf": lambda m, c: bars})
+        rows, state, src, tried = fx.fetch_daily_bars("cn", "601888", st, t0 + 1)
+        # 存量语义：skipped_open 不计 first_fail，同簇源熔断跳过后备选源取到仍标 available
+        assert state == "available" and src == "qq-tx" and len(rows) == len(bars)
+        assert [t[1] for t in tried] == ["skipped_open", "skipped_open"], tried
+        # 成功重置簇计数：qq 成功后同簇再失败不残留 em_quote 旧计数以外的状态
+        assert st["breakers"]["qq"]["fails"] == 0
+    finally:
+        fx.DAILY_FETCHERS.clear()
+        fx.DAILY_FETCHERS.update(real)
+    print("  ok 熔断按簇计账：行情簇熔断不连坐 em_search/sina/ths；日K链跳过同簇源走腾讯")
     evidence = {"meta": {"symbol": "TEST", "market": "cn", "code": "000001"},
                 "blocks": {"quote": {"state": "available", "price": 12.4},
                            "daily_bars": {"state": "available", "bars": bars},

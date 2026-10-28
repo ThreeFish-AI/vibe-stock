@@ -2,10 +2,12 @@
 """fetch.py · vibe-stock 证据取数层（蓝本：DSA data_provider 多源回退链）。
 
 机制（与 references/01-evidence.md 同源）：
-  - 市场分流：A 股链 akshare → efinance → yfinance；港股链 akshare → yfinance。
+  - 市场分流：A 股链 em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq)→yfinance；
+    港股链 em_quote(akshare)→yfinance。
   - 回退链逐源尝试；任一成功即继续，状态标 available/fallback。
-  - 熔断：单源连续 3 次失败停 300s（半开放行单次探测）；连接失败冷却 15s。
-    状态持久化在 ~/.vibe-stock/fetch_state.json（真实时钟，秒）。
+  - 熔断：按上游服务簇（非库名）计账，单簇连续 3 次失败停 300s（半开放行单次
+    探测）；连接失败冷却 15s。状态持久化在 ~/.vibe-stock/fetch_state.json
+    （真实时钟，秒）；旧库名键自然过期，不迁移不删除。
   - 八态标注：每个数据块独立标 available/missing/not_supported/fallback/stale/
     estimated/partial/fetch_failed——缺什么写什么，绝不静默消失。
   - 技术指标（MA/RSI/MACD/量比等）由日 K 纯标准库推导，不依赖三方库。
@@ -36,9 +38,23 @@ CONN_COOLDOWN = 15
 BARS_WINDOW = 250
 STALE_DAYS = {"quote": 1, "daily_bars": 5, "news": 3, "fundamentals": 120, "chip": 5}
 
+# 上游服务簇（熔断/冷却计账粒度）：同簇共享故障域，键为取数源名、值为簇名。
+# akshare 单库内含多簇上游（东财行情/东财搜索/新浪/同花顺/腾讯），按库名计账
+# 会让东财行情簇故障连坐 em_search/sina/ths 存活源（2026-10-28 实跑实证）。
+CLUSTERS = {
+    "ak-em": "em_quote",     # 东财行情簇 · akshare 日K
+    "ef-em": "em_quote",     # 东财行情簇 · efinance 日K（簇内次选，同端点冗余）
+    "em-chip": "em_quote",   # 东财行情簇 · 筹码（akshare 内无第二筹码接口）
+    "em-search": "em_search",  # 东财搜索簇 · 逐股新闻（独立于行情簇）
+    "sina-fin": "sina",      # 新浪簇 · 财务指标（首选）
+    "ths-fin": "ths",        # 同花顺簇 · 财务摘要（回退）
+    "qq-tx": "qq",           # 腾讯行情簇 · qfq 日K
+    "yf": "yf",              # Yahoo Finance
+}
+
 CHAINS = {
-    "cn": ["akshare", "efinance", "yfinance"],
-    "hk": ["akshare", "yfinance"],
+    "cn": ["ak-em", "ef-em", "qq-tx", "yf"],
+    "hk": ["ak-em", "yf"],
 }
 
 
@@ -125,6 +141,22 @@ def _daily_via_efinance(market, code):
     return rows
 
 
+def _daily_via_tencent(market, code):
+    """腾讯行情簇（proxy.finance.qq.com）：qfq 日K，与东财行情簇独立故障域。
+
+    新浪 stock_zh_a_daily 实测不复权，禁入链（不复权数据不得混入 qfq 链）。
+    """
+    import akshare as ak  # noqa: 延迟导入，缺库不致命
+    pfx = "sh" if code.startswith(("6", "9", "5")) else "sz"
+    start = (dt.date.today() - dt.timedelta(days=600)).strftime("%Y%m%d")
+    end = dt.date.today().strftime("%Y%m%d")
+    df = ak.stock_zh_a_hist_tx(symbol=pfx + code, start_date=start,
+                               end_date=end, adjust="qfq")
+    return [{"date": str(r["date"]), "open": float(r["open"]), "high": float(r["high"]),
+             "low": float(r["low"]), "close": float(r["close"]),
+             "volume": float(r["volume"])} for _, r in df.tail(BARS_WINDOW).iterrows()]
+
+
 def _daily_via_yfinance(market, code):
     import yfinance
     tk = yfinance.Ticker(yf_ticker(market, code))
@@ -134,16 +166,18 @@ def _daily_via_yfinance(market, code):
              "volume": float(r.Volume)} for i, r in df.tail(BARS_WINDOW).iterrows()]
 
 
-DAILY_FETCHERS = {"akshare": _daily_via_akshare,
-                  "efinance": _daily_via_efinance,
-                  "yfinance": _daily_via_yfinance}
+DAILY_FETCHERS = {"ak-em": _daily_via_akshare,
+                  "ef-em": _daily_via_efinance,
+                  "qq-tx": _daily_via_tencent,
+                  "yf": _daily_via_yfinance}
 
 
 def fetch_daily_bars(market, code, st, now):
     """回退链取日 K。返回 (rows, state, source, tried)。全链失败 → fetch_failed。"""
     tried, first_fail = [], None
     for name in CHAINS[market]:
-        ok, why = source_allowed(st, name, now)
+        cluster = CLUSTERS[name]
+        ok, why = source_allowed(st, cluster, now)
         if not ok:
             tried.append((name, why))
             continue
@@ -151,14 +185,14 @@ def fetch_daily_bars(market, code, st, now):
             rows = DAILY_FETCHERS[name](market, code)
             if not rows:
                 raise ValueError("empty bars")
-            record(st, name, True, "", now)
+            record(st, cluster, True, "", now)
             state = "available" if first_fail is None else "fallback"
             return rows, state, name, tried
         except ImportError as e:
             tried.append((name, "import_missing"))
             first_fail = first_fail or name  # 缺库不记熔断（环境问题非源问题）
         except Exception as e:
-            record(st, name, False, str(e), now)
+            record(st, cluster, False, str(e), now)
             tried.append((name, "fail: %s" % type(e).__name__))
             first_fail = first_fail or name
     return [], "fetch_failed", "", tried
@@ -224,77 +258,111 @@ def derive_technical(bars):
 
 
 def fetch_news(market, code, st, now):
-    """新闻块：A 股 akshare；港股 not_supported（v1 诚实标注）。"""
+    """新闻块：A 股 em_search 簇（独立计账，行情簇熔断不连坐）；
+    港股 not_supported（v1 诚实标注）。"""
     if market == "hk":
         return {"state": "not_supported", "source": "",
                 "note": "港股新闻源 v1 未接入"}
-    ok, why = source_allowed(st, "akshare", now)
+    cluster = CLUSTERS["em-search"]
+    ok, why = source_allowed(st, cluster, now)
     if not ok:
-        return {"state": "fetch_failed", "source": "akshare", "note": why}
+        return {"state": "fetch_failed", "source": "em-search", "note": why}
     try:
         import akshare as ak
         df = ak.stock_news_em(symbol=code)
         items = [{"title": str(r["新闻标题"]), "content": str(r["新闻内容"])[:200],
                   "time": str(r["发布时间"])} for _, r in df.head(10).iterrows()]
-        return {"state": "available", "source": "akshare", "items": items}
+        record(st, cluster, True, "", now)
+        return {"state": "available", "source": "em-search", "items": items}
     except ImportError:
-        return {"state": "fetch_failed", "source": "akshare", "note": "import_missing"}
+        return {"state": "fetch_failed", "source": "em-search", "note": "import_missing"}
     except Exception as e:
-        record(st, "akshare", False, str(e), now)
-        return {"state": "fetch_failed", "source": "akshare",
+        record(st, cluster, False, str(e), now)
+        return {"state": "fetch_failed", "source": "em-search",
                 "note": type(e).__name__}
+
+
+def _fund_via_sina(code):
+    """新浪簇财务指标（首选）：值为 float，概念键四项。"""
+    import akshare as ak
+    df = ak.stock_financial_analysis_indicator(symbol=code, start_year="2024")
+    row = df.iloc[-1] if len(df) else {}
+    keys = ["净资产收益率(%)", "每股收益(元)", "主营业务收入增长率(%)",
+            "资产负债率(%)"]
+    return {k: (None if k not in row else _num(row[k])) for k in keys}
+
+
+def _fund_via_ths(code):
+    """同花顺簇财务摘要（回退）：值为带 %/亿 的字符串，概念映射到与新浪源同名键。"""
+    import akshare as ak
+    df = ak.stock_financial_abstract_ths(symbol=code, indicator="按报告期")
+    row = df.iloc[-1] if len(df) else {}
+    mapping = {"净资产收益率(%)": "净资产收益率", "每股收益(元)": "基本每股收益",
+               "主营业务收入增长率(%)": "营业总收入同比增长率",
+               "资产负债率(%)": "资产负债率"}
+    return {k: (None if c not in row else _num(row[c])) for k, c in mapping.items()}
+
+
+FUNDAMENTALS_FETCHERS = {"sina-fin": _fund_via_sina, "ths-fin": _fund_via_ths}
 
 
 def fetch_fundamentals(market, code, st, now):
+    """财务指标：sina 簇 → ths 簇回退（簇级计账，任一簇熔断不牵连另一簇）。"""
     if market == "hk":
         return {"state": "not_supported", "source": "",
                 "note": "港股财务指标 v1 未接入"}
-    ok, why = source_allowed(st, "akshare", now)
-    if not ok:
-        return {"state": "fetch_failed", "source": "akshare", "note": why}
-    try:
-        import akshare as ak
-        df = ak.stock_financial_analysis_indicator(symbol=code, start_year="2024")
-        row = df.iloc[-1] if len(df) else {}
-        keys = ["净资产收益率(%)", "每股收益(元)", "主营业务收入增长率(%)",
-                "资产负债率(%)"]
-        return {"state": "available", "source": "akshare",
-                "data": {k: (None if k not in row else _num(row[k])) for k in keys}}
-    except ImportError:
-        return {"state": "fetch_failed", "source": "akshare", "note": "import_missing"}
-    except Exception as e:
-        record(st, "akshare", False, str(e), now)
-        return {"state": "fetch_failed", "source": "akshare",
-                "note": type(e).__name__}
+    tried = []
+    for name in FUNDAMENTALS_FETCHERS:
+        cluster = CLUSTERS[name]
+        ok, why = source_allowed(st, cluster, now)
+        if not ok:
+            tried.append((name, why))
+            continue
+        try:
+            data = FUNDAMENTALS_FETCHERS[name](code)
+            if not any(v is not None for v in data.values()):
+                raise ValueError("empty fundamentals")
+            record(st, cluster, True, "", now)
+            state = "available" if not tried else "fallback"
+            return {"state": state, "source": name, "data": data, "tried": tried}
+        except ImportError:
+            tried.append((name, "import_missing"))  # 缺库不记熔断（环境问题非源问题）
+        except Exception as e:
+            record(st, cluster, False, str(e), now)
+            tried.append((name, "fail: %s" % type(e).__name__))
+    return {"state": "fetch_failed", "source": "", "note": "all_failed", "tried": tried}
 
 
 def _num(v):
     try:
-        return float(str(v).replace(",", "").replace("--", "nan"))
+        return float(str(v).replace(",", "").replace("%", "").replace("--", "nan"))
     except Exception:
         return None
 
 
 def fetch_chip(market, code, st, now):
-    """筹码分布：A 股专属，港股 not_supported（能力差异摆到明面上）。"""
+    """筹码分布：A 股专属（唯一上游=em_quote 簇+本地 JS 换算，akshare 全包无第二
+    筹码接口——如实 fetch_failed，不虚构）；港股 not_supported（能力差异摆到明面上）。"""
     if market == "hk":
         return {"state": "not_supported", "source": "",
                 "note": "筹码数据仅 A 股"}
-    ok, why = source_allowed(st, "akshare", now)
+    cluster = CLUSTERS["em-chip"]
+    ok, why = source_allowed(st, cluster, now)
     if not ok:
-        return {"state": "fetch_failed", "source": "akshare", "note": why}
+        return {"state": "fetch_failed", "source": "em-chip", "note": why}
     try:
         import akshare as ak
         df = ak.stock_cyq_em(symbol=code, adjust="qfq")
         row = df.iloc[-1] if len(df) else {}
         keys = ["获利比例", "平均成本", "90成本-低", "90成本-高"]
-        return {"state": "available", "source": "akshare",
+        record(st, cluster, True, "", now)
+        return {"state": "available", "source": "em-chip",
                 "data": {k: (None if k not in row else _num(row[k])) for k in keys}}
     except ImportError:
-        return {"state": "fetch_failed", "source": "akshare", "note": "import_missing"}
+        return {"state": "fetch_failed", "source": "em-chip", "note": "import_missing"}
     except Exception as e:
-        record(st, "akshare", False, str(e), now)
-        return {"state": "fetch_failed", "source": "akshare",
+        record(st, cluster, False, str(e), now)
+        return {"state": "fetch_failed", "source": "em-chip",
                 "note": type(e).__name__}
 
 
