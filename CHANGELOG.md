@@ -2,6 +2,20 @@
 
 本文件只登记版本级变化；条目遵循 Keep a Changelog、[SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.1.3] - 2026-10-28
+
+### Fixed
+
+- 北交所代码（43/83/87/92 号段）交易所分流修正：新增 `cn_exchange` 统一判定
+  （bj/sh/sz），Yahoo 后缀与腾讯源共用；腾讯源对北交所显式拒绝（2026-10-28
+  实测：bj 前缀被拒、误挂 sz 亦无数据），拒绝走专用 `NotSupportedSymbol` 异常
+  按 not_supported 记轨迹——确定性不覆盖不计熔断、不连坐他股腾讯回退；Yahoo
+  `.BJ` 暂无数据则如实 fetch_failed；em 源走 akshare 既有 secid 规则
+  （`0.830799`），待东财行情簇恢复后实网复核北交所取数。`detect_market` 收
+  bj 前缀形态（bj830799，与 sh/sz 对称）；references/01-evidence.md 回退链
+  口径同步北交所坑位。回归断言并入 `diagnose.py --selftest`（87/5 号段、
+  .SS/.SZ 后缀、不覆盖不计熔断）。
+
 ## [0.1.2] - 2026-10-28
 
 ### Changed
