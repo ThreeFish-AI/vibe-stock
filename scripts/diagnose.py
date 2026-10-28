@@ -318,6 +318,24 @@ def selftest():
     import tempfile
     import adjudicate as aj
     print("== diagnose selftest（零网络合成链路） ==")
+    # 市场分流回归（fetch.detect_market 唯一定义处）
+    cases = {"0601888": ("cn", "601888"), "600519": ("cn", "600519"),
+             "sh600519": ("cn", "600519"), "sz000001": ("cn", "000001"),
+             "000001": ("cn", "000001"),   # 裸 6 位 0 开头深市码：不得被剥零闸门误吞
+             "0000001": ("cn", "000001"),  # 7 位剥后仍 0 开头，须继续走 cn 分支
+             "0000700": ("cn", "000700"),  # 深市 7 位前导零形态同享剥零
+             "00700": ("hk", "00700"), "hk00700": ("hk", "00700"),
+             "0700.HK": ("hk", "0700"), "01888": ("hk", "01888")}
+    for s, want in cases.items():
+        got = fx.detect_market(s)
+        assert got == want, "detect_market(%r)=%r 期望 %r" % (s, got, want)
+    for s in ("1234567", "00601888", "abc"):
+        try:
+            fx.detect_market(s)
+            raise AssertionError("detect_market(%r) 应拒绝" % s)
+        except SystemExit:
+            pass
+    print("  ok detect_market：7 位前导零剥零 · A/港既有形态 · 边界拒绝")
     bars = [{"date": "2026-10-%02d" % d, "open": 10 + d * 0.1, "high": 10.5 + d * 0.1,
              "low": 9.8 + d * 0.1, "close": 10.2 + d * 0.1, "volume": 1000 + d * 10}
             for d in range(1, 25)]
