@@ -270,7 +270,7 @@ def render_report(evidence, verdict, opinions, stock):
         ("核心证据齐备（报价/日K/指标）", q["confidence_cap"] == "high"),
         ("无高严重度分歧", not any(c["severity"] == "high" for c in conflicts)),
         ("置信度 ≥ 0.5", agg["confidence"] >= CONFIDENCE_GATE),
-        ("现价未偏离 MA20 过远（±10%%）",
+        ("现价未偏离 MA20 过远（±10%）",
          ma20 and price and abs(price / ma20 - 1) <= 0.10),
     ]
     for name, ok in checks:
