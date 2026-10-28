@@ -46,7 +46,7 @@ CHAINS = {
 
 def detect_market(symbol):
     s = symbol.strip().lower()
-    if re.fullmatch(r"0\d{6}", s):  # 7 位前导零沪市导出形态剥一个 0 再分流
+    if re.fullmatch(r"0\d{6}", s):  # 7 位前导零 A 股导出形态（沪/深均可能）剥一个 0 再分流
         s = s[1:]
     if re.fullmatch(r"(sh|sz)?\d{6}", s):
         return "cn", re.sub(r"^(sh|sz)", "", s)
