@@ -42,7 +42,7 @@
   同端点冗余，簇熔断开启时两源一并跳过)→qq(腾讯 qfq)→yfinance，fundamentals 链
   sina→ths；坑位：新浪 stock_zh_a_daily 实测不复权，不入链（不复权数据禁混入
   qfq 链）；news=em_search、chip=em_quote 天然单源，失败如实 fetch_failed。
-- **熔断**：持续失败——单源连续 3 败停 300s（半开放行单次探测）；状态持久化
+- **熔断**：持续失败——单簇连续 3 败停 300s（半开放行单次探测）；状态持久化
   `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（em_quote/
   em_search/sina/ths/qq/yf——akshare 单库内含多簇上游，同簇共享故障域）；坑位：
   按库名计账会让东财行情簇故障连坐 em_search/sina/ths 存活源（2026-10-28 实跑
