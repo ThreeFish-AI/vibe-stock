@@ -24,7 +24,7 @@
 | 块 | 权重 | A 股来源（簇口径） | 港股来源 |
 | --- | --- | --- | --- |
 | quote | 25 | 日 K 推导（或源实时） | 同左 |
-| daily_bars | 25 | em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq)→yfinance | em_quote(akshare)→yfinance |
+| daily_bars | 25 | em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq，不含北交所)→yfinance | em_quote(akshare)→yfinance |
 | technical | 25 | 由日 K 纯标准库推导（MA/RSI/MACD/量比/52 周位置） | 同左 |
 | news | 10 | em_search（东财搜索，独立计账） | not_supported（v1） |
 | fundamentals | 10 | sina(财务指标)→ths(财务摘要) | not_supported（v1） |
@@ -41,7 +41,11 @@
   多簇可选；做法：A 股日K链 em_quote(akshare→efinance，efinance 为簇内次选——
   同端点冗余，簇熔断开启时两源一并跳过)→qq(腾讯 qfq)→yfinance，fundamentals 链
   sina→ths；坑位：新浪 stock_zh_a_daily 实测不复权，不入链（不复权数据禁混入
-  qfq 链）；news=em_search、chip=em_quote 天然单源，失败如实 fetch_failed。
+  qfq 链）；腾讯源不覆盖北交所（43/83/87/92 号段，2026-10-28 实测 bj 前缀被端点
+  拒、误挂 sz 亦无数据），显式拒绝属确定性不覆盖（not_supported，不记熔断不连坐
+  他股），该跳必败落 yf(.BJ) 兜底、暂无数据则如实 fetch_failed，北交所 em 系源走
+  akshare/efinance 既有 secid 规则；news=em_search、chip=em_quote 天然单源，
+  失败如实 fetch_failed。
 - **熔断**：持续失败——单簇连续 3 败停 300s（半开放行单次探测）；状态持久化
   `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（em_quote/
   em_search/sina/ths/qq/yf——akshare 单库内含多簇上游，同簇共享故障域）；坑位：

@@ -2,8 +2,9 @@
 """fetch.py · vibe-stock 证据取数层（蓝本：DSA data_provider 多源回退链）。
 
 机制（与 references/01-evidence.md 同源）：
-  - 市场分流：A 股链 em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq)→yfinance；
-    港股链 em_quote(akshare)→yfinance。
+  - 市场分流：A 股链 em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq)→yfinance
+    （腾讯源不含北交所 43/83/87/92 号段，显式拒绝落 yf .BJ 兜底）；港股链
+    em_quote(akshare)→yfinance。
   - 回退链逐源尝试；任一成功即继续，状态标 available/fallback。
   - 熔断：按上游服务簇（非库名）计账，单簇连续 3 次失败停 300s（半开放行单次
     探测）；连接失败冷却 15s。状态持久化在 ~/.vibe-stock/fetch_state.json
@@ -64,12 +65,12 @@ def detect_market(symbol):
     s = symbol.strip().lower()
     if re.fullmatch(r"0\d{6}", s):  # 7 位前导零 A 股导出形态（沪/深均可能）剥一个 0 再分流
         s = s[1:]
-    if re.fullmatch(r"(sh|sz)?\d{6}", s):
-        return "cn", re.sub(r"^(sh|sz)", "", s)
+    if re.fullmatch(r"(sh|sz|bj)?\d{6}", s):
+        return "cn", re.sub(r"^(sh|sz|bj)", "", s)
     m = re.fullmatch(r"(?:hk)?(\d{4,5})(?:\.hk)?", s)
     if m:
         return "hk", m.group(1)
-    raise SystemExit("无法识别市场，示例：600519 / 0601888 / sz000001 / hk00700 / 0700.HK")
+    raise SystemExit("无法识别市场，示例：600519 / 0601888 / sz000001 / bj830799 / hk00700 / 0700.HK")
 
 
 def cn_exchange(code):
@@ -78,6 +79,11 @@ def cn_exchange(code):
     if code.startswith(("43", "83", "87", "92")):
         return "bj"
     return "sh" if code.startswith(("6", "9", "5")) else "sz"
+
+
+class NotSupportedSymbol(ValueError):
+    """源不覆盖该标的（如腾讯源无北交所行情）——确定性能力边界拒绝，
+    非源健康故障：链上按 not_supported 记轨迹，不计熔断、不连坐他股。"""
 
 
 def yf_ticker(market, code):
@@ -163,7 +169,7 @@ def _daily_via_tencent(market, code):
         # 2026-10-28 实测：腾讯端点 bj 前缀被拒、误挂 sz 亦无数据——显式拒绝
         # （置于 import 之前，零依赖环境可测）；链上由 yf(.BJ，暂无数据则
         # 如实 fetch_failed) 兜底，不静默错挂。
-        raise ValueError("北交所无腾讯行情数据")
+        raise NotSupportedSymbol("北交所无腾讯行情数据")
     import akshare as ak  # noqa: 延迟导入，缺库不致命
     start = (dt.date.today() - dt.timedelta(days=600)).strftime("%Y%m%d")
     end = dt.date.today().strftime("%Y%m%d")
@@ -209,6 +215,9 @@ def fetch_daily_bars(market, code, st, now):
             return rows, state, name, tried
         except ImportError as e:
             tried.append((name, "import_missing"))  # 缺库不记熔断（环境问题非源问题）
+        except NotSupportedSymbol:
+            # 源不覆盖该标的不记熔断（标的问题非源健康问题，重试永不成功）
+            tried.append((name, "not_supported"))
         except Exception as e:
             record(st, cluster, False, str(e), now)
             tried.append((name, "fail: %s" % type(e).__name__))

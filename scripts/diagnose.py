@@ -321,6 +321,7 @@ def selftest():
     # 市场分流回归（fetch.detect_market 唯一定义处）
     cases = {"0601888": ("cn", "601888"), "600519": ("cn", "600519"),
              "sh600519": ("cn", "600519"), "sz000001": ("cn", "000001"),
+             "bj830799": ("cn", "830799"),  # 北交所前缀形态与 sh/sz 对称收下
              "000001": ("cn", "000001"),   # 裸 6 位 0 开头深市码：不得被剥零闸门误吞
              "0000001": ("cn", "000001"),  # 7 位剥后仍 0 开头，须继续走 cn 分支
              "0000700": ("cn", "000700"),  # 深市 7 位前导零形态同享剥零
@@ -337,17 +338,21 @@ def selftest():
             pass
     print("  ok detect_market：7 位前导零剥零 · A/港既有形态 · 边界拒绝")
     # 交易所分流回归（fetch.cn_exchange 唯一判定处；北交所边界 2026-10-28 实测钉住）
-    ex = {"600519": "sh", "900901": "sh", "000001": "sz", "300750": "sz",
-          "830799": "bj", "920002": "bj", "430047": "bj"}
+    ex = {"600519": "sh", "900901": "sh", "510300": "sh", "000001": "sz", "300750": "sz",
+          "830799": "bj", "920002": "bj", "430047": "bj", "870357": "bj"}
     for c, want in ex.items():
-        assert fx.cn_exchange(c) == want, "cn_exchange(%r) 期望 %r" % (c, want)
-    assert fx.yf_ticker("cn", "830799") == "830799.BJ"
+        got = fx.cn_exchange(c)
+        assert got == want, "cn_exchange(%r)=%r 期望 %r" % (c, got, want)
+    for c, want in (("830799", "830799.BJ"), ("600519", "600519.SS"),
+                    ("000001", "000001.SZ")):
+        got = fx.yf_ticker("cn", c)
+        assert got == want, "yf_ticker(cn, %r)=%r 期望 %r" % (c, got, want)
     try:
         fx._daily_via_tencent("cn", "830799")  # 守卫先于网络调用，零网络可达
         raise AssertionError("北交所应显式拒绝腾讯源")
-    except ValueError:
+    except fx.NotSupportedSymbol:
         pass
-    print("  ok cn_exchange：bj/sh/sz 号段 · Yahoo .BJ · 腾讯源显式拒北交所")
+    print("  ok cn_exchange：bj/sh/sz 号段（含 87/5 前缀）· Yahoo .BJ/.SS/.SZ · 腾讯源显式拒北交所")
     bars = [{"date": "2026-10-%02d" % d, "open": 10 + d * 0.1, "high": 10.5 + d * 0.1,
              "low": 9.8 + d * 0.1, "close": 10.2 + d * 0.1, "volume": 1000 + d * 10}
             for d in range(1, 25)]
@@ -382,6 +387,19 @@ def selftest():
     finally:
         fx.DAILY_FETCHERS.clear()
         fx.DAILY_FETCHERS.update(real)
+    # 行为级：北交所腾讯拒绝是「不覆盖」而非源故障——不记熔断、不连坐他股
+    st2 = {"breakers": {}, "cooldowns": {}}
+    real2 = dict(fx.DAILY_FETCHERS)
+    try:
+        fx.DAILY_FETCHERS.update({"ak-em": _boom, "ef-em": _boom, "yf": _boom})
+        rows, state, src, tried = fx.fetch_daily_bars("cn", "830799", st2, t0 + 1)
+        assert state == "fetch_failed" and src == "" and not rows
+        assert ("qq-tx", "not_supported") in tried, tried
+        assert "qq" not in st2["breakers"], "源不覆盖不得计入 qq 簇熔断"
+        assert fx.source_allowed(st2, "qq", t0 + 1) == (True, "")
+    finally:
+        fx.DAILY_FETCHERS.clear()
+        fx.DAILY_FETCHERS.update(real2)
     # -- 财务回退链与清洗守卫（sina→ths；空值/NaN 占位不算成功） --
     import math
     assert fx._num("7.89%") == 7.89 and math.isnan(fx._num("--"))
