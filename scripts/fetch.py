@@ -910,19 +910,25 @@ def fetch_forecast(market, code, st, now):
     if market == "hk":
         return {"state": "not_supported", "source": "", "note": "A 股专属"}
     try:
-        rows = _dc_rows("RPT_PUBLIC_OP_NEWPREDICT", code, st, now, "dc-forecast",
-                        sort="&sortColumns=NOTICE_DATE&sortTypes=-1")
+        rows = _dc_rows("RPT_PUBLIC_OP_NEWPREDICT", code, st, now, "dc-forecast")
         pf = None
-        if rows:
-            r = rows[0]
-            pf = {"report_date": str(r.get("REPORT_DATE", ""))[:10],
-                  "predict_type": r.get("PREDICT_TYPE"),
-                  "content": str(r.get("PREDICT_CONTENT", ""))[:120],
-                  "amt_lower_yi": _num(r.get("PREDICT_AMT_LOWER")),
-                  "amt_upper_yi": _num(r.get("PREDICT_AMT_UPPER")),
-                  "ratio_lower_pct": _num(r.get("PREDICT_RATIO_LOWER")),
-                  "ratio_upper_pct": _num(r.get("PREDICT_RATIO_UPPER")),
-                  "notice_date": str(r.get("NOTICE_DATE", ""))[:10]}
+        # 预告时效（无条件全局规则）：陈旧预告（>18 个月）视同无预告——大盘蓝筹
+        # 常年不发预告，残留在库的多年前预告进包只有误导。PREDICT_AMT 单位万元。
+        cutoff = (dt.date.today() - dt.timedelta(days=550)).isoformat()
+        for r in rows or []:
+            nd = str(r.get("NOTICE_DATE", ""))[:10]
+            if nd >= cutoff:
+                pf = {"report_date": str(r.get("REPORT_DATE", ""))[:10],
+                      "predict_type": r.get("PREDICT_TYPE"),
+                      "content": str(r.get("PREDICT_CONTENT", ""))[:120],
+                      "amt_lower_yi": (lambda v: None if v is None else round(v / 1e4, 2))(
+                          _num(r.get("PREDICT_AMT_LOWER"))),
+                      "amt_upper_yi": (lambda v: None if v is None else round(v / 1e4, 2))(
+                          _num(r.get("PREDICT_AMT_UPPER"))),
+                      "ratio_lower_pct": _num(r.get("PREDICT_RATIO_LOWER")),
+                      "ratio_upper_pct": _num(r.get("PREDICT_RATIO_UPPER")),
+                      "notice_date": nd}
+                break
         rows2 = _dc_rows("RPT_PUBLIC_BS_APPOIN", code, st, now, "dc-forecast",
                          sort="&sortColumns=FIRST_APPOINT_DATE&sortTypes=-1")
         nd = None
