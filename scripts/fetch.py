@@ -72,10 +72,18 @@ def detect_market(symbol):
     raise SystemExit("无法识别市场，示例：600519 / 0601888 / sz000001 / hk00700 / 0700.HK")
 
 
+def cn_exchange(code):
+    """A 股交易所分流（唯一判定处）：北交所 43/83/87/92 号段，沪 6/9(B 股
+    900)/5，其余深。腾讯源与 Yahoo 后缀共用，勿各写一份前缀规则。"""
+    if code.startswith(("43", "83", "87", "92")):
+        return "bj"
+    return "sh" if code.startswith(("6", "9", "5")) else "sz"
+
+
 def yf_ticker(market, code):
     if market == "hk":
         return str(int(code)).zfill(4) + ".HK"  # Yahoo 港码 4 位：00700→0700.HK
-    return code + (".SS" if code.startswith(("6", "9", "5")) else ".SZ")
+    return code + {"bj": ".BJ", "sh": ".SS", "sz": ".SZ"}[cn_exchange(code)]
 
 
 # ---------------------------------------------------------------- 熔断与冷却（持久化）
@@ -150,8 +158,13 @@ def _daily_via_tencent(market, code):
     volume 列要求 akshare ≥2025-10 版；单位为股（em 系源为手），仅用于源内
     比值 vol_ratio_5，单位相消。
     """
+    pfx = cn_exchange(code)
+    if pfx == "bj":
+        # 2026-10-28 实测：腾讯端点 bj 前缀被拒、误挂 sz 亦无数据——显式拒绝
+        # （置于 import 之前，零依赖环境可测）；链上由 yf(.BJ，暂无数据则
+        # 如实 fetch_failed) 兜底，不静默错挂。
+        raise ValueError("北交所无腾讯行情数据")
     import akshare as ak  # noqa: 延迟导入，缺库不致命
-    pfx = "sh" if code.startswith(("6", "9", "5")) else "sz"
     start = (dt.date.today() - dt.timedelta(days=600)).strftime("%Y%m%d")
     end = dt.date.today().strftime("%Y%m%d")
     df = ak.stock_zh_a_hist_tx(symbol=pfx + code, start_date=start,

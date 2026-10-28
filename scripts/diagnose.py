@@ -336,6 +336,18 @@ def selftest():
         except SystemExit:
             pass
     print("  ok detect_market：7 位前导零剥零 · A/港既有形态 · 边界拒绝")
+    # 交易所分流回归（fetch.cn_exchange 唯一判定处；北交所边界 2026-10-28 实测钉住）
+    ex = {"600519": "sh", "900901": "sh", "000001": "sz", "300750": "sz",
+          "830799": "bj", "920002": "bj", "430047": "bj"}
+    for c, want in ex.items():
+        assert fx.cn_exchange(c) == want, "cn_exchange(%r) 期望 %r" % (c, want)
+    assert fx.yf_ticker("cn", "830799") == "830799.BJ"
+    try:
+        fx._daily_via_tencent("cn", "830799")  # 守卫先于网络调用，零网络可达
+        raise AssertionError("北交所应显式拒绝腾讯源")
+    except ValueError:
+        pass
+    print("  ok cn_exchange：bj/sh/sz 号段 · Yahoo .BJ · 腾讯源显式拒北交所")
     bars = [{"date": "2026-10-%02d" % d, "open": 10 + d * 0.1, "high": 10.5 + d * 0.1,
              "low": 9.8 + d * 0.1, "close": 10.2 + d * 0.1, "volume": 1000 + d * 10}
             for d in range(1, 25)]
