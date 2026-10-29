@@ -23,7 +23,7 @@
 
 | 块 | 权重 | A 股来源（簇口径） | 港股来源 |
 | --- | --- | --- | --- |
-| quote | 25 | 日 K 推导（或源实时） | 同左 |
+| quote | 25 | 日 K 推导（或源实时） | 日 K 推导（无实时叠加） |
 | daily_bars | 25 | em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq，不含北交所)→yfinance | em_quote(akshare)→yfinance |
 | technical | 25 | 由日 K 纯标准库推导（MA/RSI/MACD/量比/52 周位置） | 同左 |
 | news | 10 | em_search→qq_news（腾讯资讯）→sina_flow（个股资讯页）；港股 qq_news 单源 | qq_news（腾讯资讯） |
@@ -106,6 +106,10 @@
   字段（chip 自算随之降级），绝不硬编码信任单一位序。
 - **forecast 空结果语义**：无业绩预告是事实不是失败——空结果标 available 且
   字段 null；只有网络/解析失败才 fetch_failed。
+- **空结果语义分级**（条件：扩展块取数为空时如何判级）：notices 90 天窗口可
+  合法为空（停牌/公告空窗期）——单源空不记熔断、换源交叉，双源皆空=available
+  空列表；holder 股东户数每季必有披露，空=端点异常按失败计熔断；坑位：分级
+  依据是「该数据对该标的是否必然存在」，勿把必然存在的空缺当事实放行。
 - **行业三口径**（申万/东财/同花顺）：排名数字不可跨口径混用；申万↔同花顺板块
   匹配置信不足时只给归属不带板块统计，taxonomy_note 如实标注。
 - **单厂商依赖如实标注**：forecast/unlock（em_datacenter）、research 共识

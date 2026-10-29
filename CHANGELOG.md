@@ -14,7 +14,7 @@
   三口径标注）/valuation（qt 快照+百度 5 年分位）。
 - CLUSTERS 扩容 6→15 簇，簇判定规则成文（主机/服务族粒度故障域：同厂商不同
   服务族分簇、同子域多端点合簇）。
-- 港股 news 解除 not_supported（qq_news 单源）；quote 实时叠加 qt 快照与换手率。
+- 港股 news 解除 not_supported（qq_news 单源）；quote 实时叠加 qt 快照与换手率（A 股；港股位序未验证不叠加）。
 - technical 派生扩容：20 日新高/新低、60 日箱体、近 10 日量比序列、K 线形态、
   连续收涨天数、MACD hist_rising——修复 pack 只渲染收盘价导致 volume_breakout/
   box_oscillation/bottom_volume 等策略判据失明的消费矩阵缺陷。
@@ -41,6 +41,7 @@
   estimated 如实），em_quote 源降为复活回退位；volume 手/股单位按源判定。
 - datacenter 侧 RPT_HOLDERNUM_DET 数据集停在 2022（服务端排序亦不生效），
   股东户数事实源切 emweb F10 gdrs。
+
 ## [0.1.3] - 2026-10-28
 
 ### Fixed

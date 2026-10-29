@@ -30,4 +30,5 @@ instructions: |
   - 事件源全缺（notices/forecast/research/news 均不可用）或 fundamentals
     缺失 → 本策略只能 hold 并注明证据缺失（缺证据不出方向意见）；news 单独
     缺失而结构化源在 → 置信降一档并注明。
-  - 利空事件 + 基本面同向恶化 → sell。
+  - 利空/风险向事件不出方向票：只作为 risk.json downgrade/veto 线索移交
+    风险角色（与判定 1 的分流口径一致，勿在本策略投 sell）。

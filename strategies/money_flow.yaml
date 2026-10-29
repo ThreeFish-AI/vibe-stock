@@ -26,5 +26,6 @@ instructions: |
   评分调整：
   - 连续净流入 + 价格企稳 → buy（置信 0.65–0.75）。
   - 高位连续净流出 → sell（置信 0.6–0.7）。
-  - moneyflow 块缺失（fetch_failed/missing）→ 本策略只能 hold 并注明
-    「证据缺失」（缺证据不出方向意见）。
+  - moneyflow 非 available/fallback（fetch_failed/missing/not_supported/stale，
+    如北交所全零序列=not_supported、序列止于 10 自然日前=stale）→ 本策略
+    只能 hold 并注明「证据缺失」（缺证据不出方向意见）。
