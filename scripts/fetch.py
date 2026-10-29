@@ -38,9 +38,10 @@ BREAKER_FAILS, BREAKER_COOLDOWN = 3, 300
 CONN_COOLDOWN = 15
 BARS_WINDOW = 250
 STALE_DAYS = {"quote": 1, "daily_bars": 5, "news": 3, "fundamentals": 120,
-              "chip": 5, "moneyflow": 1, "notices": 1, "research": 30,
+              "chip": 5, "moneyflow": 10, "notices": 1, "research": 30,
               "forecast": 1, "unlock": 1, "holder": 7, "market": 1,
-              "industry": 1, "valuation": 1}  # 声明式口径（过期判级参照）
+              "industry": 1, "valuation": 1}  # 声明式口径（过期判级参照；
+              # moneyflow 为自然日口径且被 fetch_moneyflow 新鲜度门消费）
 
 # 上游服务簇（熔断/冷却计账粒度）：同簇共享故障域，键为取数源名、值为簇名。
 # 簇判定规则：簇=主机/服务族粒度的故障域——同厂商不同服务族分簇（东财先例：
@@ -63,7 +64,6 @@ CLUSTERS = {
     "dc-respredict": "em_datacenter",   # 评级共识+目标价（datacenter-web 直连）
     "dc-forecast": "em_datacenter",     # 业绩预告+披露日历（同簇两条 reportName）
     "dc-unlock": "em_datacenter",       # 解禁批次
-    "dc-holder": "em_datacenter",       # 股东户数
     "sina-flow": "sina_flow",   # 新浪行情流量簇 · 资金流/个股资讯/申万归属（vip.stock 子域）
     "sina-news": "sina_flow",   # 新闻第三源（同子域，共担熔断）
     "sina-industry": "sina_flow",  # 申万行业归属（同子域）
@@ -181,6 +181,10 @@ def _parse_qt_full(text):
     绝不硬编码信任单一位序。"""
     body = text[text.index('"') + 1:text.rindex('"')]
     f = body.split("~")
+    if len(f) < 65:
+        # 最高消费位序 64；无效/不覆盖代码 qt 返回 none_match 短 body（无 ~
+        # 字段序），按能力边界拒绝而非源故障（不计熔断，同北交所腾讯先例）
+        raise NotSupportedSymbol("qt 快照字段数异常（%d）" % len(f))
 
     def num(i):
         try:
@@ -235,7 +239,12 @@ def _qt_batch(market, code, st, now):
         full = None
         if market == "cn":
             sym = cn_exchange(code) + code
-            full = _parse_qt_full(_http_text("https://qt.gtimg.cn/q=" + sym))
+            try:
+                full = _parse_qt_full(_http_text("https://qt.gtimg.cn/q=" + sym))
+            except NotSupportedSymbol:
+                # 标的不在 qt 覆盖：能力边界拒绝非源故障，不计熔断（quote 叠加/
+                # 股本/估值消费方自行降级），指数快照照取
+                pass
         idx = ("s_sh000001,s_sz399001,s_sz399006,s_sh000300,s_sh000688"
                if market == "cn" else "s_hkHSI,s_hkHSCEI")
         indices = _parse_qt_s(_http_text("https://qt.gtimg.cn/q=" + idx))
@@ -284,8 +293,9 @@ def _daily_via_tencent(market, code):
     """腾讯行情簇（proxy.finance.qq.com）：qfq 日K，与东财行情簇独立故障域。
 
     新浪 stock_zh_a_daily 实测不复权，禁入链（不复权数据不得混入 qfq 链）。
-    volume 列要求 akshare ≥2025-10 版；单位为股（em 系源为手），仅用于源内
-    比值 vol_ratio_5，单位相消。
+    volume 列要求 akshare ≥2025-10 版；单位为股（em 系源为手）——0.2.0 起
+    被 derive_chip（绝对量换手）与 pack OHLCV 原值渲染消费，单位口径以
+    01-evidence chip 规约句为 SSOT（判错方向会把换手率放大百倍）。
     """
     pfx = cn_exchange(code)
     if pfx == "bj":
@@ -471,7 +481,9 @@ def _news_via_qq(market, code):
         a.get("summary", ""))[:150], "time": str(a.get("time", "")),
         "src": str(a.get("src", ""))} for a in arr if a.get("title")]
     if not items:
-        raise ValueError("empty news")
+        # 标的级无覆盖（小市值/次新常态）非源故障——能力边界拒绝不计熔断，
+        # 不打死港股唯一 news 源（qq_news 单源簇）
+        raise NotSupportedSymbol("qq 无该标的新闻覆盖")
     return items[:10]
 
 
@@ -487,7 +499,7 @@ def _news_via_sina(code):
     items = [{"title": t.strip(), "content": "", "time": tm, "url": u}
              for tm, u, t in rows]
     if not items:
-        raise ValueError("empty news")
+        raise NotSupportedSymbol("sina 资讯页无该标的条目")  # 同 qq：不计熔断
     return items[:10]
 
 
@@ -512,6 +524,11 @@ def fetch_news(market, code, st, now):
             record(st, cluster, True, "", now)
             state = "available" if not tried else "fallback"
             return {"state": state, "source": name, "items": items, "tried": tried}
+        except NotSupportedSymbol:
+            # 标的级无覆盖：能力边界拒绝非源故障，不计熔断不连坐他股
+            # （同 qt none_match；终态仍如实 fetch_failed——news 为有权重核心
+            # 块，「空=available」属质量分语义变更，0.3.0 级决策不在此改）
+            tried.append((name, "not_supported"))
         except ImportError:
             tried.append((name, "import_missing"))  # 缺库不记熔断（环境问题非源问题）
         except Exception as e:
@@ -522,7 +539,7 @@ def fetch_news(market, code, st, now):
 
 def _fund_via_em(code):
     """东财数据中心簇（0.2.0 链首，经 akshare）：一表全含——四概念键对齐既有
-    口径，另带扩展键（毛利率/净利率/ROIC/扣非/单季环比，近 4 报告期）。
+    口径，另带扩展键（毛利率/净利率/ROIC/归母净利同比，近 4 报告期）。
     列名为接口 raw 英文列（REPORT_DATE/EPSJB/ROEJQ/…），最新期在前。
     SECUCODE 后缀按 cn_exchange 唯一判定处映射（bj→.BJ/sh→.SH/sz→.SZ）。"""
     import akshare as ak
@@ -593,6 +610,10 @@ def fetch_fundamentals(market, code, st, now):
             history = None
             if data and all(isinstance(v, dict) for v in data.values()):
                 history, data = data, data[max(data)]
+            # NaN（"--" 占位）归一 None：pack 渲染与 history 均不落 NaN 字面量
+            data = _fin_dict(data)
+            if history:
+                history = {p: _fin_dict(h) for p, h in history.items()}
             # v == v 滤 NaN：_num("--")→nan 非 None，全占位不算成功（勿重置簇
             # 计数）。只验数值（em-fin 各期含「报告期」字符串键，any() 对字符串
             # 恒 True 会放行全空指标）
@@ -617,6 +638,19 @@ def _num(v):
         return float(str(v).replace(",", "").replace("%", "").replace("--", "nan"))
     except Exception:
         return None
+
+
+def _fnum(v):
+    """_num 有限值版：NaN（东财/新浪 "--" 占位经 _num 的常态）归 None——
+    缺数不虚构，也不让 nan 字面量流进下游换算与 pack。"""
+    x = _num(v)
+    return None if isinstance(x, float) and x != x else x
+
+
+def _fin_dict(d):
+    """dict 值域 NaN→None（同 _fnum 语义的整表归一）。"""
+    return {k: (None if isinstance(v, float) and v != v else v)
+            for k, v in d.items()}
 
 
 def derive_chip(bars, float_shares, bars_source=""):
@@ -711,7 +745,7 @@ def fetch_chip(market, code, st, now, bars=None, float_shares=None,
         df = ak.stock_cyq_em(symbol=code, adjust="qfq")
         row = df.iloc[-1] if len(df) else {}
         keys = ["获利比例", "平均成本", "90成本-低", "90成本-高"]
-        data = {k: (None if k not in row else _num(row[k])) for k in keys}
+        data = {k: (None if k not in row else _fnum(row[k])) for k in keys}
         # 与 fundamentals 同式守卫：全空/NaN 占位不算成功，不重置簇计数
         if not any(v is not None and v == v for v in data.values()):
             raise ValueError("empty chip")
@@ -785,19 +819,19 @@ def fetch_moneyflow(market, code, st, now):
         days = []
         for r in rows:
             try:
-                net = _num(r.get("netamount"))
-                parts = sum(_num(r.get(k)) or 0 for k in
+                net = _fnum(r.get("netamount"))
+                parts = sum(_fnum(r.get(k)) or 0 for k in
                             ("r0_net", "r1_net", "r2_net", "r3_net"))
                 if net is None or abs(parts - net) / max(abs(net), 1) > 0.01:
                     raise ValueError("netamount mismatch")
                 days.append({
-                    "date": r["opendate"], "close": _num(r.get("trade")),
-                    "change_pct": round((_num(r.get("changeratio")) or 0) * 100, 2),
-                    "turnover_pct": round((_num(r.get("turnover")) or 0) / 100, 2),
-                    "main_net_yi": round(((_num(r.get("r0_net")) or 0)
-                                          + (_num(r.get("r1_net")) or 0)) / 1e8, 4),
-                    "super_net_yi": round((_num(r.get("r0_net")) or 0) / 1e8, 4),
-                    "big_net_yi": round((_num(r.get("r1_net")) or 0) / 1e8, 4)})
+                    "date": r["opendate"], "close": _fnum(r.get("trade")),
+                    "change_pct": round((_fnum(r.get("changeratio")) or 0) * 100, 2),
+                    "turnover_pct": round((_fnum(r.get("turnover")) or 0) / 100, 2),
+                    "main_net_yi": round(((_fnum(r.get("r0_net")) or 0)
+                                          + (_fnum(r.get("r1_net")) or 0)) / 1e8, 4),
+                    "super_net_yi": round((_fnum(r.get("r0_net")) or 0) / 1e8, 4),
+                    "big_net_yi": round((_fnum(r.get("r1_net")) or 0) / 1e8, 4)})
             except KeyError:
                 continue
         if not days:
@@ -806,7 +840,8 @@ def fetch_moneyflow(market, code, st, now):
         # 新鲜度门（无条件全局规则：不虚构数据）：新浪对北交所/长期停牌标的
         # 返回陈旧或全零尾部序列（bj830799 实测全零止于 2025-05-07、
         # bj832566 真值止于 2025-09-30），不得当 available 的「今日」事实进包。
-        # 阈值 10 个自然日容纳周末+长假；全零序列=源对该标的无覆盖。
+        # 阈值单一事实源＝STALE_DAYS["moneyflow"]（10 自然日容纳周末+长假，
+        # 勿在调用点另写魔数）；全零序列=源对该标的无覆盖。
         newest = days[0]["date"]
         all_zero = all(abs(d["main_net_yi"]) < 1e-9 for d in days)
         try:
@@ -816,7 +851,7 @@ def fetch_moneyflow(market, code, st, now):
         if all_zero:
             return {"state": "not_supported", "source": "sina-flow",
                     "note": "新浪资金流对该标的仅全零序列，无有效覆盖，不虚构数据"}
-        if age is None or age > 10:
+        if age is None or age > STALE_DAYS["moneyflow"]:
             return {"state": "stale", "source": "sina-flow",
                     "note": "资金流序列止于 %s（距今 %s 天），不按最新事实采信"
                             % (newest, "未知" if age is None else age)}
@@ -869,10 +904,14 @@ def _notices_via_cninfo(code):
 
 def fetch_notices(market, code, st, now):
     """扩展块·公告：em_notice 簇（8 类枚举）→ cninfo 簇（监管权威回退），
-    近 90 天 ≤30 条；双源覆盖面不同（东财含 H 股镜像），条数差异属正常。"""
+    近 90 天 ≤30 条；双源覆盖面不同（东财含 H 股镜像），条数差异属正常。
+    空结果语义（与 forecast/research 同钉）：90 天无公告是标的级事实非源故障
+    ——单源空不记熔断、换下一源交叉验证，双源皆空=available 空列表；任一源
+    硬失败则按回退链语义如实 fetch_failed（无法确认「无公告」事实）。"""
     if market == "hk":
         return {"state": "not_supported", "source": "", "note": "A 股专属"}
     tried = []
+    emptied = []
     for name, fn in (("em-notice", _notices_via_em),
                      ("cninfo-disc", _notices_via_cninfo)):
         cluster = CLUSTERS[name]
@@ -882,7 +921,12 @@ def fetch_notices(market, code, st, now):
                 raise _Skip(why)
             items = fn(code)
             if not items:
-                raise ValueError("empty notices")
+                # 空不记败不计熔断，换源交叉；tried 逐源穷尽（同 news/
+                # fundamentals 口径）——「主源空」是排障关键线索（如上游
+                # 接口列名变更恒空），不得从审计轨迹中丢失
+                emptied.append(name)
+                tried.append((name, "empty"))
+                continue
             record(st, cluster, True, "", now)
             state = "available" if not tried else "fallback"
             return {"state": state, "source": name, "items": items, "tried": tried}
@@ -893,6 +937,10 @@ def fetch_notices(market, code, st, now):
         except Exception as e:
             record(st, cluster, False, str(e), now)
             tried.append((name, "fail: %s" % type(e).__name__))
+    if len(emptied) == 2:  # 双源皆空=事实：无公告非缺失（同 research 双空语义）
+        return {"state": "available", "source": "+".join(emptied), "items": [],
+                "note": "近 90 天无公告（双源皆空是事实，非数据缺失）",
+                "tried": tried}
     return {"state": "fetch_failed", "source": "", "note": "all_failed", "tried": tried}
 
 
@@ -987,11 +1035,11 @@ def fetch_forecast(market, code, st, now):
                       "predict_type": r.get("PREDICT_TYPE"),
                       "content": str(r.get("PREDICT_CONTENT", ""))[:120],
                       "amt_lower_yi": (lambda v: None if v is None else round(v / 1e4, 2))(
-                          _num(r.get("PREDICT_AMT_LOWER"))),
+                          _fnum(r.get("PREDICT_AMT_LOWER"))),
                       "amt_upper_yi": (lambda v: None if v is None else round(v / 1e4, 2))(
-                          _num(r.get("PREDICT_AMT_UPPER"))),
-                      "ratio_lower_pct": _num(r.get("PREDICT_RATIO_LOWER")),
-                      "ratio_upper_pct": _num(r.get("PREDICT_RATIO_UPPER")),
+                          _fnum(r.get("PREDICT_AMT_UPPER"))),
+                      "ratio_lower_pct": _fnum(r.get("PREDICT_RATIO_LOWER")),
+                      "ratio_upper_pct": _fnum(r.get("PREDICT_RATIO_UPPER")),
                       "notice_date": nd}
                 break
         rows2 = _dc_rows("RPT_PUBLIC_BS_APPOIN", code, st, now, "dc-forecast",
@@ -1028,7 +1076,7 @@ def fetch_unlock(market, code, st, now):
         for r in rows or []:
             item = {"date": str(r.get("FREE_DATE", ""))[:10],
                     "shares": r.get("FREE_SHARES"),
-                    "ratio_pct": _num(r.get("FREE_RATIO")),
+                    "ratio_pct": _fnum(r.get("FREE_RATIO")),
                     "type": str(r.get("FREE_SHARES_TYPE", ""))}
             if item["date"] >= today.isoformat():
                 upcoming.append(item)
@@ -1066,8 +1114,8 @@ def fetch_holder(market, code, st, now):
         record(st, cluster, True, "", now)
         records = [{"date": str(r.get("END_DATE", ""))[:10],
                     "holder_num": r.get("HOLDER_TOTAL_NUM"),
-                    "pct_change": _num(r.get("TOTAL_NUM_RATIO")),
-                    "avg_mktcap": _num(r.get("AVG_MARKET_CAP"))}
+                    "pct_change": _fnum(r.get("TOTAL_NUM_RATIO")),
+                    "avg_mktcap": _fnum(r.get("AVG_MARKET_CAP"))}
                    for r in rows[:8] if r.get("END_DATE")]
         return {"state": "available", "source": "emweb-holder", "records": records}
     except Exception as e:
@@ -1089,7 +1137,9 @@ def _sw_industry_via_sina(code):
     m = re.search(r"所属行业板块</td>.*?<td[^>]*>([^<]+)</td>\s*<td[^>]*><a",
                   text, re.S)
     if not m:
-        raise ValueError("no industry field")
+        # 标的无该字段（如金融股/次新）是标的级事实——不计入 sina_flow 共享簇
+        # 熔断（同簇 moneyflow/news 回退位不得被连坐）
+        raise NotSupportedSymbol("无所属行业板块字段")
     return m.group(1).strip()
 
 
@@ -1136,6 +1186,8 @@ def fetch_industry(market, code, st, now):
         record(st, CLUSTERS["sina-industry"], True, "", now)
     except _Skip as e:
         note.append("sina-industry:%s" % e)
+    except NotSupportedSymbol:
+        note.append("sina-industry:not_supported")  # 标的级空缺不计熔断
     except Exception as e:
         record(st, CLUSTERS["sina-industry"], False, str(e), now)
         note.append("sina-industry:%s" % type(e).__name__)
@@ -1150,14 +1202,17 @@ def fetch_industry(market, code, st, now):
         if board_row is not None:
             board = {"name": str(board_row["板块"]),
                      "rank": int(board_row["序号"]), "total": len(df),
-                     "change_pct": _num(board_row["涨跌幅"]),
-                     "net_inflow_yi": _num(board_row["净流入"]),
+                     "change_pct": _fnum(board_row["涨跌幅"]),
+                     "net_inflow_yi": _fnum(board_row["净流入"]),
                      "top": str(board_row["领涨股"]),
-                     "top_change_pct": _num(board_row["领涨股-涨跌幅"])}
+                     "top_change_pct": _fnum(board_row["领涨股-涨跌幅"])}
             note.append("匹配置信 %.2f（申万『%s』↔同花顺『%s』）"
                         % (score, sw, board["name"]))
-        else:
+        elif sw:
             note.append("申万『%s』与同花顺板块匹配置信不足，只给归属" % sw)
+        else:
+            # sw 本身缺失（sina 路失败/熔断）：陈述事实，不落 None 字面量
+            note.append("申万归属缺失（sina 路未取到），无板块匹配输入")
         record(st, CLUSTERS["ths-fin"], True, "", now)
     except _Skip as e:
         note.append("ths-board:%s" % e)
@@ -1173,6 +1228,10 @@ def fetch_industry(market, code, st, now):
                "+同花顺二级板块；两口径排名不可混用"}
         if note:
             blk["note"] = "；".join(note)
+    elif note:
+        # 双路全失败：逐源失败明细一并带回（缺什么写什么，与 news/notices
+        # 的 tried 口径一致），不泛化成 all_failed
+        blk["note"] = "；".join(note)
     return blk
 
 
@@ -1181,14 +1240,15 @@ def _baidu_percentile(code, indicator):
     import akshare as ak
     df = ak.stock_zh_valuation_baidu(symbol=code, indicator=indicator,
                                      period="近五年")
-    vals = [(_num(v)) for v in df["value"]]
+    vals = [_fnum(v) for v in df["value"]]  # "--"→NaN 归 None：不虚构 0.0 分位
     dates = [str(d) for d in df["date"]]
     if not vals or vals[-1] is None:
         raise ValueError("empty %s" % indicator)
     cur = vals[-1]
     below = sum(1 for v in vals if v is not None and v <= cur)
     pct = round(100.0 * below / len([v for v in vals if v is not None]), 1)
-    tail = [{"date": dates[i], "value": vals[i]} for i in range(len(vals) - 5, len(vals))]
+    tail = [{"date": dates[i], "value": vals[i]}
+            for i in range(max(0, len(vals) - 5), len(vals))]
     return pct, tail
 
 
@@ -1238,12 +1298,13 @@ def fetch_valuation(market, code, st, now, qt_full):
                "pe_percentile_5y": pe_pct, "pb_percentile_5y": pb_pct,
                "pe_series_tail": tail}
         if pe_pct is None or pb_pct is None:  # 半失败如实记 note 不谎报（docstring）
-            blk["note"] = "历史分位部分缺失（%s分位获取失败）" % (
+            # 措辞不臆断成因：空序列（标的无数据）与网络失败同走此路径
+            blk["note"] = "历史分位部分缺失（%s序列无数据或获取失败）" % (
                 "市盈率" if pe_pct is None else "市净率")
         return blk
     if a:
         return {"state": "available", "source": "qt-snap", **a,
-                "note": "历史分位缺失（baidu 源不可用）"}
+                "note": "历史分位缺失（baidu 序列无数据或源不可用）"}
     if pe_pct is not None or pb_pct is not None:
         return {"state": "fallback", "source": "baidu-val",
                 "pe_percentile_5y": pe_pct, "pb_percentile_5y": pb_pct,
@@ -1324,6 +1385,10 @@ def fetch(symbol, snapshot_dir=None):
                         qt_full["price"], q["price"])
                 q = {**q, "price": qt_full["price"],
                      "turnover_pct": qt_full.get("turnover_pct")}
+                # date 同刻：叠加后 price/prev_close/change_pct 均为今日实时
+                # 口径，date 留日 K 末根（昨日）会形成「昨日日期 × 今日实时价」
+                # 混合时点——qt 快照无独立交易日字段，按取数当日计。
+                q["date"] = dt.date.today().isoformat()
                 # 同刻配对：集合竞价/日K滞后窗口里日 K 末根仍是昨日，若只叠
                 # price 会形成「今日实时价 × 昨日涨跌幅」混合时点——qt 昨收与
                 # 实时价同源同时刻，一并采信并重算涨幅（昨收>0 才采信防位序漂移）。
