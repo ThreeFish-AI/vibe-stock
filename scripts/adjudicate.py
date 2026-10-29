@@ -318,9 +318,11 @@ def selftest():
                                 **{n: {"state": "fetch_failed"} for n in EXT_BLOCKS}}}
     _check("E4 ext blocks zero-weight", evidence_cap(ev_ext_failed),
            evidence_cap(ev_base))
-    # 前向兼容钉：未知名块静默忽略不报错（fetch 层加块无须同步本文件）
-    ev_unknown = {"blocks": {n: {"state": "available"} for n, _ in BLOCKS},
-                  "future_block": {"state": "available"}}
+    # 前向兼容钉：未知名块静默忽略不报错（fetch 层加块无须同步本文件）。
+    # future_block 必须放进 blocks 内——真实场景是 fetch 往 blocks 加新键，
+    # 放外层对 evidence_cap 是恒真测试，钉不住该不变量。
+    ev_unknown = {"blocks": {**{n: {"state": "available"} for n, _ in BLOCKS},
+                             "future_block": {"state": "available"}}}
     _check("E5 unknown block ignored", evidence_cap(ev_unknown), evidence_cap(ev_base))
     print("SELFTEST PASSED ✔")
 
