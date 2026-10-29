@@ -10,10 +10,12 @@
     命中率 ≥60% 且样本 ≥10 → promote；≤40% 且样本 ≥10 → demote；否则 observe。
 
 用法：
-  uv run --no-project --with yfinance scripts/postmortem.py --stock 600519
+  uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance \
+    scripts/postmortem.py --stock 600519
   uv run --no-project scripts/postmortem.py --selftest
 """
 import argparse
+import bisect
 import datetime as dt
 import json
 import os
@@ -75,7 +77,14 @@ def evaluate_signals(signals, bars_by_code):
         try:
             i = dates.index(s["date"])
         except ValueError:
-            continue
+            # 非交易日登记的信号（周末/节假日 qt 静态快照使 quote.date 落在非
+            # 交易日）：回退到 ≤ 信号日的最近一根日 K——非交易日 qt 静态价＝
+            # 最后交易日收盘，价与该 bar 同刻，绩效基准不失真；信号日新于最新
+            # bar（当日盘中登记、日 K 未出）属未到期，跳过不评估（同 j 越界分支）。
+            j = bisect.bisect_right(dates, s["date"]) - 1
+            if j < 0 or s["date"] > dates[-1]:
+                continue
+            i = j
         for h in s["horizons"]:
             if str(h) in s.get("evaluated", {}):
                 continue
@@ -186,7 +195,21 @@ def selftest():
           "horizons": [1, 3, 5, 10], "evaluated": {}}
     evaluate_signals([s2], {"000001": bars})
     assert s2["evaluated"] == {} and s2["status"] == "pending"
-    print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动")
+    # 非交易日登记信号（周末 qt 静态快照使 date 落在非交易日）：回退 ≤ 信号日
+    # 最近 bar 评估，不静默永久失配；信号日新于最新 bar 仍属未到期跳过
+    bars_g = [{"date": "2026-10-%02d" % d, "open": 1.0, "high": 1.0, "low": 1.0,
+               "close": 10.0 + d, "volume": 1} for d in (2, 9, 16, 23, 30)]
+    s3 = {**sig_buy, "id": "b3", "date": "2026-10-10", "close_at_signal": 19.0,
+          "status": "pending", "horizons": [1], "evaluated": {}}
+    evaluate_signals([s3], {"000001": bars_g})
+    assert s3["evaluated"]["1"]["date"] == "2026-10-16", \
+        "非交易日信号须回退最近 bar（10-09）后按 horizon 推进"
+    s4 = {**sig_buy, "id": "b4", "date": "2026-11-01", "status": "pending",
+          "horizons": [1], "evaluated": {}}
+    evaluate_signals([s4], {"000001": bars_g})
+    assert s4["evaluated"] == {} and s4["status"] == "pending", \
+        "信号日新于最新 bar 属未到期，不得提前评估"
+    print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动 · 非交易日回退")
     print("SELFTEST PASSED ✔")
 
 

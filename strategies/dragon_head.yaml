@@ -16,9 +16,12 @@ instructions: |
 
   1. **相对强度**：近 20 日涨幅显著领先（pct_from_52w_low > 40 且
      pct_from_52w_high > -10，强势但未极端透支）。
-  2. **题材地位**：news 块中出现同题材反复提及、公司为主线核心标的的线索。
+  2. **题材地位**：news 块出现同题材反复提及、公司为主线核心标的的线索；
+     industry.board_ths.rank 靠前（所属板块当日领涨）为题材佐证；
+     moneyflow.summary 主力连续净流入加分。
   3. **动量健康**：rsi14 < 78；回调不破 ma10。
-  4. **拥挤度风控**：若 vol_ratio_5 > 3 且单日换手异常（量能极端），视为
+  4. **拥挤度风控**：若 vol_ratio_5 > 3 且 quote.turnover_pct 异常放大
+     （量能极端；港股 quote 块无 turnover_pct，仅按 vol_ratio_5 > 3 判），视为
      情绪顶风险，禁止 strong_buy。
 
   评分调整：

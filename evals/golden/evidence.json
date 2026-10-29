@@ -535,6 +535,24 @@
   "chip": {
    "state": "not_supported",
    "source": "snapshot"
+  },
+  "moneyflow": {
+   "state": "available",
+   "source": "sina-flow",
+   "summary": {
+    "main_net_yi": -1.3882,
+    "main_net_3d_yi": -0.9397,
+    "main_net_5d_yi": 1.5727,
+    "main_net_10d_yi": 1.5256,
+    "main_streak_days": 2,
+    "streak_direction": "outflow"
+   },
+   "note": "扩展块零权重样本：不进质量分"
+  },
+  "valuation": {
+   "state": "fetch_failed",
+   "source": "",
+   "note": "扩展块零权重样本：失败不动摇裁决核心"
   }
  },
  "quality": {

@@ -22,6 +22,6 @@ instructions: |
 
   评分调整：
   - 三线多头 + 现价 > ma20 → buy（趋势确立，置信 0.7–0.85）。
-  - 叠加 macd.dif > dea 且柱体放大 → strong_buy（置信 ≤0.9）。
+  - 叠加 macd.dif > dea 且 macd.hist_rising=true（柱体放大）→ strong_buy（置信 ≤0.9）。
   - 证据块 daily_bars/technical 非 available/fallback → 置信减半并说明。
   - 只在趋势在場时看多；跌破 ma20 当日给 hold 或 sell，禁止「再等等」。

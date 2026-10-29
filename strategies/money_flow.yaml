@@ -1,0 +1,31 @@
+# 资金流 / Money Flow
+name: money_flow
+display_name: 资金流
+description: 主力资金连续净流入/净流出与价格的背离或共振。
+category: flow
+required_evidence: [moneyflow, daily_bars, technical]
+aliases: [主力资金, 资金动向]
+default_priority: 70
+market_regimes: [any]
+
+instructions: |
+  **资金流**
+
+  判定（moneyflow 块为主，technical 为辅；主力净额=超大单+大单，新浪口径，
+  各源口径不齐禁止跨源直接比较数值）：
+
+  1. **连续性**：summary.main_streak_days >= 3 且 streak_direction=inflow，
+     同时价格企稳（未创新低 new_low_20d=false）→ 主力吸筹迹象。
+  2. **共振**：3 日/5 日净流入同向为正且当日收阳（last_bar_pattern.yang）
+     → buy。
+  3. **背离**：价格逼近 20 日新高（new_high_20d=true）而 5 日净额转负
+     → 拉高出货嫌疑，sell/降档。
+  4. **流出压制**：streak_direction=outflow 且 streak >= 5 日 → 中性偏空，
+     最多 hold（资金面不构成独立做空依据）。
+
+  评分调整：
+  - 连续净流入 + 价格企稳 → buy（置信 0.65–0.75）。
+  - 高位连续净流出 → sell（置信 0.6–0.7）。
+  - moneyflow 非 available/fallback（fetch_failed/missing/not_supported/stale，
+    如北交所全零序列=not_supported、序列止于 10 自然日前=stale）→ 本策略
+    只能 hold 并注明「证据缺失」（缺证据不出方向意见）。

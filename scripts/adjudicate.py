@@ -49,6 +49,12 @@ STATE_SCORE = {"available": 100, "fallback": 85, "partial": 70, "stale": 60,
                "estimated": 55, "missing": 30, "not_supported": 30, "fetch_failed": 25}
 BLOCKS = [("quote", 25), ("daily_bars", 25), ("technical", 25),
           ("news", 10), ("fundamentals", 10), ("chip", 5)]
+# 0.2.0 扩展块镜像（fetch.EXT_BLOCKS 为 SSOT，此处只作裁决侧口径声明）：
+# evidence_cap 有意只算 BLOCKS 六块——扩展块零权重（信息面不是裁决面，置信帽
+# 只反映核心行情链可用性）。修订此口径属 0.3.0 级语义变更：须人工评审 + golden
+# 重建（selftest E4/E5 两钉冻结当前语义）。
+EXT_BLOCKS = ["moneyflow", "notices", "research", "forecast", "unlock",
+              "holder", "market", "industry", "valuation"]
 PF_CLAMP = (0.83, 1.2)
 PF_PRIOR = 15.0        # Beta(15,15) 先验
 PF_MIN_SAMPLES = 30    # 样本不足 → 中性 1.0
@@ -306,6 +312,18 @@ def selftest():
     no_cap, _ = apply_confidence_cap("strong_buy", "high")
     _check("E3 no-cap keeps strong", (no_cap, apply_confidence_cap("strong_buy", "low")[0]),
            ("strong_buy", "buy"))
+    # 拆零权重钉（0.2.0）：扩展块状态任意变化不得扰动质量分/档位/置信帽
+    ev_base = {"blocks": {n: {"state": "available"} for n, _ in BLOCKS}}
+    ev_ext_failed = {"blocks": {**{n: {"state": "available"} for n, _ in BLOCKS},
+                                **{n: {"state": "fetch_failed"} for n in EXT_BLOCKS}}}
+    _check("E4 ext blocks zero-weight", evidence_cap(ev_ext_failed),
+           evidence_cap(ev_base))
+    # 前向兼容钉：未知名块静默忽略不报错（fetch 层加块无须同步本文件）。
+    # future_block 必须放进 blocks 内——真实场景是 fetch 往 blocks 加新键，
+    # 放外层对 evidence_cap 是恒真测试，钉不住该不变量。
+    ev_unknown = {"blocks": {**{n: {"state": "available"} for n, _ in BLOCKS},
+                             "future_block": {"state": "available"}}}
+    _check("E5 unknown block ignored", evidence_cap(ev_unknown), evidence_cap(ev_base))
     print("SELFTEST PASSED ✔")
 
 

@@ -4,3 +4,4 @@ __pycache__/
 *.local.json
 .DS_Store
 .vs*
+.playwright-mcp/
