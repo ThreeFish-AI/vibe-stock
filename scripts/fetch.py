@@ -2,8 +2,9 @@
 """fetch.py · vibe-stock 证据取数层（蓝本：DSA data_provider 多源回退链）。
 
 机制（与 references/01-evidence.md 同源）：
-  - 市场分流：A 股链 em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq)→yfinance；
-    港股链 em_quote(akshare)→yfinance。
+  - 市场分流：A 股链 em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq)→yfinance
+    （腾讯源不含北交所 43/83/87/92 号段，显式拒绝落 yf .BJ 兜底）；港股链
+    em_quote(akshare)→yfinance。
   - 回退链逐源尝试；任一成功即继续，状态标 available/fallback。
   - 熔断：按上游服务簇（非库名）计账，单簇连续 3 次失败停 300s（半开放行单次
     探测）；连接失败冷却 15s。状态持久化在 ~/.vibe-stock/fetch_state.json
@@ -85,18 +86,31 @@ def detect_market(symbol):
     s = symbol.strip().lower()
     if re.fullmatch(r"0\d{6}", s):  # 7 位前导零 A 股导出形态（沪/深均可能）剥一个 0 再分流
         s = s[1:]
-    if re.fullmatch(r"(sh|sz)?\d{6}", s):
-        return "cn", re.sub(r"^(sh|sz)", "", s)
+    if re.fullmatch(r"(sh|sz|bj)?\d{6}", s):
+        return "cn", re.sub(r"^(sh|sz|bj)", "", s)
     m = re.fullmatch(r"(?:hk)?(\d{4,5})(?:\.hk)?", s)
     if m:
         return "hk", m.group(1)
-    raise SystemExit("无法识别市场，示例：600519 / 0601888 / sz000001 / hk00700 / 0700.HK")
+    raise SystemExit("无法识别市场，示例：600519 / 0601888 / sz000001 / bj830799 / hk00700 / 0700.HK")
+
+
+def cn_exchange(code):
+    """A 股交易所分流（唯一判定处）：北交所 43/83/87/92 号段，沪 6/9(B 股
+    900)/5，其余深。腾讯源与 Yahoo 后缀共用，勿各写一份前缀规则。"""
+    if code.startswith(("43", "83", "87", "92")):
+        return "bj"
+    return "sh" if code.startswith(("6", "9", "5")) else "sz"
+
+
+class NotSupportedSymbol(ValueError):
+    """源不覆盖该标的（如腾讯源无北交所行情）——确定性能力边界拒绝，
+    非源健康故障：链上按 not_supported 记轨迹，不计熔断、不连坐他股。"""
 
 
 def yf_ticker(market, code):
     if market == "hk":
         return str(int(code)).zfill(4) + ".HK"  # Yahoo 港码 4 位：00700→0700.HK
-    return code + (".SS" if code.startswith(("6", "9", "5")) else ".SZ")
+    return code + {"bj": ".BJ", "sh": ".SS", "sz": ".SZ"}[cn_exchange(code)]
 
 
 # ---------------------------------------------------------------- 熔断与冷却（持久化）
@@ -213,7 +227,7 @@ def _qt_batch(market, code, st, now):
     try:
         full = None
         if market == "cn":
-            sym = ("sh" if code.startswith(("6", "9", "5")) else "sz") + code
+            sym = cn_exchange(code) + code
             full = _parse_qt_full(_http_text("https://qt.gtimg.cn/q=" + sym))
         idx = ("s_sh000001,s_sz399001,s_sz399006,s_sh000300,s_sh000688"
                if market == "cn" else "s_hkHSI,s_hkHSCEI")
@@ -266,8 +280,13 @@ def _daily_via_tencent(market, code):
     volume 列要求 akshare ≥2025-10 版；单位为股（em 系源为手），仅用于源内
     比值 vol_ratio_5，单位相消。
     """
+    pfx = cn_exchange(code)
+    if pfx == "bj":
+        # 2026-10-28 实测：腾讯端点 bj 前缀被拒、误挂 sz 亦无数据——显式拒绝
+        # （置于 import 之前，零依赖环境可测）；链上由 yf(.BJ，暂无数据则
+        # 如实 fetch_failed) 兜底，不静默错挂。
+        raise NotSupportedSymbol("北交所无腾讯行情数据")
     import akshare as ak  # noqa: 延迟导入，缺库不致命
-    pfx = "sh" if code.startswith(("6", "9", "5")) else "sz"
     start = (dt.date.today() - dt.timedelta(days=600)).strftime("%Y%m%d")
     end = dt.date.today().strftime("%Y%m%d")
     df = ak.stock_zh_a_hist_tx(symbol=pfx + code, start_date=start,
@@ -312,6 +331,9 @@ def fetch_daily_bars(market, code, st, now):
             return rows, state, name, tried
         except ImportError as e:
             tried.append((name, "import_missing"))  # 缺库不记熔断（环境问题非源问题）
+        except NotSupportedSymbol:
+            # 源不覆盖该标的不记熔断（标的问题非源健康问题，重试永不成功）
+            tried.append((name, "not_supported"))
         except Exception as e:
             record(st, cluster, False, str(e), now)
             tried.append((name, "fail: %s" % type(e).__name__))
@@ -434,7 +456,7 @@ def _news_via_qq(market, code):
     """腾讯资讯簇（直连 proxy.finance.qq.com，A+港通吃——港股唯一源）：
     data.data[] 含 time/title/src/summary；混有自媒体条目，靠 src 字段如实透出。"""
     sym = ("hk" + code if market == "hk"
-           else ("sh" if code.startswith(("6", "9", "5")) else "sz") + code)
+           else cn_exchange(code) + code)
     text = _http_text("https://proxy.finance.qq.com/ifzqgtimg/appstock/"
                       "news/info/search?page=1&symbol=%s&n=20&type=2" % sym)
     arr = (json.loads(text).get("data") or {}).get("data") or []
@@ -449,7 +471,7 @@ def _news_via_qq(market, code):
 def _news_via_sina(code):
     """新浪流量簇（直连 F10 个股资讯页，GB2312 HTML，标题级末位回退）：
     无内容摘要无来源名，仅 A 股；页面含弱相关条目，如实进包由意见层甄别。"""
-    sym = ("sh" if code.startswith(("6", "9", "5")) else "sz") + code
+    sym = cn_exchange(code) + code
     text = _http_text("https://vip.stock.finance.sina.com.cn/corp/go.php/"
                       "vCB_AllNewsStock/symbol/%s.phtml" % sym)
     rows = re.findall(
@@ -497,8 +519,7 @@ def _fund_via_em(code):
     列名为接口 raw 英文列（REPORT_DATE/EPSJB/ROEJQ/…），最新期在前。
     SECUCODE 后缀：沪 6/9/5 → .SH，北交 8/4 → .BJ，其余 → .SZ。"""
     import akshare as ak
-    suf = ".SH" if code.startswith(("6", "9", "5")) else (
-        ".BJ" if code.startswith(("8", "4")) else ".SZ")
+    suf = {"sh": ".SH", "sz": ".SZ", "bj": ".BJ"}[cn_exchange(code)]
     df = ak.stock_financial_analysis_indicator_em(symbol=code + suf,
                                                   indicator="按报告期")
     out = {}
@@ -740,7 +761,7 @@ def fetch_moneyflow(market, code, st, now):
         ok, why = source_allowed(st, cluster, now)
         if not ok:
             raise _Skip(why)
-        sym = ("sh" if code.startswith(("6", "9", "5")) else "sz") + code
+        sym = cn_exchange(code) + code
         text = _http_text(
             "https://vip.stock.finance.sina.com.cn/quotes_service/api/"
             "json_v2.php/MoneyFlow.ssl_qsfx_lscjfb?page=1&num=60&sort=opendate"
@@ -987,8 +1008,7 @@ def fetch_holder(market, code, st, now):
         ok, why = source_allowed(st, cluster, now)
         if not ok:
             raise _Skip(why)
-        suf = "SH" if code.startswith(("6", "9", "5")) else (
-            "BJ" if code.startswith(("8", "4")) else "SZ")
+        suf = {"sh": "SH", "sz": "SZ", "bj": "BJ"}[cn_exchange(code)]
         data = json.loads(_http_text(
             "https://emweb.securities.eastmoney.com/PC_HSF10/"
             "ShareholderResearch/PageAjax?code=%s%s" % (suf, code)))
