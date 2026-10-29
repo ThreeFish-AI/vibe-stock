@@ -10,7 +10,8 @@
     命中率 ≥60% 且样本 ≥10 → promote；≤40% 且样本 ≥10 → demote；否则 observe。
 
 用法：
-  uv run --no-project --with yfinance scripts/postmortem.py --stock 600519
+  uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance \
+    scripts/postmortem.py --stock 600519
   uv run --no-project scripts/postmortem.py --selftest
 """
 import argparse
