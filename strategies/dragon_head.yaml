@@ -21,7 +21,7 @@ instructions: |
      moneyflow.summary 主力连续净流入加分。
   3. **动量健康**：rsi14 < 78；回调不破 ma10。
   4. **拥挤度风控**：若 vol_ratio_5 > 3 且 quote.turnover_pct 异常放大
-     （量能极端），视为
+     （量能极端；港股 quote 块无 turnover_pct，仅按 vol_ratio_5 > 3 判），视为
      情绪顶风险，禁止 strong_buy。
 
   评分调整：

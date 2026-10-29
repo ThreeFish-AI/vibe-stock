@@ -72,6 +72,7 @@ verdict 全 insufficient → 如实出「证据/意见不足」报告，不硬�
 
 ## 后验与自校准
 
-隔 1/3/5/10 个交易日后：`uv run --no-project --with akshare --with yfinance
+隔 1/3/5/10 个交易日后：`uv run --no-project --with 'akshare==1.20.*'
+--with yfinance --with efinance
 $T/scripts/postmortem.py --stock <code>`——记对错、归因台账、绩效因子与画像
 升降档（≥60% 升 / ≤40% 降 / <10 样本只观察），下次聚合自动吃到战绩权重。

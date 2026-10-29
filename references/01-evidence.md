@@ -40,12 +40,14 @@
 - **回退链**：临时失败——按链逐源换，成功即标 fallback 继续。条件：同一块存在
   多簇可选；做法：A 股日K链 em_quote(akshare→efinance，efinance 为簇内次选——
   同端点冗余，簇熔断开启时两源一并跳过)→qq(腾讯 qfq)→yfinance，fundamentals 链
-  sina→ths；坑位：新浪 stock_zh_a_daily 实测不复权，不入链（不复权数据禁混入
+  em_datacenter(主指标全量)→sina(财务指标)→ths(财务摘要)，news 链
+  em_search→qq_news(腾讯资讯)→sina_flow(个股资讯页)，chip 为本地 derive(日K+qt
+  流通股本)→em_quote 复活位；坑位：新浪 stock_zh_a_daily 实测不复权，不入链（不复权数据禁混入
   qfq 链）；腾讯源不覆盖北交所（43/83/87/92 号段，2026-10-28 实测 bj 前缀被端点
   拒、误挂 sz 亦无数据），显式拒绝属确定性不覆盖（not_supported，不记熔断不连坐
   他股），该跳必败落 yf(.BJ) 兜底、暂无数据则如实 fetch_failed，北交所 em 系源走
-  akshare/efinance 既有 secid 规则；news=em_search、chip=em_quote 天然单源，
-  失败如实 fetch_failed。
+  akshare/efinance 既有 secid 规则；链外仍单源的块（如扩展块 emweb-holder、
+  baidu-val）失败如实 fetch_failed，不虚构回退。
 - **熔断**：持续失败——单簇连续 3 败停 300s（半开放行单次探测）；状态持久化
   `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（15 簇：
   em_quote/em_search/em_datacenter/em_notice/em_report/emweb/cninfo/sina/
@@ -73,7 +75,8 @@
 </untrusted_external>
 ```
 
-条件：凡外部抓取内容进入 LLM 可见面（news/notices/research 三块的外部文本）；
+条件：凡外部抓取内容进入 LLM 可见面（news/notices/research/forecast 四块的
+外部文本——预告原文同属上市公司公告文字）；
 做法：包裹 + 声明 + 报告不复述；
 坑位：哨兵声明写在外层、不进外文正文，报告引用新闻事实时不得携带哨兵标记。
 
