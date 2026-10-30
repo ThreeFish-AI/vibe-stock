@@ -9,10 +9,12 @@ dsa_lab.py 的 M4/M5。本文件回答「意见合不合法、共识是什么、
   ① 信号资格分选：意见必须落在五个标准信号；别名归一化失败 → 移入诊断记录，
      不进意见链（证据链与诊断互斥且穷尽）。
   ② 确定性聚合：权重 = 置信度 × 绩效因子（Beta(15,15) 收缩、钳 0.83–1.2、样本
-     <30 中性 1.0，读 ledger.json）；加权分映射阈值 4.5/3.5/2.5/1.5；有效意见
-     零/一条/置信度全零 → insufficient（hold、置信 0）。
+     <30 中性 1.0，读 ledger.json）；加权分 = 按权重加权的档位均值（strong_buy=5
+     … strong_sell=1），映射阈值 4.5/3.5/2.5/1.5；聚合置信只取与聚合信号同方向族
+     的意见（权重加权均值，无同族支撑为 0）；有效意见零/一条/置信度全零 →
+     insufficient（hold、置信 0）。
   ③ 分歧检测：方向对立 / 置信离散 / 高置信异见（三类；加减分矛盾由策略侧
-     rationale 承载，RiskGuard 兜底）；高严重度冲突 → 共识 low。
+     rationale 承载，RiskGuard 兜底）；主信号 = 聚合信号；高严重度冲突 → 共识 low。
   ④ 分歧摘要：三桶（bullish/bearish/neutral）显式上桌。
   ⑤ RiskGuard 只降不升：veto 把买入族压 hold；降档沿 buy→hold→sell 单向
      （高严重度可两档）；任何情况不升级。
@@ -44,6 +46,9 @@ ALIAS = {
     "strongsell": "strong_sell", "清仓卖出": "strong_sell",
 }
 AGG_THRESH = [(4.5, "strong_buy"), (3.5, "buy"), (2.5, "hold"), (1.5, "sell")]
+LEVEL = {s: 5 - i for i, s in enumerate(LADDER)}  # 档位值 strong_buy=5 … strong_sell=1
+FAMILY = {"strong_buy": "bull", "buy": "bull", "hold": "neutral",
+          "sell": "bear", "strong_sell": "bear"}
 CORE_BLOCKS = {"quote", "daily_bars", "technical"}
 STATE_SCORE = {"available": 100, "fallback": 85, "partial": 70, "stale": 60,
                "estimated": 55, "missing": 30, "not_supported": 30, "fetch_failed": 25}
@@ -103,13 +108,24 @@ def performance_factor(ledger, source):
 
 
 def aggregate(valid, ledger=None):
-    """确定性聚合。返回 {final_signal, confidence, consensus_level, conflicts, _valid}。"""
+    """确定性聚合。返回 {final_signal, score, confidence, consensus_level, conflicts, _valid}。"""
     ledger = ledger or {}
     for o in valid:
         o["weight"] = performance_factor(ledger, o["source"])
     if len(valid) <= 1 or sum(o["confidence"] for o in valid) == 0:
-        return {"final_signal": "hold", "confidence": 0.0,
+        return {"final_signal": "hold", "score": None, "confidence": 0.0,
                 "consensus_level": "insufficient", "conflicts": [], "_valid": valid}
+    # 加权档位均值：信号档位必须进分（取「最高权重×5」会让方向不参与聚合）；
+    # 四位小数取整，防浮点误差把恰在阈值上的分判到下一档
+    w = [o["confidence"] * o["weight"] for o in valid]
+    score = round(sum(wi * LEVEL[o["signal"]] for wi, o in zip(w, valid)) / sum(w), 4)
+    final = next((sig for th, sig in AGG_THRESH if score >= th), "strong_sell")
+    # 聚合置信只认同方向族：权重加权均值（≤ 同族最高置信），无同族支撑 → 0.0
+    fam = [(wi, o["confidence"]) for wi, o in zip(w, valid)
+           if FAMILY[o["signal"]] == FAMILY[final]]
+    fw = sum(wi for wi, _ in fam)
+    conf = (min(round(sum(wi * c for wi, c in fam) / fw, 2), max(c for _, c in fam))
+            if fw else 0.0)
     bull = [o for o in valid if o["signal"] in ("strong_buy", "buy")]
     bear = [o for o in valid if o["signal"] in ("strong_sell", "sell")]
     conflicts = []
@@ -118,26 +134,20 @@ def aggregate(valid, ledger=None):
     confs = [o["confidence"] for o in valid]
     if max(confs) - min(confs) >= 0.3:
         conflicts.append({"type": "spread", "severity": "medium"})
-    final_sig = max(valid, key=lambda o: o["confidence"] * o["weight"])
+    # 主信号 = 聚合信号（不是置信×绩效最高的那条意见）：异见与共识都以它为锚
     for o in valid:
-        if (o["confidence"] >= 0.75 and o is not final_sig
-                and abs(LADDER.index(o["signal"]) -
-                        LADDER.index(final_sig["signal"])) >= 2):
+        if (o["confidence"] >= 0.75
+                and abs(LADDER.index(o["signal"]) - LADDER.index(final)) >= 2):
             conflicts.append({"type": "high_conf_dissent",
                               "severity": "high" if o["confidence"] >= 0.9 else "medium"})
-    aligned = len([o for o in valid if o["signal"] == final_sig["signal"]]) / len(valid)
+    aligned = len([o for o in valid if o["signal"] == final]) / len(valid)
     if any(c["severity"] == "high" for c in conflicts):
         level = "low"
     elif aligned >= 2 / 3 and not conflicts:
         level = "high"
     else:
         level = "medium"
-    wscore = max(o["confidence"] * o["weight"] * 5 for o in valid)
-    for th, sig in AGG_THRESH:
-        if wscore >= th:
-            return {"final_signal": sig, "confidence": round(final_sig["confidence"], 2),
-                    "consensus_level": level, "conflicts": conflicts, "_valid": valid}
-    return {"final_signal": "hold", "confidence": round(final_sig["confidence"], 2),
+    return {"final_signal": final, "score": score, "confidence": conf,
             "consensus_level": level, "conflicts": conflicts, "_valid": valid}
 
 
@@ -236,10 +246,22 @@ def selftest():
     v = adjudicate(ops, {}, ev)
     _check("valid count", len(v["valid_opinions"]), 3)
     _check("alias normalize", v["valid_opinions"][1]["signal"], "strong_buy")
-    _check("agg signal", v["aggregate"]["final_signal"], "strong_buy")
-    _check("consensus medium(1/3 aligned)", v["aggregate"]["consensus_level"], "medium")
-    _check("no-op guard", v["risk_guard"]["final"], "strong_buy")
+    # 档位均值 (0.8×4+0.9×5+0.7×4)/2.4=4.375 → buy；主信号 buy 2/3 同档、零冲突 → high
+    _check("agg signal", v["aggregate"]["final_signal"], "buy")
+    _check("consensus high(2/3 aligned)", v["aggregate"]["consensus_level"], "high")
+    _check("no-op guard", v["risk_guard"]["final"], "buy")
+    _check("agg conf = bull-family mean", v["aggregate"]["confidence"], 0.81)
     _check("executable gate", v["executable"], True)
+    # strong_* 初判 Fixture：置信帽、两档降级须以 strong_buy 为输入才触达
+    ops_s = [
+        {"source": "strategy:bull_trend", "signal": "strong_buy", "confidence": 0.9},
+        {"source": "strategy:volume_breakout", "signal": "strong_buy", "confidence": 0.8},
+        {"source": "strategy:chan_theory", "signal": "buy", "confidence": 0.7},
+    ]
+    _check("agg strong_buy(score 4.7083)",
+           aggregate([dict(o) for o in ops_s])["score"], 4.7083)
+    _check("agg strong_buy signal", adjudicate(ops_s, {}, ev)["risk_guard"]["initial"],
+           "strong_buy")
 
     print("== 无效意见进诊断（互斥且穷尽） ==")
     ops2 = ops + [{"source": "strategy:hot_theme", "signal": "看多!!!", "confidence": 0.95},
@@ -259,22 +281,77 @@ def selftest():
                       {"source": "b", "signal": "buy", "confidence": 0.0}], {}, ev)
     _check("zero-conf insufficient", v3b["aggregate"]["consensus_level"], "insufficient")
 
+    print("== 聚合 = 加权档位均值（方向进分，置信只认同族） ==")
+    board = lambda *spec: [{"source": "s%d" % i, "signal": s, "confidence": c}
+                           for i, (s, c) in enumerate(spec)]
+    # 全空头板（最高置信是 0.70 sell）：「最高权重×5」形态下 0.7×5=3.5 会聚合出 buy
+    bear13 = board(*[("hold", c) for c in (0.2, 0.3, 0.35, 0.4, 0.45, 0.5, 0.5, 0.55, 0.6)],
+                   *[("sell", c) for c in (0.65, 0.55, 0.7, 0.63)])
+    a = aggregate(bear13)
+    _check("bear board 9h+4s", (a["final_signal"], a["score"], a["confidence"]),
+           ("hold", 2.6034, 0.46))
+    bear6 = board(("sell", 0.7), ("sell", 0.65), ("sell", 0.55),
+                  ("hold", 0.6), ("hold", 0.5), ("hold", 0.3))
+    vb = adjudicate(bear6, {}, ev)
+    _check("bear board 3s+3h", (vb["aggregate"]["final_signal"],
+                                vb["aggregate"]["confidence"], vb["executable"]),
+           ("sell", 0.64, False))
+    # 纯中性板：hold；共识如实分级（同档 3/3 零冲突 high，置信离散 ≥0.3 → medium）
+    a = aggregate(board(("hold", 0.4), ("hold", 0.5), ("hold", 0.6)))
+    _check("neutral tight", (a["final_signal"], a["consensus_level"], a["confidence"]),
+           ("hold", "high", 0.51))
+    a = aggregate(board(("hold", 0.2), ("hold", 0.5), ("hold", 0.6)))
+    _check("neutral spread", (a["final_signal"], a["consensus_level"]), ("hold", "medium"))
+    # 单条 ≥0.9 高置信意见混在 hold 板里不得把聚合推到 strong_*（「最高权重×5」下 → strong_buy）
+    _check("lone 0.95 hold", aggregate(board(("hold", 0.95), ("hold", 0.5), ("hold", 0.5),
+                                             ("hold", 0.4)))["final_signal"], "hold")
+    _check("lone 0.95 strong_buy", aggregate(board(
+        ("strong_buy", 0.95), ("hold", 0.5), ("hold", 0.5), ("hold", 0.4)))["final_signal"],
+           "buy")
+    # 多空对冲落 hold 且无 hold 意见：无同族支撑 → 置信 0.0
+    vh = adjudicate(board(("buy", 0.8), ("sell", 0.8)), {}, ev)
+    _check("hedge no same-family", (vh["aggregate"]["final_signal"],
+                                    vh["aggregate"]["confidence"]), ("hold", 0.0))
+    # ≥0.9 异见升 high：sell 0.9 与主信号 buy（4.25）隔 2 档
+    a = aggregate(board(("strong_buy", 0.9), ("strong_buy", 0.9), ("strong_buy", 0.9),
+                        ("sell", 0.9)))
+    _check("dissent >=0.9 high", a["conflicts"][-1],
+           {"type": "high_conf_dissent", "severity": "high"})
+    # 阈值边界：数学上恰 3.5（浮点 3.4999…）按四位小数取整归 ≥3.5 → buy
+    _check("boundary 3.5 rounding",
+           aggregate(board(("buy", 0.6), ("hold", 0.6)))["score"], 3.5)
+    # 聚合置信 ≤ 同族最高置信（无同族时上界 0.0）
+    def within_family(spec):
+        a = aggregate([dict(o, signal=valid_signal(o["signal"])) for o in spec])
+        fam = [o["confidence"] for o in spec
+               if FAMILY[valid_signal(o["signal"])] == FAMILY[a["final_signal"]]]
+        return a["confidence"] <= max(fam, default=0.0)
+    _check("agg conf <= family max", all(within_family(s) for s in (
+        ops, ops_s, bear13, bear6, board(("buy", 0.8), ("sell", 0.8)),
+        board(("strong_buy", 0.95), ("hold", 0.5), ("hold", 0.5), ("hold", 0.4))
+    )), True)
+
     print("== 方向冲突 → low；veto 压 hold ==")
+    # 初判须落买入族 veto 才触达：(0.85×5+0.8×2)/1.65=3.5455 → buy
     ops4 = [
-        {"source": "strategy:bull_trend", "signal": "buy", "confidence": 0.85},
+        {"source": "strategy:bull_trend", "signal": "strong_buy", "confidence": 0.85},
         {"source": "strategy:wave_theory", "signal": "sell", "confidence": 0.8},
     ]
     v4 = adjudicate(ops4, {"veto": True}, ev)
     _check("direction conflict", v4["aggregate"]["conflicts"][0]["type"],
            "direction_opposition")
     _check("consensus low", v4["aggregate"]["consensus_level"], "low")
+    _check("veto reached (initial buy)", v4["risk_guard"]["initial"], "buy")
     _check("veto hold", v4["risk_guard"]["final"], "hold")
+    # 高置信异见以聚合信号为锚：sell 0.8 与主信号 buy 隔 2 档 → medium
+    _check("dissent anchored on agg", v4["aggregate"]["conflicts"][1],
+           {"type": "high_conf_dissent", "severity": "medium"})
     _check("buckets", (v4["disagreement"]["buckets"]["bullish"],
                        v4["disagreement"]["buckets"]["bearish"]),
            (["strategy:bull_trend"], ["strategy:wave_theory"]))
 
     print("== RiskGuard 只降不升（高严重度两档） ==")
-    v5 = adjudicate(ops, {"downgrade": True, "severity": "high"}, ev)
+    v5 = adjudicate(ops_s, {"downgrade": True, "severity": "high"}, ev)
     _check("strong_buy -2 = hold", v5["risk_guard"]["final"], "hold")
     _check("buy -2 = sell", risk_guard("buy", downgrade=True, severity_high=True)[0],
            "sell")
@@ -293,18 +370,24 @@ def selftest():
                          "technical": {"state": "available"}, "news": {"state": "missing"},
                          "fundamentals": {"state": "missing"},
                          "chip": {"state": "fetch_failed"}}}
-    v6 = adjudicate(ops, {}, ev_bad)
+    v6 = adjudicate(ops_s, {}, ev_bad)
     _check("cap low", v6["evidence_quality"]["confidence_cap"], "low")
     _check("tier limited", v6["evidence_quality"]["tier"], "limited")
     _check("strong pressed", v6["risk_guard"]["final"], "buy")
     _check("cap log", "confidence_cap" in v6["risk_guard"]["log"][1], True)
 
     print("== 破坏性实验（证明各机制不可拆） ==")
-    # 拆验票门：无效信号（「看多!!!」当 strong_buy）直进意见链的后果
+    # 拆验票门：无效信号（「看多!!!」当 strong_buy）直进意见链的后果——
+    # 过门时空头板 (0.7×2+0.5×3)/1.2=2.4167 → sell；污染票直进后 3.5581 → buy
+    bear_ops = [{"source": "strategy:wave_theory", "signal": "sell", "confidence": 0.7},
+                {"source": "strategy:chan_theory", "signal": "hold", "confidence": 0.5}]
+    gated = adjudicate([{"source": "strategy:hot_theme", "signal": "看多!!!",
+                         "confidence": 0.95}] + bear_ops, {}, ev)
+    _check("E1 gated board stays bearish", gated["aggregate"]["final_signal"], "sell")
     polluted = aggregate([
-        {"source": "strategy:hot_theme", "signal": "strong_buy", "confidence": 0.95},
-        {"source": "strategy:wave_theory", "signal": "sell", "confidence": 0.7}], {})
-    _check("E1 no-partition pollution", polluted["final_signal"], "strong_buy")
+        {"source": "strategy:hot_theme", "signal": "strong_buy", "confidence": 0.95}]
+        + [dict(o) for o in bear_ops], {})
+    _check("E1 no-partition pollution", polluted["final_signal"], "buy")
     # 拆只降不升：允许升级的后果（直接演示被禁形态）
     _check("E2 upgrade forbidden by design", risk_guard("hold", downgrade=True)[0]
            in LADDER[LADDER.index("hold"):], True)
