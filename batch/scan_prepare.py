@@ -39,7 +39,11 @@ def run_prepare(skill_dir, scan_root, code):
            "--with", "yfinance", os.path.join(skill_dir, "scripts", "diagnose.py"),
            "prepare", "--stock", code, "--workdir", wd]
     t0 = time.time()
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+    except subprocess.TimeoutExpired:  # 单股超时按失败记账继续，不炸整个驱动器
+        return {"code": code, "ok": False, "rc": "timeout", "bars": "no_evidence",
+                "dur_s": round(time.time() - t0, 1), "tail": "timeout after 240s"}
     dur = round(time.time() - t0, 1)
     ev = os.path.join(wd, "evidence.json")
     bars_state = "no_evidence"
@@ -118,8 +122,8 @@ def drive_prepare(a):
         results = [r for r in results if r["ok"]] + [r for r in retried if r["ok"]] + \
                   [r for r in retried if not r["ok"]]
 
-    # N x 15 块状态矩阵
-    lines = [f"# 取数矩阵（{len(codes)} 只 x 15 块）", ""]
+    # N x 16 块状态矩阵（核心六块 + 扩展十块，含 fx 的 not_supported 行）
+    lines = [f"# 取数矩阵（{len(codes)} 只 x 16 块）", ""]
     for r in sorted(results, key=lambda x: x["code"]):
         ev = os.path.join(a.scan_root, "vs", r["code"], "evidence.json")
         if os.path.exists(ev):
@@ -143,7 +147,11 @@ def drive_prepare(a):
 
 
 def register_shortlist(a):
-    """shortlisted 股逐只跑 diagnose.py report；当日已登记复用不重跑。"""
+    """shortlisted 股逐只跑 diagnose.py report；已登记复用不重跑。
+
+    去重键与登记写入同源（数据日而非运行日）：register_signal 落的 date 取
+    quote.date/末根日 K 日期，周末/节假日重跑时运行日 ≠ 数据日——只比运行日
+    会重复 append 信号污染台账，故比对「该股将写入的数据日」。"""
     today = a.date or dt.date.today().isoformat()
     try:
         with open(SIGNALS, encoding="utf-8") as f:
@@ -152,20 +160,43 @@ def register_shortlist(a):
         signals = []
     with open(os.path.join(a.scan_root, "midtier.jsonl"), encoding="utf-8") as f:
         sel = [r for r in map(json.loads, f) if r.get("shortlisted")]
+
+    def data_date(code):
+        """该股本次将登记的数据日（register_signal 同源口径），读不出退运行日。"""
+        try:
+            with open(os.path.join(a.scan_root, "vs", code, "evidence.json"),
+                      encoding="utf-8") as f:
+                b = json.load(f).get("blocks", {})
+            q = (b.get("quote") or {}).get("date")
+            if q:
+                return str(q)[:10]
+            bars = (b.get("daily_bars") or {}).get("bars") or []
+            if bars:
+                return str(bars[-1].get("date", ""))[:10]
+        except Exception:  # noqa: BLE001
+            pass
+        return today
+
     n_ok = 0
     for r in sel:
         code = r["code"]
-        if any(s.get("code") == code and s.get("date") == today for s in signals):
+        d0 = data_date(code)
+        if any(s.get("code") == code and s.get("date") in (d0, today)
+               for s in signals):
             n_ok += 1
-            print(f"{code}: 当日已登记（signals.json），复用不重跑")
+            print(f"{code}: 已登记（signals.json date={d0}），复用不重跑")
             continue
-        p = subprocess.run(
-            ["uv", "run", "--no-project", os.path.join(a.skill_dir, "scripts",
-                                                       "diagnose.py"), "report",
-             "--stock", code, "--workdir", os.path.join(a.scan_root, "vs", code)],
-            capture_output=True, text=True, timeout=120)
-        n_ok += p.returncode == 0
-        print(f"{code}: rc={p.returncode} {(p.stdout or p.stderr or '')[-120:]}")
+        try:
+            p = subprocess.run(
+                ["uv", "run", "--no-project", os.path.join(a.skill_dir, "scripts",
+                                                           "diagnose.py"), "report",
+                 "--stock", code, "--workdir", os.path.join(a.scan_root, "vs", code)],
+                capture_output=True, text=True, timeout=120)
+            rc, tail = p.returncode, (p.stdout or p.stderr or "")[-120:]
+        except subprocess.TimeoutExpired:  # 单股超时按失败继续，不炸登记器
+            rc, tail = "timeout", "timeout after 120s"
+        n_ok += rc == 0
+        print(f"{code}: rc={rc} {tail}")
     print(f"DONE: {n_ok}/{len(sel)}")
     return 0 if sel else 2
 

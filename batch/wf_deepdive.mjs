@@ -5,10 +5,11 @@
 // pipeline/log 全局函数、args 为运行入参对象、export const meta 声明元信息）中
 // 运行。路径全部参数化：args.scan_root（批量运行根目录）、args.skill_dir
 //（skill 根目录，digest 命令用）、args.shortlist（midtier 入选表：
-// [{code, name, industry, score}]）。
+// [{code, name, industry, score}]）——三者必填且必须为绝对路径（宿主脚本面
+// 无 Node/process API，`~` 展开由宿主在调用前完成）。
 //
-// 运行入参示例：{ scan_root: '~/.vibe-stock/reports/_scans/<date>-<pool>',
-//                   skill_dir: '~/.claude/skills/vibe-stock',
+// 运行入参示例：{ scan_root: '/Users/<u>/.vibe-stock/reports/_scans/<date>-<pool>',
+//                   skill_dir: '/Users/<u>/.claude/skills/vibe-stock',
 //                   shortlist: [{code:'600519', name:'...', industry:'...', score:3.4}, ...] }
 export const meta = {
   name: 'vibe-stock-deepdive',
@@ -19,10 +20,11 @@ export const meta = {
     { title: 'Synthesize', detail: '确定性合分 + 叙事理由生成' },
   ],
 }
-const S = args.scan_root?.replace(/^~/, process.env.HOME || '~')
-  || `${process.env.HOME}/.vibe-stock/reports/_scans/scan-latest`
-const T = args.skill_dir?.replace(/^~/, process.env.HOME || '~')
-  || `${process.env.HOME}/.claude/skills/vibe-stock`
+if (!args.scan_root || !args.skill_dir
+    || !Array.isArray(args.shortlist) || !args.shortlist.length)
+  throw new Error('入参须为绝对路径：{ scan_root, skill_dir, shortlist:[...] }（缺一不可，~ 展开由宿主完成）')
+const S = args.scan_root
+const T = args.skill_dir
 const digestCmd = (code) => `uv run --no-project ${T}/batch/digest.py --scan-root ${S} ${code}`
 
 const VERIFY = {
@@ -60,7 +62,7 @@ const JUDGE = {
 
 const verifyPrompt = (t) => `你是 vibe-stock 批量诊断的对抗核验代理，负责证伪「${t.code} ${t.name}」的买入论点。只做反驳，不做辩护。
 
-先用 Bash 运行 \`${digestCmd(t.code)}\` 读取证据摘要（stdout JSON；SSOT：score 为 ≥0.2.1 管线聚合分复算，initial/final 为管线初判与终裁）。逐项排查可证伪证据：
+先用 Bash 运行 \`${digestCmd(t.code)}\` 读取证据摘要（stdout JSON；SSOT：score 为 ≥0.0.6 管线聚合分复算，initial/final 为管线初判与终裁）。逐项排查可证伪证据：
 1. 解禁：ext_blocks_truncated.unlock 的 upcoming 批次日期与规模占流通市值比；
 2. 业绩雷：forecast 预告是否预亏/大幅下修；financials.np_yoy 与 rev_yoy 是否背离；
 3. 估值极端：valuation.pe_percentile_5y / pb_percentile_5y 是否处于 5 年高位；
@@ -119,6 +121,11 @@ for (const t of args.shortlist) {
     refuted: v ? v.refute_confidence : null, hard_falsified: v ? v.hard_falsified : null })
 }
 rank.sort((a, b) => b.final_score - a.final_score || b.score - a.score)
+// 硬证伪股不进最终配置：ranking 保留标记与排名供审计（06「硬证伪剔除」），
+// portfolio.py 按本标记跳过资金分配、render_index 如实披露——候补顶上属宿主
+// 编排裁量（候补未过深评，参考实现不自动顶上）
+const nHard = rank.filter((r) => r.hard_falsified).length
+if (nHard) log(`硬证伪 ${nHard} 只保留排名标记、不进配置（portfolio 跳过）`)
 
 phase('Synthesize')
 const NARR = {

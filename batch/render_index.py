@@ -62,18 +62,23 @@ def main():
     ranking = rk["ranking"]
     rows = sorted(alloc["rows"], key=lambda r: r["rank"])
     allm = list(mid.values())
-    n_buy_initial = sum(r["initial"] in BUY for r in allm)
-    n_buy_final = sum(r["final"] in BUY for r in allm)
-    g1 = next((r["gate_fail"][len("G1_not_"):] for r in allm
-               if (r.get("gate_fail") or "").startswith("G1_not_")), "strict")
-    alt = [r for r in allm if not r.get("gate_fail") and not r.get("shortlisted")]
+    okm = [r for r in allm if "excluded" not in r]  # no_verdict 行只留痕，不进统计
+    n_buy_initial = sum(r.get("initial") in BUY for r in okm)
+    n_buy_final = sum(r.get("final") in BUY for r in okm)
+    # G1 采用档从 midtier.jsonl 落盘的 g1_step 读（SSOT），不再从失败标记反推
+    # （score 档零失败时反推兜底 'strict' 会误报）
+    g1 = next((r.get("g1_step") for r in okm if r.get("g1_step")), "strict")
+    alt = [r for r in okm if not r.get("gate_fail") and not r.get("shortlisted")]
     penal = [r for r in ranking if r["penalty"] < 1]
     n_hard = sum(bool(v.get("hard_falsified")) for v in rk["verifiers"].values())
     ws = [r["w_actual"] for r in rows]
     max_loss = sum(r["lots"] * 100 * (r["price"] - r["stop"]) for r in rows)
-    tiers = sorted({r["evidence_tier"] for r in allm})
-    n_unknown_ind = sum(r["industry"] == "未知" for r in allm)
+    tiers = sorted({r["evidence_tier"] for r in okm})
+    n_unknown_ind = sum(r.get("industry") == "未知" for r in okm)
     budget = alloc["budget"]
+    # bin/（运行脚本快照，06 可选产物）存在才渲染 bin/ 相对命令，否则渲染 $SK 形态
+    has_bin = os.path.isdir(os.path.join(a.scan_root, "bin"))
+    rebuild_cmd = "bin/render_index.py" if has_bin else "$SK/batch/render_index.py"
 
     L = [
         f"# A 股{pool_name} 批量诊断 · TOP{a.shortlist_n} 投资价值排名与配置方案", "",
@@ -82,7 +87,7 @@ def main():
         "> 由 [stageC/ranking.json](stageC/ranking.json)、"
         "[portfolio/allocation.json](portfolio/allocation.json)、"
         "[midtier.jsonl](midtier.jsonl) 派生："
-        "`uv run --no-project bin/render_index.py` 重建，勿手改。",
+        "`uv run --no-project %s` 重建，勿手改。" % rebuild_cmd,
         ">",
         "> **免责声明：本报告仅供学习与研究参考，不构成投资建议。系统不下单、"
         "不保证收益。数据可能缺失或滞后。**", "",
@@ -94,15 +99,15 @@ def main():
     ]
     for r in ranking:
         m = mid[r["code"]]
-        sig = m["initial"]
+        sig = m.get("initial")
         L.append("| %d | %s | %s | %s | %s | %s | %s | %s | %s |" % (
-            r["rank"], link(r["code"]), r["name"], m["industry"], sig, m["final"],
+            r["rank"], link(r["code"]), r["name"], m.get("industry"), sig, m.get("final"),
             r.get("score") if r.get("score") is not None else "-",
             r["refuted"] if r["refuted"] is not None else "-",
             "%.3f" % r["final_score"]))
     L += [
         "",
-        "¹ 聚合初判（aggregate.final_signal）与聚合分为 vibe-stock ≥0.2.1 管线口径"
+        "¹ 聚合初判（aggregate.final_signal）与聚合分为 vibe-stock ≥0.0.6 管线口径"
         "（置信收缩加权分，信号档位进分）；终裁含 RiskGuard 只降不升与置信帽。"
         "意见 rationale 以 `vs/<code>/opinions.json` 为准。", "",
         "### 为何值此名次", "",
@@ -150,13 +155,15 @@ def main():
         % (fl.get("pool_size", a.top_n), a.top_n, fl["spot_source"], fl["periods"][0],
            fl["primary_coverage"], fl.get("pool_size", 300), fl["secondary_backfill"],
            fl.get("industry_cap", 3), a.top_n, n_ind),
-        "- **Stage B 全管线诊断（%d/%d）**：每股 15 证据块（取数状态见 "
+        "- **Stage B 全管线诊断（%d/%d）**：每股 16 证据块（取数状态见 "
         "[vs/_fetch_matrix.md](vs/_fetch_matrix.md)，证据档位 %s）→ 每股一 agent "
-        "出意见板（每策略一条+三角色各一条）→ 确定性裁决（≥0.2.1 聚合口径，"
-        "初判买入族 %d 只、终裁买入族 %d 只）。"
-        % (len(allm), a.top_n, "/".join(tiers), n_buy_initial, n_buy_final),
+        "出意见板（每策略一条+三角色各一条）→ 确定性裁决（≥0.0.6 聚合口径，"
+        "初判买入族 %d 只、终裁买入族 %d 只；no_verdict %d 只只留痕不进统计）。"
+        % (len(okm), a.top_n, "/".join(tiers), n_buy_initial, n_buy_final,
+           len(allm) - len(okm)),
         "- **Stage C 深评**：门限 G1–G5（G1 采用档 `%s`%s）→ %d 只对抗核验 → "
-        "三 lens 独立评审 → 确定性合分；硬证伪 %d 只，降权 %d 只。"
+        "三 lens 独立评审 → 确定性合分；硬证伪 %d 只（不进配置，候补顶上属宿主"
+        "裁量），降权 %d 只。"
         % (g1, "，候补：" + "、".join("%s %s" % (r["code"], r["score"]) for r in alt)
            if alt else "", a.shortlist_n, n_hard, len(penal)),
         "- **Stage D**：确定性手数贴合 + %d 项一致性校验（PASS %d / FAIL %d；"
@@ -199,10 +206,13 @@ def main():
         "[midtier_table.md](midtier_table.md) 为其可读视图）",
         "- 深评：[stageC/ranking.json](stageC/ranking.json)（排名、三 lens 子分、"
         "核验反驳明细）；深评输入摘要按需派生："
-        "`uv run --no-project bin/digest.py --scan-root <scan_root> <code>`",
+        "`uv run --no-project %s --scan-root <scan_root> <code>`"
+        % ("bin/digest.py" if has_bin else "$SK/batch/digest.py"),
         "- 组合：[portfolio/allocation.json](portfolio/allocation.json)、"
         "[portfolio/checks.txt](portfolio/checks.txt)",
-        "- 复现脚本：[bin/](bin/)；批量总览：`~/.vibe-stock/reports/_scans/`",
+        "- 复现脚本：%s；批量总览：`~/.vibe-stock/reports/_scans/`"
+        % ("[bin/](bin/)（本次运行脚本快照）" if has_bin
+           else "运行所用 skill 副本 `$SK`（bin/ 快照未生成）"),
     ]
     with open(os.path.join(a.scan_root, "index.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")

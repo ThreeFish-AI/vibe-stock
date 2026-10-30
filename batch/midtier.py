@@ -2,7 +2,7 @@
 """Stage B/C 汇总器：N 只 verdict × Stage A 因子 → midtier.jsonl（中 tier SSOT，
 含 shortlisted 标记）+ midtier_table.md 可读视图 + 门限筛。
 
-vibe-stock ≥0.2.1：直接消费 verdict.aggregate.final_signal（聚合已含信号
+vibe-stock ≥0.0.6：直接消费 verdict.aggregate.final_signal（聚合已含信号
 档位）；聚合分 score 按公式复算——verdict.aggregate 投影不含 score，以
 verdict.valid_opinions 的 signal/confidence/weight（weight 即绩效因子）按
 references/03-synthesis.md 同式复算，公式与 scripts/adjudicate.py 的
@@ -36,9 +36,12 @@ def load_adjudicate(skill_scripts):
 def agg_score(aj, valid):
     """复算置信收缩加权分（与 adjudicate.aggregate() 同式）：
     score = 3 + Σ(绩效ᵢ×置信ᵢ×(档位值ᵢ−3)) / Σ绩效ᵢ，四位小数取整。
-    valid 取自 verdict.valid_opinions（weight 已是绩效因子，不重算）。"""
+    valid 取自 verdict.valid_opinions（weight 已是绩效因子，不重算）。
+    insufficient 早退与 aggregate() 逐字同步：len(valid)<=1 或置信和为 0 → None
+    （单条有效意见不得虚构聚合分——否则可经 G1 降档门放行）。"""
     p = [o.get("weight", 1.0) or 1.0 for o in valid]
-    if not valid or sum(p) == 0:
+    if len(valid) <= 1 or sum(o.get("confidence", 0) for o in valid) == 0 \
+            or sum(p) == 0:
         return None
     return round(3 + sum(pi * o["confidence"] * (aj.LEVEL[o["signal"]] - 3)
                           for pi, o in zip(p, valid)) / sum(p), 4)
@@ -115,7 +118,7 @@ def main():
             "composite_stageA": fnum(uni[code]["composite"]),
             "period_used": uni[code].get("period_used", ""),
             "price": price, "lo20": lo20, "hi20": hi20, "ma20": fnum(tech.get("ma20")),
-            "initial": agg.get("final_signal"),          # 聚合初判（0.2.1 语义已修）
+            "initial": agg.get("final_signal"),          # 聚合初判（0.0.6 语义已修）
             "score": agg_score(aj, valid),               # 同式复算（见模块 docstring）
             "confidence": agg.get("confidence"),
             "consensus": agg.get("consensus_level"),
@@ -213,10 +216,17 @@ def main():
     sel_codes = {r["code"] for r in sel}
     for r in rows:
         r["shortlisted"] = r["code"] in sel_codes
+        if "excluded" not in r:
+            # G1 采用档落 SSOT（render_index 直读，勿从失败标记反推——score 档
+            # 零失败时反推兜底 'strict' 会误报）
+            r["g1_step"] = chosen_step
     with open(os.path.join(a.scan_root, "midtier.jsonl"), "w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    lines = [f"# 中 tier 汇总（{len(ok_rows)} 只，vibe-stock ≥0.2.1 管线口径）", "",
+    step_counts = {}
+    for step_name, pred in g1_steps:  # 各档通过数（06「降档逐档如实记录」）
+        step_counts[step_name] = len([r for r in gated if pred(r)])
+    lines = [f"# 中 tier 汇总（{len(ok_rows)} 只，vibe-stock ≥0.0.6 管线口径）", "",
              "| code | 名称 | 行业 | 初判 | 终裁 | 聚合分 | 板面B/H/S | tier | R_sel | 门限 |",
              "|---|---|---|---|---|---|---|---|---|---|"]
     for r in sorted(ok_rows, key=lambda x: -(x["R_sel"] or 0)):
@@ -225,8 +235,9 @@ def main():
                      f"| {r['board']['bull']}/{r['board']['neutral']}/{r['board']['bear']} "
                      f"| {r['evidence_tier']} | {r['R_sel']} | {r['gate_fail'] or 'PASS'} |")
     lines += [f"",
-              f"- G1 采用档位：{chosen_step}；门限通过 {len(passed)}（--min-pass "
-              f"{a.min_pass}，不足即如实交付不硬凑）；行业帽挤出 {skipped_ind}",
+              f"- G1 采用档位：{chosen_step}（各档通过 {step_counts}）；门限通过 "
+              f"{len(passed)}（--min-pass {a.min_pass}，不足即如实交付不硬凑）；"
+              f"行业帽挤出 {skipped_ind}",
               f"- 最终 shortlist：{[r['code'] for r in sel]}（{len(sel)} 只；"
               f"登记走 scan_prepare.py --register）"]
     with open(os.path.join(a.scan_root, "midtier_table.md"), "w", encoding="utf-8") as f:

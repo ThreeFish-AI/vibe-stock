@@ -233,6 +233,11 @@ def main():
                                                            a.skill_scripts))
         qtf = qtf[0] if isinstance(qtf, tuple) else qtf
         if qtf is not None and len(qtf):
+            # 缓存重跑路径 read_csv(dtype=str) 会把数值列污染成字符串（下文
+            # qt_turnover_wan*1e4 直接 TypeError）——合并前强制回数值
+            for nc in ("qt_price", "qt_pe", "qt_pb", "qt_dy", "qt_turnover_wan"):
+                if nc in qtf:
+                    qtf[nc] = pd.to_numeric(qtf[nc], errors="coerce")
             df = df.merge(qtf, on="code", how="left")
             for src, dst in [("qt_price", "price"), ("qt_pe", "pe"), ("qt_pb", "pb")]:
                 df[dst] = df[dst].fillna(df[src])
@@ -289,8 +294,11 @@ def main():
     # spot 缺 PE/PB（新浪回退）时用业绩表推算：pe_est=price/eps 年化，flag 标注
     df["pe_est_flag"] = df["pe"].isna() & np.isfinite(df["eps_ann"])
     df["pb_est_flag"] = df["pb"].isna() & df["bps"].notna()
-    df["pe_used"] = pd.Series(np.where(df["pe"] > 0, df["pe"], df["price"] / df["eps_ann"]),
-                              index=df.index)
+    # eps_ann=0 时 price/eps_ann 得 +inf 渗入分位——分母非正一律 NaN（PE 钉缺失）
+    df["pe_used"] = pd.Series(
+        np.where(df["pe"] > 0, df["pe"],
+                 np.where(df["eps_ann"] > 0, df["price"] / df["eps_ann"], np.nan)),
+        index=df.index)
     df["pe_used"] = df["pe_used"].where(df["pe_used"] > 0)
     df["pb_used"] = df["pb"].fillna(df["price"] / df["bps"])
     pe_ok = df["pe_used"].notna()

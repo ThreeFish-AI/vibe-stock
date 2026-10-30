@@ -32,7 +32,12 @@ def main():
         mid = {m["code"]: m for m in map(json.loads, f)}
 
     rows = []
+    excluded_hard = []  # 硬证伪股不进配置（06「硬证伪剔除」：ranking 保留标记，此处跳过）
     for r in ranking:
+        if r.get("hard_falsified"):
+            excluded_hard.append({"code": r["code"], "name": r["name"],
+                                  "rank": r.get("rank")})
+            continue
         d = mid[r["code"]]
         price = d["price"]
         lo20, hi20, ma20 = d.get("lo20"), d.get("hi20"), d.get("ma20")
@@ -56,14 +61,18 @@ def main():
     def spent():
         return sum(r["lots"] * LOT * r["price"] for r in rows)
 
-    # 超预算：从 final_score 最低者减手（各保 1 手）
-    guard = 0
-    while spent() > budget and guard < 200:
-        guard += 1
-        cands = [r for r in sorted(rows, key=lambda x: x["final_score"]) if r["lots"] > 1]
-        if not cands:
-            break
-        cands[0]["lots"] -= 1
+    def trim_over_budget():
+        # 超预算：从 final_score 最低者减手（各保 1 手）
+        guard = 0
+        while spent() > budget and guard < 200:
+            guard += 1
+            cands = [r for r in sorted(rows, key=lambda x: x["final_score"])
+                     if r["lots"] > 1]
+            if not cands:
+                break
+            cands[0]["lots"] -= 1
+
+    trim_over_budget()
     # 剩现金 ≥ 最便宜一手：向高分且加后不超带上限者加手
     guard = 0
     while guard < 200:
@@ -76,7 +85,8 @@ def main():
             break
         addable[0]["lots"] += 1
 
-    # 抬底：任何 <w_min 者 +1 手，预算从最大成本仓（减后仍 ≥1 手且 ≥w_min）扣
+    # 抬底：任何 <w_min 者 +1 手，预算从最大成本仓扣——donor 一手价值须 ≥ 抬底
+    # 一手成本（防只扣一手仍穿透预算），无等价 donor 则回退不抬（如实 FAIL 带）
     guard = 0
     while guard < 100:
         guard += 1
@@ -86,12 +96,16 @@ def main():
         low = sorted(lows, key=lambda x: x["final_score"])[-1]  # 先抬分高的欠重股
         low["lots"] += 1
         if spent() > budget:
+            one_low = LOT * low["price"]
             doners = [r for r in sorted(rows, key=lambda x: -x["lots"] * LOT * x["price"])
                       if r is not low and r["lots"] > 1
-                      and (r["lots"] - 1) * LOT * r["price"] / budget >= w_min - 1e-9]
+                      and (r["lots"] - 1) * LOT * r["price"] / budget >= w_min - 1e-9
+                      and LOT * r["price"] >= one_low]
             if not doners:
+                low["lots"] -= 1  # 回退：无等价 donor，本轮不抬（欠带由 checks 披露）
                 break
             doners[0]["lots"] -= 1
+    trim_over_budget()  # 防御性收口：任何路径后都不许 spent() > budget
 
     for r in rows:
         r["cost"] = round(r["lots"] * LOT * r["price"], 2)
@@ -105,9 +119,16 @@ def main():
 
     # ---- 一致性校验（checks.txt 全 PASS 才算完成）----
     checks = []
-    checks.append(("权重和+零股现金=100%",
-                   abs(sum(r["w_actual"] for r in rows) + cash_left / budget - 1) <= 0.005,
-                   f"w_sum={sum(r['w_actual'] for r in rows):.4f} cash={cash_left}"))
+    # 两条可证伪校验（原「权重和+现金=100%」恒等式永真、删）：现金非负、权重和
+    # 不超预算——抬底/减手任何路径穿透都会在此 FAIL 而非被恒等式掩盖
+    checks.append(("零股现金非负", cash_left >= -1e-6, f"cash={cash_left}"))
+    checks.append(("权重和≤100%", sum(r["w_actual"] for r in rows) <= 1 + 0.005,
+                   f"w_sum={sum(r['w_actual'] for r in rows):.4f}"))
+    if excluded_hard:
+        checks.append(("硬证伪股零配置", True,
+                       "剔除 %d 只：%s（候补顶上属宿主裁量，见 06）"
+                       % (len(excluded_hard),
+                          ",".join(x["code"] for x in excluded_hard))))
     for r in rows:
         checks.append((f"{r['code']} 仓位带", w_min - 0.001 <= r["w_actual"] <= w_max + 0.001,
                        f"w={r['w_actual']:.3f} lots={r['lots']}"))
@@ -126,7 +147,8 @@ def main():
     with open(os.path.join(a.scan_root, "portfolio", "allocation.json"), "w",
               encoding="utf-8") as f:
         json.dump({"rows": rows, "cash_left": cash_left, "budget": budget,
-                   "w_band": [w_min, w_max], "industry_counts": ind_cnt},
+                   "w_band": [w_min, w_max], "industry_counts": ind_cnt,
+                   "excluded_hard_falsified": excluded_hard},
                   f, ensure_ascii=False, indent=2)
     with open(os.path.join(a.scan_root, "portfolio", "checks.txt"), "w",
               encoding="utf-8") as f:
