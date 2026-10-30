@@ -2,6 +2,83 @@
 
 本文件只登记版本级变化；条目遵循 Keep a Changelog、[SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-10-30
+
+### Fixed
+
+- 报告风险/利好/附录逐条接回意见与 risk.json 的 rationale
+  （RSI-20261029-02）：原风险栏/利好栏恒「（无登记）」——旧实现
+  verdict.valid_opinions 只投影四键、恒无 rationale，两栏从未列出条目；现
+  经 partition 同一验票判据按 source 挂 rationale（未过验票不挂），风险
+  角色理由标注 veto/downgrade 触发态，附录意见行附 rationale 原文，空栏
+  仍如实「（无登记）」。
+- RiskGuard veto 与 downgrade 同真时各自施加、取更保守者（RSI-20261030-01）：
+  原实现 veto 提前返回吞掉 downgrade——buy 经 severity=high 两档降本应
+  sell、加 veto 反被截停在 hold，风险输入越多终裁越宽松；现两者对同一初判
+  各施其罚、取档位更保守者，log 同真时两步都记（stricter=终裁），selftest
+  穷举五档 × veto/downgrade/severity_high 40 组合永不升级、60 个
+  false→true 翻转单调不更宽松。
+- 盘中未完成 K 线标注与量比线性外推，价格口径入信号登记（RSI-20261030-02）：
+  原盘中跑把未收盘的半根 K 当完整 K，量比假缩量误导策略判据；现 session
+  标注 SSOT 落 evidence.meta.session（phase/as_of/elapsed_min/session_min/
+  last_bar_partial，快照模式不判时段=unknown），末根未完成时 technical
+  原值保留、另出 vol_ratio_5_projected 按已开盘交易分钟线性外推
+  （estimated；坑位：早盘量能 U 形分布下外推值系统性偏高），context-pack
+  头部出盘中警示行点名末根 OHLCV/MA/RSI/MACD 末值等受影响口径，
+  register_signal 增 price_kind（intraday/close/unknown）——price_kind=
+  intraday 时 close_at_signal 为盘中价而非收盘价，后验解读注意（后验基准
+  沿用登记价原样不回改），报告现价注明「（盘中价）」。
+- 结论句理由按终裁信号选取（RSI-20261030-03）：原取「与聚合初判同信号的
+  首条意见」，RiskGuard 改判后出现终裁 sell 却挂 hold 理由的错位；现改判
+  致终裁≠初判时优先挂 risk.json.rationale 摘要并注明「初判 X 经 RiskGuard
+  改判为 Y」，无改判取与终裁同信号（其次同方向族）的最高置信意见并标注
+  source，置信帽压档时径取同族，都没有则不硬凑。
+- 合并前独立评审收口（六镜头评审 + 对抗核验确认项）：附录诊断行的
+  source/原始输出改走 rationale 同通道处置（剥哨兵+转全角+折单行）——原 %r
+  原样回显会把无效意见 signal 携带的哨兵原文逐字写进报告（先存缺口，本 PR
+  规约句同爆炸半径内补全）；_one_line 增方括号/反引号转全角，掐断 rationale
+  经 markdown 链接/图片语法注入渲染器；快照模式二次推导合并时清除 session
+  门控关闭后的残留 vol_ratio_5_projected（不再孤儿穿透渲染出 None/None 分钟
+  数的无时段背书外推行）。
+
+### Changed
+
+- **聚合算法语义级变更（RSI-20261029-01）**：加权分由「最高置信×绩效×5」
+  （wscore=max）改为置信收缩加权分 score = 3 + Σ(绩效ᵢ × 置信ᵢ ×
+  (档位值ᵢ−3)) / Σ绩效ᵢ（档位值 strong_buy=5 … strong_sell=1：每条意见先按
+  1−置信向 hold 收缩，再按绩效因子加权平均，四位小数取整比阈值）；主信号
+  改锚聚合信号（共识与高置信异见同锚，消除「终裁 hold、共识按某条 sell
+  意见计」错位），聚合置信只取与聚合信号同方向族按绩效加权（≤ 同族最高
+  置信，无同族支撑 0.0）。旧实现两死形态：方向盲——信号档位不进分，纯
+  空头板只要最高置信 ≥0.70 就 wscore≥3.5 恒出买入族；单条独裁——一条
+  ≥0.9 意见可无视全板直接 strong_buy。
+  - 收严面：高置信空头/中性板不再恒买入族（旧口径 wscore=max(置信×绩效×5)
+    与方向无关——绩效中性时板上最高置信 ≥0.70 即恒落买入族，数学恒真），
+    单条 ≥0.9 独裁终结；selftest 显式钉 9hold+4sell 板（最高
+    置信 0.70 sell）旧 buy→新 hold、单条 0.95 strong_buy 混 hold 板旧
+    strong_buy→新 hold。
+  - 放宽面（AGENTS.md 红线 4，逐条点名供人工评审）：放宽集中于一致/多数
+    多头板与低置信板，含跨入买入族的形态——selftest 已钉 `relax: 2x sb`
+    两例：2×strong_buy 0.6 旧 hold→新 buy、2×0.8 旧 buy→新 strong_buy
+    （一致方向攒够幅度即进档）；最小反例 8×strong_buy 0.60 + 2×hold 0.50
+    → 旧 hold / 新 buy——多数多头板一步跨进买入族；数学边界（可验证，
+    同信号一致板）：buy 板进 buy 须平均置信 ≥0.5、strong_buy 板进
+    strong_buy 须 ≥0.75（与 CONFIDENCE_GATE 同量纲）；strong_* 板进
+    相邻档门槛减半——strong_buy 板 ≥0.25 即聚合 buy、strong_sell 板
+    >0.25 即聚合 sell，评估放宽面勿按 0.5 门槛估。低置信一致空头板按
+    [03] 字面旧判
+    （<1.5→strong_sell）的 strong_sell→新 hold——低置信不再独裁最重卖出档。
+  - <1.5 兜底由 hold 改 strong_sell，对齐 [03] 阈值表字面（旧代码兜底
+    分支错写 hold，strong_sell 档从未可达）。
+  - 共识分级锚修正：共识与高置信异见均以聚合信号为主信号（aligned 按与
+    聚合信号同档计），正常路径样例 medium→high 属重算副作用。
+  - golden verdict 重建：初判 hold（加权分 3.48、同族置信 0.63）、veto
+    只压买入族故 no-op、0.85 strong_buy 隔 2 档构成 high_conf_dissent
+    回归；evals/README 断言要点同步。
+  - 本条为语义级变更，按默认纪律升 patch（0.2.1），维护者可改判 0.3.0
+    再合并；selftest 判据改动逐条为重算/收严/新增钉，无删除断言（置信帽
+    与两档降级换 strong_buy 初判 Fixture 保持触达）。
+
 ## [0.2.0] - 2026-10-28
 
 ### Added

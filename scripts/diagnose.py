@@ -19,10 +19,12 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch as fx  # noqa: E402
+import adjudicate as aj  # noqa: E402
 
 STATE_DIR = os.path.expanduser("~/.vibe-stock")
 SIGNALS = os.path.join(STATE_DIR, "signals.json")
@@ -236,15 +238,36 @@ def render_ext_blocks(lines, b):
             lines.append(" · ".join(seg))
 
 
+def _intraday_warning(ss, bars, tech):
+    """盘中警示行（01「盘中口径」）：phase=intraday 才出，按末根是否完成改述。"""
+    head = "- **[盘中警示]** 取数于 %s（UTC+8，已开盘 %s/%s 交易分钟）" % (
+        str(ss.get("as_of", ""))[:16].replace("T", " "), ss.get("elapsed_min"),
+        ss.get("session_min"))
+    if not bars:  # 日 K 未能取得：时段可判而末根无从谈起，如实另述
+        return head + "：日 K 未能取得，报价可能为盘中价，结论以收盘后复核为准。"
+    last = bars[-1]["date"]
+    if not ss.get("last_bar_partial"):
+        return head + "：日 K 末根 %s 为已完成 K 线（今日 K 线未出或休市日）；" \
+            "报价可能为盘中价，结论以收盘后复核为准。" % last
+    ref = ("应参考 vol_ratio_5_projected（线性外推，estimated）或收盘后复核"
+           if tech.get("vol_ratio_5_projected") is not None else "以收盘后复核为准")
+    return head + "：日 K 末根 %s 未收盘——vol_ratio_5、vol_series_10 末位、" \
+        "last_bar_pattern 与末根 OHLCV 均为未完成 K 线口径（量能系统性偏低，" \
+        "MA/RSI/MACD 末值按盘中价计）；缩量/放量判据%s；报价为盘中价。" % (last, ref)
+
+
 def render_context_pack(evidence, workdir):
     q = evidence["quality"]
     b = evidence["blocks"]
     tech = b.get("technical", {})
     bars = b.get("daily_bars", {}).get("bars", [])
+    ss = evidence["meta"].get("session") or {}
     lines = []
     lines.append("# 证据包 · %s（%s）" % (evidence["meta"]["symbol"],
                                          evidence["meta"].get("market", "snapshot")))
     lines.append("")
+    if ss.get("phase") == "intraday":
+        lines.append(_intraday_warning(ss, bars, tech))
     lines.append("- 质量：%d（%s）· 置信帽：%s%s" % (
         q["score"], q["tier"], q["confidence_cap"],
         "（核心证据降级：报告禁止出现『强烈』『必定』等高置信表述，结论最高到 buy/sell 一档）"
@@ -272,6 +295,11 @@ def render_context_pack(evidence, workdir):
                 "new_low_20d", "consecutive_up_days"]
         lines.append(" ".join("%s=%s" % (k, tech.get(k)) for k in keys
                               if tech.get(k) is not None))
+        if tech.get("vol_ratio_5_projected") is not None and ss.get("last_bar_partial"):
+            lines.append("vol_ratio_5_projected: %s（estimated：末根未完成，按已开盘 %s/%s "
+                         "交易分钟线性外推全天量；日内量 U 形分布，早盘偏高、午后偏低）"
+                         % (tech["vol_ratio_5_projected"], ss.get("elapsed_min"),
+                            ss.get("session_min")))
         if tech.get("macd"):
             lines.append("macd: %s" % tech["macd"])
         if tech.get("box_60d"):
@@ -411,6 +439,13 @@ def load_json(path, default):
         return default
 
 
+def _price_kind(evidence):
+    """报价口径（时段 SSOT 在 evidence.meta.session）：盘中取数=intraday（不保证
+    为收盘价）、非交易时段=close、快照/旧 evidence 无时段=unknown。"""
+    ph = ((evidence.get("meta") or {}).get("session") or {}).get("phase")
+    return {"intraday": "intraday", "closed": "close"}.get(ph, "unknown")
+
+
 def register_signal(evidence, verdict, opinions, report_id, report_path):
     market = evidence["meta"].get("market", "?")
     code = evidence["meta"].get("code") or evidence["meta"]["symbol"]
@@ -437,6 +472,7 @@ def register_signal(evidence, verdict, opinions, report_id, report_path):
     quote = evidence["blocks"].get("quote", {}) or {}
     # 与 render_report/pack 报价节同口径（qt 实时叠加价优先）：报告展示价、
     # 信号登记价、postmortem 后验基准价三点同源；quote 缺失回退日 K 末根。
+    # 盘中登记时 close0 是盘中价而非收盘价，price_kind 如实标注口径。
     close0 = quote.get("price") or (bars[-1]["close"] if bars else None)
     date0 = (quote.get("date") or (bars[-1]["date"] if bars else None)
              or dt.date.today().isoformat())
@@ -449,6 +485,7 @@ def register_signal(evidence, verdict, opinions, report_id, report_path):
         "horizons": [1, 3, 5, 10], "regime": verdict["disagreement"]["conflicts"]
         and "conflict" or "aligned",
         "date": date0, "close_at_signal": close0,
+        "price_kind": _price_kind(evidence),
         "sources": [o["source"] for o in verdict["valid_opinions"]],
         "status": "pending", "evaluated": {}, "note": note,
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
@@ -465,7 +502,61 @@ def _fmt_price(v):
     return "—" if v is None else round(v, 2)
 
 
-def render_report(evidence, verdict, opinions, stock):
+def _one_line(text):
+    """LLM 产出（rationale/诊断原始输出）入报告：剥哨兵标记、尖/方括号与
+    反引号转全角、折成单行——报告不复述哨兵原文（04 规约），换行不得撑破
+    bullet 结构；方括号全角化同时掐断 markdown 链接/图片注入（](url) 失效）。"""
+    s = re.sub(r"</?untrusted_external\b[^>]*>", "", str(text or ""))
+    for a, b in (("<", "＜"), (">", "＞"), ("[", "［"), ("]", "］"), ("`", "｀")):
+        s = s.replace(a, b)
+    return " ".join(s.split())
+
+
+def _opinions_with_rationale(verdict, opinions):
+    """verdict.valid_opinions 只存四键（裁决 SSOT，不扩结构）；rationale 的
+    SSOT 是 opinions.json：经 adjudicate.partition 同一验票判据筛出过门意见，
+    按 source 依序接回——未过验票的意见（含同 source 的表外写法）不挂。"""
+    pool = {}
+    for o in aj.partition(opinions or [])[0]:
+        pool.setdefault(o["source"], []).append(o.get("rationale") or "")
+    rows = []
+    for o in verdict["valid_opinions"]:
+        q = pool.get(o["source"])
+        rows.append(dict(o, rationale=_one_line(q.pop(0)) if q else ""))
+    return rows
+
+
+def _clip(s, n=120):
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
+def _conclusion_reason(rg, rows, risk):
+    """结论理由须支撑终裁 rg.final（04 §1）：RiskGuard 改判致终裁≠初判 → 优先
+    risk.json.rationale 摘要并注明改判；否则取同信号（其次同方向族；置信帽压档
+    时径取同方向族）最高置信意见；都没有不挂（不硬凑）。"""
+    final, initial = rg["final"], rg["initial"]
+    guarded = rg.get("final_before_cap", final)
+    note = ""
+    if final != initial and guarded != initial:
+        note = "初判 %s 经 RiskGuard 改判为 %s%s" % (
+            initial, guarded, "、置信帽压为 %s" % final if final != guarded else "")
+        rr = _one_line(risk.get("rationale"))
+        if rr:
+            return "%s——风险角色 risk.json：%s" % (note, _clip(rr))
+    pool = [o for o in rows if o["rationale"]]
+    cands = [o for o in pool if o["signal"] == final] if final == guarded else []
+    cands = cands or [o for o in pool
+                      if aj.FAMILY[o["signal"]] == aj.FAMILY[final]]
+    if not cands:
+        return note
+    o = max(cands, key=lambda o: o["confidence"])
+    why = "%s（%s·%s %.2f）" % (_clip(o["rationale"]), o["source"], o["signal"],
+                               o["confidence"])
+    return "%s——%s" % (note, why) if note else why
+
+
+def render_report(evidence, verdict, opinions, stock, risk=None):
+    risk = risk if isinstance(risk, dict) else {}
     q = evidence["quality"]
     agg = verdict["aggregate"]
     rg = verdict["risk_guard"]
@@ -478,9 +569,8 @@ def render_report(evidence, verdict, opinions, stock):
     close_n = [b["close"] for b in bars[-20:]] or [price or 0]
     lo20, hi20 = _fmt_price(min(close_n)), _fmt_price(max(close_n))
     ma20 = tech.get("ma20")
-    ops = {o["source"]: o for o in verdict["valid_opinions"]}
-    rationale = next((o.get("rationale", "") for o in opinions
-                      if o.get("signal") == agg["final_signal"]), "")
+    rows = _opinions_with_rationale(verdict, opinions)
+    rationale = _conclusion_reason(rg, rows, risk)
     cap_note = ("置信帽 low：核心证据降级，strong_* 已压一档。"
                 if q["confidence_cap"] == "low" else "")
     conflicts = agg["conflicts"]
@@ -535,8 +625,10 @@ def render_report(evidence, verdict, opinions, stock):
             L.append("- %s" % e)
         L.append("")
     L.append("## 关键价位")
-    L.append("- 现价 %s · 20 日低 %s / 高 %s · MA20 %s" % (
-        _fmt_price(price), lo20, hi20, _fmt_price(ma20)))
+    L.append("- 现价 %s%s · 20 日低 %s / 高 %s · MA20 %s" % (
+        _fmt_price(price),
+        "（盘中价）" if _price_kind(evidence) == "intraday" else "",
+        lo20, hi20, _fmt_price(ma20)))
     if price:
         L.append("- 参考买点 %s（近 20 日低点上方）· 止损 %s（跌破 20 日低/−5%%）"
                  "· 目标 %s（20 日高点）" % (
@@ -544,12 +636,25 @@ def render_report(evidence, verdict, opinions, stock):
                      _fmt_price(price * 0.95), hi20))
     L.append("")
     L.append("## 风险与利好")
-    risks = [o["rationale"] for o in ops.values()
-             if o["signal"] in ("sell", "strong_sell") and o.get("rationale")]
-    bulls = [o["rationale"] for o in ops.values()
-             if o["signal"] in ("buy", "strong_buy") and o.get("rationale")]
+    # 逐条可溯源（04 §4）：意见带 source 与 signal/置信；风险栏另挂风险角色
+    # risk.json.rationale（RiskGuard 输入的论证面），标注触发态
+    def _items(fam):
+        return ["%s（%s·置信 %.2f）：%s" % (o["source"], o["signal"],
+                                         o["confidence"], o["rationale"])
+                for o in rows if o["signal"] in fam and o["rationale"]]
+    risks, bulls = _items(("sell", "strong_sell")), _items(("buy", "strong_buy"))
+    rr = _one_line(risk.get("rationale"))
+    if rr:
+        trig = "、".join(k for k in ("veto", "downgrade") if risk.get(k))
+        risks.append("风险角色 risk.json（%s）：%s" % (
+            "%s·%s" % (trig, risk.get("severity") or "medium") if trig
+            else "未触发 veto/downgrade", rr))
     for tag, items in (("风险", risks), ("利好", bulls)):
-        L.append("- **%s**：%s" % (tag, "；".join(items) if items else "（无登记）"))
+        if not items:
+            L.append("- **%s**：（无登记）" % tag)
+            continue
+        L.append("- **%s**：" % tag)
+        L.extend("  - %s" % it for it in items)
     L.append("")
     L.append("## 操作建议")
     final = rg["final"]
@@ -573,11 +678,15 @@ def render_report(evidence, verdict, opinions, stock):
         L.append("- [%s] %s" % ("x" if ok else " ", name))
     L.append("")
     L.append("## 附：各意见（含绩效因子加权）")
-    for o in verdict["valid_opinions"]:
-        L.append("- %s：%s（置信 %.2f × 绩效 %s）" % (
-            o["source"], o["signal"], o["confidence"], o["weight"]))
+    for o in rows:
+        L.append("- %s：%s（置信 %.2f × 绩效 %s）%s" % (
+            o["source"], o["signal"], o["confidence"], o["weight"],
+            "——" + o["rationale"] if o["rationale"] else ""))
     for d in verdict["diagnostics"]:
-        L.append("- 诊断：%s 原始输出 %r（%s）" % (d["source"], d["raw"], d["reason"]))
+        # 诊断行的 source/raw 同为 LLM 产出：与 rationale 同通道剥哨兵（%r 回显
+        # 会把哨兵原文逐字写进报告，违 04「报告不复述哨兵原文」）
+        L.append("- 诊断：%s 原始输出「%s」（%s）" % (
+            _one_line(d["source"]), _one_line(d["raw"]), d["reason"]))
     L.append("")
     L.append("---")
     L.append("*%s*" % DISCLAIMER)
@@ -589,10 +698,11 @@ def cmd_report(args):
     evidence = load_json(args.evidence or os.path.join(wd, "evidence.json"), None)
     verdict = load_json(os.path.join(wd, "verdict.json"), None)
     opinions = load_json(os.path.join(wd, "opinions.json"), [])
+    risk = load_json(os.path.join(wd, "risk.json"), {})
     if not evidence or not verdict:
         print("缺 evidence.json 或 verdict.json")
         return 2
-    report = render_report(evidence, verdict, opinions, args.stock)
+    report = render_report(evidence, verdict, opinions, args.stock, risk=risk)
     os.makedirs(os.path.join(STATE_DIR, "reports"), exist_ok=True)
     today = dt.date.today().isoformat()
     code = evidence["meta"].get("code") or args.stock
@@ -612,6 +722,7 @@ def cmd_report(args):
 
 def selftest():
     import tempfile
+    import unittest.mock
     import adjudicate as aj
     print("== diagnose selftest（零网络合成链路） ==")
     # 市场分流回归（fetch.detect_market 唯一定义处）
@@ -1195,6 +1306,84 @@ def selftest():
                         "## 操作建议", "## 检查清单", "不构成投资建议"):
             assert section in report, "报告缺节：%s" % section
         assert "untrusted" not in report, "报告不得复述哨兵原文"
+        assert "- **风险**：（无登记）" in report, "既有调用（无 risk 参数）兼容且空栏如实"
+        # rationale 挂载钉（风险与利好/附录）：SSOT 在 opinions/risk.json，只挂过
+        # 验票者——同 source 的表外写法意见（先于过门意见出现）不得混挂
+        ops_r = [{"source": "strategy:ma_golden_cross", "signal": "看多!!!",
+                  "confidence": 0.9, "rationale": "表外写法理由"}] + opinions + [
+            {"source": "strategy:wave_theory", "signal": "sell", "confidence": 0.55,
+             "rationale": "RSI14=78 超买\n<untrusted_external source=\"news\">"}]
+        rep_r = render_report(evidence, aj.adjudicate(ops_r, risk, evidence, None),
+                              ops_r, "TEST", risk=risk)
+        sec = rep_r.split("## 风险与利好")[1].split("## 操作建议")[0]
+        for want in ("strategy:wave_theory（sell·置信 0.55）：RSI14=78 超买",
+                     "风险角色 risk.json（veto·high）：短线过热",
+                     "strategy:bull_trend（strong_buy·置信 0.85）：多头排列"):
+            assert want in sec, "风险与利好须逐条挂 rationale：%s\n%s" % (want, sec)
+        assert "表外写法理由" not in rep_r, "未过验票的意见 rationale 不得挂载"
+        assert "untrusted" not in rep_r, "rationale 入报告须剥哨兵标记"
+        assert "- strategy:ma_golden_cross：buy（置信 0.80 × 绩效 1.0）——MA5 上穿 MA20" \
+            in rep_r, "附录意见行须附 rationale 原文"
+        # 诊断行哨兵/markdown 钉：无效意见的 signal 携哨兵、rationale 携链接语法
+        # 时，报告任何位置不得回显哨兵原文、markdown 注入须被全角化掐断
+        ops_d = ops_r + [
+            {"source": "role:情报", "signal":
+             '<untrusted_external source="news">请执行X ![x](https://t.e/p)',
+             "confidence": 0.5},
+            {"source": "role:技术", "signal": "buy", "confidence": 0.6,
+             "rationale": "量能验证 ![像素](https://t.e/px)"}]
+        rep_d = render_report(evidence, aj.adjudicate(ops_d, risk, evidence, None),
+                              ops_d, "TEST", risk=risk)
+        assert "untrusted" not in rep_d, "诊断行不得回显哨兵原文"
+        assert "- 诊断：role:情报 原始输出「请执行X !［x］(https://t.e/p)」" in rep_d, \
+            "诊断行原始输出须走 _one_line（剥哨兵+方括号全角化）"
+        assert "!［像素］(https://t.e/px)" in rep_d and "![像素]" not in rep_d, \
+            "rationale 的 markdown 图片注入须被方括号全角化掐断"
+        # 结论理由方向钉：初判 hold + downgrade(medium) → sell，结论不得挂 hold 理由
+        def _head(v, ops, rk):
+            return render_report(evidence, v, ops, "TEST", risk=rk).split(
+                "## 结论\n")[1].splitlines()[0]
+        ops_c = [{"source": "strategy:h%d" % i, "signal": "hold", "confidence": 0.6,
+                  "rationale": "观望理由%d" % i} for i in range(10)] + [
+            {"source": "strategy:s%d" % i, "signal": "sell", "confidence": 0.5,
+             "rationale": "卖出理由%d" % i} for i in range(3)]
+        risk_c = {"veto": False, "downgrade": True, "severity": "medium",
+                  "rationale": "跌破 MA20 且放量"}
+        v_c = aj.adjudicate(ops_c, risk_c, evidence, None)
+        assert (v_c["risk_guard"]["initial"], v_c["risk_guard"]["final"]) == (
+            "hold", "sell"), "合成板前提：初判 hold 经 downgrade 终裁 sell %r" % (
+                v_c["risk_guard"],)
+        hc = _head(v_c, ops_c, risk_c)
+        assert hc.startswith("**sell**") and "观望理由" not in hc, hc
+        assert "初判 hold 经 RiskGuard 改判为 sell——风险角色 risk.json：跌破 MA20 且放量" \
+            in hc, hc
+        hc2 = _head(v_c, ops_c, dict(risk_c, rationale=""))  # 无风险理由回落卖出族
+        assert "观望理由" not in hc2 and "卖出理由0（strategy:s0·sell 0.50）" in hc2, hc2
+        # 无改判：结论理由与终裁同信号（最高置信），不注改判
+        ops_n = [{"source": "strategy:a", "signal": "buy", "confidence": 0.8,
+                  "rationale": "金叉放量"},
+                 {"source": "strategy:b", "signal": "buy", "confidence": 0.7,
+                  "rationale": "站上均线"},
+                 {"source": "role:风险", "signal": "hold", "confidence": 0.6,
+                  "rationale": "等待确认"}]
+        v_n = aj.adjudicate(ops_n, {}, evidence, None)
+        assert v_n["risk_guard"]["initial"] == v_n["risk_guard"]["final"] == "buy", \
+            v_n["risk_guard"]
+        hn = _head(v_n, ops_n, {})
+        assert "。金叉放量（strategy:a·buy 0.80）" in hn and "等待确认" not in hn \
+            and "RiskGuard" not in hn, hn
+        # 置信帽压档（strong_buy→buy）：径取同方向族最高置信，不挑低置信同信号意见
+        ops_k = [{"source": "strategy:bull_trend", "signal": "strong_buy",
+                  "confidence": 0.9, "rationale": "多头排列"}] + ops_n[1:]
+        v_k = dict(aj.adjudicate(ops_k, {}, evidence, None), risk_guard={
+            "initial": "strong_buy", "final_before_cap": "strong_buy", "final": "buy",
+            "log": ["no-op", "confidence_cap strong_buy->buy (core evidence degraded)"]})
+        hk = _head(v_k, ops_k, {})
+        assert "。多头排列（strategy:bull_trend·strong_buy 0.90）" in hk, hk
+        # 改判且无任何同向理由：只注改判、不硬凑
+        hv = _head(dict(v_n, risk_guard={"initial": "buy", "final_before_cap": "sell",
+                                          "final": "sell", "log": []}), ops_n, {})
+        assert hv.endswith("。初判 buy 经 RiskGuard 改判为 sell"), hv
         # 0.2.0：报告全块状态表（核心/扩展标注）+ 近期事件 bullet
         assert "| moneyflow |" in report and "扩展·0分" in report
         assert "| valuation | 扩展·0分 | missing |" in report
@@ -1331,6 +1520,54 @@ def selftest():
         kl = [ln for ln in tk.splitlines() if ln.startswith("2026-10-")]
         assert kl and all(len(l.split()) == 7 for l in kl), \
             "bars≤10 首行涨跌幅须「—」占位守住七列"
+        # -- 盘中口径：时段判定纯函数（固定 now）· 外推量比 · 警示行 · 盘中价 --
+        tz8 = dt.timezone(dt.timedelta(hours=8))
+
+        def _at(h, m, day=30):  # 2026-10-30 周五 / 10-31 周六
+            return dt.datetime(2026, 10, day, h, m, tzinfo=tz8)
+        for args, want in (
+                (("cn", "2026-10-30", _at(10, 26)), ("intraday", 56, 240, True)),
+                (("cn", "2026-10-30", _at(12, 0)), ("intraday", 120, 240, True)),
+                (("cn", "2026-10-30", _at(15, 5)), ("closed", 240, 240, False)),
+                (("cn", "2026-10-29", _at(10, 26)), ("intraday", 56, 240, False)),
+                (("cn", "2026-10-31", _at(10, 26, 31)), ("closed", 0, 240, False)),
+                (("hk", "2026-10-30", _at(15, 30)), ("intraday", 300, 330, True)),
+                # aware now 统一换算 UTC+8：UTC 02:26 = 10:26
+                (("cn", "2026-10-30", dt.datetime(2026, 10, 30, 2, 26,
+                                                  tzinfo=dt.timezone.utc)),
+                 ("intraday", 56, 240, True))):
+            s = fx.session_phase(*args)
+            got = (s["phase"], s["elapsed_min"], s["session_min"], s["last_bar_partial"])
+            assert got == want, "session_phase%r=%r 期望 %r" % (args, got, want)
+        ss_in = fx.session_phase("cn", "2026-10-30", _at(10, 26))
+        assert ss_in["as_of"] == "2026-10-30T10:26:00+08:00", ss_in
+        ib = [{"date": "2026-10-%02d" % d, "open": 10, "high": 10.2, "low": 9.9,
+               "close": 10.1, "volume": 10000} for d in range(1, 30)]
+        ib[-1] = {"date": "2026-10-30", "open": 10.1, "high": 10.1, "low": 9.6,
+                  "close": 9.7, "volume": 4700}  # 开盘 56 分钟的半截量
+        ti = fx.derive_technical(ib, ss_in)
+        assert ti["vol_ratio_5"] == 0.47 and ti["vol_ratio_5_projected"] == 2.01, \
+            "原量比如实保留、外推=4700×240/56÷10000：%r" % ti
+        for s_np in (None, fx.session_phase("cn", "2026-10-29", _at(10, 26)),
+                     fx.session_phase("cn", "2026-10-30", _at(9, 30))):  # elapsed=0
+            assert "vol_ratio_5_projected" not in fx.derive_technical(ib, s_np), s_np
+        ev_i = json.loads(json.dumps(evidence))
+        ev_i["meta"]["session"] = ss_in
+        ev_i["blocks"]["quote"] = {"state": "available", "price": 9.7}
+        ev_i["blocks"]["daily_bars"]["bars"] = ib
+        ev_i["blocks"]["technical"] = {"state": "available", **ti}
+        ti_txt = open(render_context_pack(ev_i, td), encoding="utf-8").read()
+        warn = [ln for ln in ti_txt.splitlines()[:4] if "[盘中警示]" in ln]
+        assert warn and "末根 2026-10-30 未收盘" in warn[0] and \
+            "vol_ratio_5_projected" in warn[0] and "报价为盘中价" in warn[0], ti_txt[:400]
+        assert "vol_ratio_5_projected: 2.01（estimated" in ti_txt, "外推值须渲染并标 estimated"
+        ev_c = json.loads(json.dumps(ev_i))
+        ev_c["meta"]["session"] = fx.session_phase("cn", "2026-10-30", _at(15, 5))
+        assert "[盘中警示]" not in open(render_context_pack(ev_c, td),
+                                     encoding="utf-8").read(), "收盘后不出警示行"
+        assert "[盘中警示]" not in text, "无时段（快照/旧 evidence）不出警示行"
+        assert "现价 9.7（盘中价）" in render_report(ev_i, verdict, opinions, "TEST"), \
+            "盘中报告现价须注明盘中价"
         # 信号登记（隔离 state 目录）
         global STATE_DIR, SIGNALS
         STATE_DIR, SIGNALS = td, os.path.join(td, "signals.json")
@@ -1352,6 +1589,13 @@ def selftest():
         sigs3 = json.load(open(SIGNALS, encoding="utf-8"))
         # 登记基准价与报告现价同口径：quote.price（12.4）优先于日 K 末根（14.6）
         assert sigs3[-1]["close_at_signal"] == 12.4, sigs3[-1]["close_at_signal"]
+        assert sigs3[-1]["price_kind"] == "unknown", "无时段登记口径须标 unknown"
+        register_signal(ev_i, verdict, opinions, "r5", "p5")
+        register_signal(ev_c, verdict, opinions, "r6", "p6")
+        sigs5 = json.load(open(SIGNALS, encoding="utf-8"))
+        assert [s["price_kind"] for s in sigs5[-2:]] == ["intraday", "close"], sigs5[-2:]
+        import postmortem as pm
+        pm.evaluate_signals(sigs5, {"000001": ib})  # 新增键不破坏后验读取
     # 快照模式扩展块三态：声明态 / 缺省 estimated / 文件缺失 missing
     with tempfile.TemporaryDirectory() as td:
         json.dump({"state": "available", "summary": {}},
@@ -1362,9 +1606,62 @@ def selftest():
         assert sb["notices"]["state"] == "estimated"  # 未声明态缺省 estimated
         assert sb["valuation"]["state"] == "missing"   # 扩展块文件可选
         assert sb["quote"]["state"] == "missing"       # 核心块同路径不受影响
+        ev_sn = fx.fetch("600519", td)                 # 快照模式不判时段
+        assert ev_sn["meta"]["session"]["phase"] == "unknown"
+        # 快照残留外推键钉：盘中 live 拆块存快照后 session 门控关闭（phase=
+        # unknown），technical.json 残留的 vol_ratio_5_projected 不得孤儿穿透
+        json.dump({"state": "available", "vol_ratio_5_projected": 2.01},
+                  open(os.path.join(td, "technical.json"), "w"))
+        json.dump({"state": "available", "bars": [
+            {"date": "2026-09-%02d" % d, "open": 10, "high": 10.2, "low": 9.9,
+             "close": 10.1, "volume": 10000} for d in range(1, 30)]},
+                  open(os.path.join(td, "daily_bars.json"), "w"))
+        ev_or = fx.fetch("600519", td)
+        assert "vol_ratio_5_projected" not in ev_or["blocks"]["technical"], \
+            "快照二次推导不得让 session 门控键孤儿存活"
+        pk_or = open(render_context_pack(ev_or, td), encoding="utf-8").read()
+        assert "vol_ratio_5_projected" not in pk_or and "None/None" not in pk_or, \
+            "pack 不渲染无时段背书的外推键（分钟数不得渲染为 None/None）"
+    # 联网主流程 meta.session 单一落点（全源桩替+固定 now，零网络）：
+    # fetch() 以末根日期+时钟判时段，technical 带时段推导（外推键入 evidence）
+    _rb = {"bars": bars, "state": "available", "source": "ak-em", "tried": []}
+
+    def _fake_fetch_daily(market, code, st, now):
+        return _rb["bars"], _rb["state"], _rb["source"], _rb["tried"]
+    _patch = {"_qt_batch": lambda m, c, st, now: (None, None),
+              "fetch_daily_bars": _fake_fetch_daily, "load_fetch_state": lambda: {},
+              "save_fetch_state": lambda st: None,
+              "fetch_news": lambda *a: {"state": "missing"},
+              "fetch_fundamentals": lambda *a: {"state": "missing"},
+              "fetch_chip": lambda *a, **k: {"state": "missing"}}
+    for name in fx.EXT_BLOCKS:  # market 块函数名例外（market_block，非 fetch_market）
+        _patch["fetch_" + name if name != "market" else "market_block"] = \
+            lambda *a, **k: {"state": "missing"}
+    real_fx = {k: getattr(fx, k) for k in _patch}
+    try:
+        for k, v in _patch.items():
+            setattr(fx, k, v)
+        _rb["bars"] = ib  # 末根=今日未完成 K
+        with unittest.mock.patch("fetch.time.time", return_value=1793327160):  # 10:26 +08
+            ev_live = fx.fetch("600519")
+        assert ev_live["meta"]["session"]["phase"] == "intraday" and \
+            ev_live["meta"]["session"]["last_bar_partial"], ev_live["meta"]["session"]
+        assert ev_live["blocks"]["technical"]["vol_ratio_5_projected"] == 2.01, \
+            "technical 须带时段推导出外推量比"
+        assert ev_live["blocks"]["quote"]["date"] == "2026-10-30"  # 快照无叠加价路径
+        _rb["bars"] = bars  # 末根为历史日：last_bar_partial=false、无外推键
+        ev_live2 = fx.fetch("600519")
+        assert not ev_live2["meta"]["session"]["last_bar_partial"] and \
+            "vol_ratio_5_projected" not in ev_live2["blocks"]["technical"]
+    finally:
+        for k, v in real_fx.items():
+            setattr(fx, k, v)
     print("  ok context-pack 哨兵/置信帽 · 报告七节 · 免责段")
     print("  ok 扩展九块：渲染预算截断/哨兵/缺失如实/零权重钉/快照三态/近期事件")
     print("  ok 信号登记：观察/对立失效/八元组期限")
+    print("  ok 报告 rationale 挂载：风险与利好逐条溯源 · 附录原文 · 验票过滤 · 剥哨兵（诊断行同通道 · markdown 注入掐断）")
+    print("  ok 结论理由支撑终裁：RiskGuard 改判挂风险理由 · 同信号/同族回落 · 置信帽径取同族 · 不硬凑")
+    print("  ok 盘中口径：时段纯函数（A/港边界）· 线性外推量比 · 警示行/盘中价/price_kind · 快照不判时段 · 门控键不留旧值")
     print("SELFTEST PASSED ✔")
 
 

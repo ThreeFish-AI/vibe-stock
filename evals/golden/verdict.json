@@ -33,8 +33,8 @@
  ],
  "diagnostics": [],
  "aggregate": {
-  "final_signal": "strong_buy",
-  "confidence": 0.9,
+  "final_signal": "hold",
+  "confidence": 0.63,
   "consensus_level": "medium",
   "conflicts": [
    {
@@ -72,11 +72,11 @@
   ]
  },
  "risk_guard": {
-  "initial": "strong_buy",
+  "initial": "hold",
   "final_before_cap": "hold",
   "final": "hold",
   "log": [
-   "veto strong_buy->hold",
+   "no-op",
    "no-op"
   ]
  },
