@@ -14,6 +14,9 @@
   对立信号标 invalidated——不同 profile 可并存相反动作。
 - **置信门**：buy 族置信 <0.5 → 登记 watch（不算可执行建议）。
 - 期限 horizons = [1, 3, 5, 10] 个交易日。
+- **价格口径**：盘中取数登记时 close_at_signal 是盘中价而非收盘价——
+  price_kind（intraday/close/unknown）如实标注，后验基准沿用登记价原样、
+  不回改（时段判定见 [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)）。
 
 ## 后验（postmortem 时）
 

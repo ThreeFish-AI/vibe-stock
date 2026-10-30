@@ -237,15 +237,36 @@ def render_ext_blocks(lines, b):
             lines.append(" · ".join(seg))
 
 
+def _intraday_warning(ss, bars, tech):
+    """盘中警示行（01「盘中口径」）：phase=intraday 才出，按末根是否完成改述。"""
+    head = "- **[盘中警示]** 取数于 %s（UTC+8，已开盘 %s/%s 交易分钟）" % (
+        str(ss.get("as_of", ""))[:16].replace("T", " "), ss.get("elapsed_min"),
+        ss.get("session_min"))
+    if not bars:  # 日 K 未能取得：时段可判而末根无从谈起，如实另述
+        return head + "：日 K 未能取得，报价可能为盘中价，结论以收盘后复核为准。"
+    last = bars[-1]["date"]
+    if not ss.get("last_bar_partial"):
+        return head + "：日 K 末根 %s 为已完成 K 线（今日 K 线未出或休市日）；" \
+            "报价可能为盘中价，结论以收盘后复核为准。" % last
+    ref = ("应参考 vol_ratio_5_projected（线性外推，estimated）或收盘后复核"
+           if tech.get("vol_ratio_5_projected") is not None else "以收盘后复核为准")
+    return head + "：日 K 末根 %s 未收盘——vol_ratio_5、vol_series_10 末位、" \
+        "last_bar_pattern 与末根 OHLCV 均为未完成 K 线口径（量能系统性偏低，" \
+        "MA/RSI/MACD 末值按盘中价计）；缩量/放量判据%s；报价为盘中价。" % (last, ref)
+
+
 def render_context_pack(evidence, workdir):
     q = evidence["quality"]
     b = evidence["blocks"]
     tech = b.get("technical", {})
     bars = b.get("daily_bars", {}).get("bars", [])
+    ss = evidence["meta"].get("session") or {}
     lines = []
     lines.append("# 证据包 · %s（%s）" % (evidence["meta"]["symbol"],
                                          evidence["meta"].get("market", "snapshot")))
     lines.append("")
+    if ss.get("phase") == "intraday":
+        lines.append(_intraday_warning(ss, bars, tech))
     lines.append("- 质量：%d（%s）· 置信帽：%s%s" % (
         q["score"], q["tier"], q["confidence_cap"],
         "（核心证据降级：报告禁止出现『强烈』『必定』等高置信表述，结论最高到 buy/sell 一档）"
@@ -273,6 +294,11 @@ def render_context_pack(evidence, workdir):
                 "new_low_20d", "consecutive_up_days"]
         lines.append(" ".join("%s=%s" % (k, tech.get(k)) for k in keys
                               if tech.get(k) is not None))
+        if tech.get("vol_ratio_5_projected") is not None:
+            lines.append("vol_ratio_5_projected: %s（estimated：末根未完成，按已开盘 %s/%s "
+                         "交易分钟线性外推全天量；日内量 U 形分布，早盘偏高、午后偏低）"
+                         % (tech["vol_ratio_5_projected"], ss.get("elapsed_min"),
+                            ss.get("session_min")))
         if tech.get("macd"):
             lines.append("macd: %s" % tech["macd"])
         if tech.get("box_60d"):
@@ -412,6 +438,13 @@ def load_json(path, default):
         return default
 
 
+def _price_kind(evidence):
+    """报价口径（时段 SSOT 在 evidence.meta.session）：盘中取数=intraday（不保证
+    为收盘价）、非交易时段=close、快照/旧 evidence 无时段=unknown。"""
+    ph = ((evidence.get("meta") or {}).get("session") or {}).get("phase")
+    return {"intraday": "intraday", "closed": "close"}.get(ph, "unknown")
+
+
 def register_signal(evidence, verdict, opinions, report_id, report_path):
     market = evidence["meta"].get("market", "?")
     code = evidence["meta"].get("code") or evidence["meta"]["symbol"]
@@ -438,6 +471,7 @@ def register_signal(evidence, verdict, opinions, report_id, report_path):
     quote = evidence["blocks"].get("quote", {}) or {}
     # 与 render_report/pack 报价节同口径（qt 实时叠加价优先）：报告展示价、
     # 信号登记价、postmortem 后验基准价三点同源；quote 缺失回退日 K 末根。
+    # 盘中登记时 close0 是盘中价而非收盘价，price_kind 如实标注口径。
     close0 = quote.get("price") or (bars[-1]["close"] if bars else None)
     date0 = (quote.get("date") or (bars[-1]["date"] if bars else None)
              or dt.date.today().isoformat())
@@ -450,6 +484,7 @@ def register_signal(evidence, verdict, opinions, report_id, report_path):
         "horizons": [1, 3, 5, 10], "regime": verdict["disagreement"]["conflicts"]
         and "conflict" or "aligned",
         "date": date0, "close_at_signal": close0,
+        "price_kind": _price_kind(evidence),
         "sources": [o["source"] for o in verdict["valid_opinions"]],
         "status": "pending", "evaluated": {}, "note": note,
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
@@ -591,8 +626,10 @@ def render_report(evidence, verdict, opinions, stock, risk=None):
             L.append("- %s" % e)
         L.append("")
     L.append("## 关键价位")
-    L.append("- 现价 %s · 20 日低 %s / 高 %s · MA20 %s" % (
-        _fmt_price(price), lo20, hi20, _fmt_price(ma20)))
+    L.append("- 现价 %s%s · 20 日低 %s / 高 %s · MA20 %s" % (
+        _fmt_price(price),
+        "（盘中价）" if _price_kind(evidence) == "intraday" else "",
+        lo20, hi20, _fmt_price(ma20)))
     if price:
         L.append("- 参考买点 %s（近 20 日低点上方）· 止损 %s（跌破 20 日低/−5%%）"
                  "· 目标 %s（20 日高点）" % (
@@ -683,6 +720,7 @@ def cmd_report(args):
 
 def selftest():
     import tempfile
+    import unittest.mock
     import adjudicate as aj
     print("== diagnose selftest（零网络合成链路） ==")
     # 市场分流回归（fetch.detect_market 唯一定义处）
@@ -1465,6 +1503,54 @@ def selftest():
         kl = [ln for ln in tk.splitlines() if ln.startswith("2026-10-")]
         assert kl and all(len(l.split()) == 7 for l in kl), \
             "bars≤10 首行涨跌幅须「—」占位守住七列"
+        # -- 盘中口径：时段判定纯函数（固定 now）· 外推量比 · 警示行 · 盘中价 --
+        tz8 = dt.timezone(dt.timedelta(hours=8))
+
+        def _at(h, m, day=30):  # 2026-10-30 周五 / 10-31 周六
+            return dt.datetime(2026, 10, day, h, m, tzinfo=tz8)
+        for args, want in (
+                (("cn", "2026-10-30", _at(10, 26)), ("intraday", 56, 240, True)),
+                (("cn", "2026-10-30", _at(12, 0)), ("intraday", 120, 240, True)),
+                (("cn", "2026-10-30", _at(15, 5)), ("closed", 240, 240, False)),
+                (("cn", "2026-10-29", _at(10, 26)), ("intraday", 56, 240, False)),
+                (("cn", "2026-10-31", _at(10, 26, 31)), ("closed", 0, 240, False)),
+                (("hk", "2026-10-30", _at(15, 30)), ("intraday", 300, 330, True)),
+                # aware now 统一换算 UTC+8：UTC 02:26 = 10:26
+                (("cn", "2026-10-30", dt.datetime(2026, 10, 30, 2, 26,
+                                                  tzinfo=dt.timezone.utc)),
+                 ("intraday", 56, 240, True))):
+            s = fx.session_phase(*args)
+            got = (s["phase"], s["elapsed_min"], s["session_min"], s["last_bar_partial"])
+            assert got == want, "session_phase%r=%r 期望 %r" % (args, got, want)
+        ss_in = fx.session_phase("cn", "2026-10-30", _at(10, 26))
+        assert ss_in["as_of"] == "2026-10-30T10:26:00+08:00", ss_in
+        ib = [{"date": "2026-10-%02d" % d, "open": 10, "high": 10.2, "low": 9.9,
+               "close": 10.1, "volume": 10000} for d in range(1, 30)]
+        ib[-1] = {"date": "2026-10-30", "open": 10.1, "high": 10.1, "low": 9.6,
+                  "close": 9.7, "volume": 4700}  # 开盘 56 分钟的半截量
+        ti = fx.derive_technical(ib, ss_in)
+        assert ti["vol_ratio_5"] == 0.47 and ti["vol_ratio_5_projected"] == 2.01, \
+            "原量比如实保留、外推=4700×240/56÷10000：%r" % ti
+        for s_np in (None, fx.session_phase("cn", "2026-10-29", _at(10, 26)),
+                     fx.session_phase("cn", "2026-10-30", _at(9, 30))):  # elapsed=0
+            assert "vol_ratio_5_projected" not in fx.derive_technical(ib, s_np), s_np
+        ev_i = json.loads(json.dumps(evidence))
+        ev_i["meta"]["session"] = ss_in
+        ev_i["blocks"]["quote"] = {"state": "available", "price": 9.7}
+        ev_i["blocks"]["daily_bars"]["bars"] = ib
+        ev_i["blocks"]["technical"] = {"state": "available", **ti}
+        ti_txt = open(render_context_pack(ev_i, td), encoding="utf-8").read()
+        warn = [ln for ln in ti_txt.splitlines()[:4] if "[盘中警示]" in ln]
+        assert warn and "末根 2026-10-30 未收盘" in warn[0] and \
+            "vol_ratio_5_projected" in warn[0] and "报价为盘中价" in warn[0], ti_txt[:400]
+        assert "vol_ratio_5_projected: 2.01（estimated" in ti_txt, "外推值须渲染并标 estimated"
+        ev_c = json.loads(json.dumps(ev_i))
+        ev_c["meta"]["session"] = fx.session_phase("cn", "2026-10-30", _at(15, 5))
+        assert "[盘中警示]" not in open(render_context_pack(ev_c, td),
+                                     encoding="utf-8").read(), "收盘后不出警示行"
+        assert "[盘中警示]" not in text, "无时段（快照/旧 evidence）不出警示行"
+        assert "现价 9.7（盘中价）" in render_report(ev_i, verdict, opinions, "TEST"), \
+            "盘中报告现价须注明盘中价"
         # 信号登记（隔离 state 目录）
         global STATE_DIR, SIGNALS
         STATE_DIR, SIGNALS = td, os.path.join(td, "signals.json")
@@ -1486,6 +1572,13 @@ def selftest():
         sigs3 = json.load(open(SIGNALS, encoding="utf-8"))
         # 登记基准价与报告现价同口径：quote.price（12.4）优先于日 K 末根（14.6）
         assert sigs3[-1]["close_at_signal"] == 12.4, sigs3[-1]["close_at_signal"]
+        assert sigs3[-1]["price_kind"] == "unknown", "无时段登记口径须标 unknown"
+        register_signal(ev_i, verdict, opinions, "r5", "p5")
+        register_signal(ev_c, verdict, opinions, "r6", "p6")
+        sigs5 = json.load(open(SIGNALS, encoding="utf-8"))
+        assert [s["price_kind"] for s in sigs5[-2:]] == ["intraday", "close"], sigs5[-2:]
+        import postmortem as pm
+        pm.evaluate_signals(sigs5, {"000001": ib})  # 新增键不破坏后验读取
     # 快照模式扩展块三态：声明态 / 缺省 estimated / 文件缺失 missing
     with tempfile.TemporaryDirectory() as td:
         json.dump({"state": "available", "summary": {}},
@@ -1496,11 +1589,48 @@ def selftest():
         assert sb["notices"]["state"] == "estimated"  # 未声明态缺省 estimated
         assert sb["valuation"]["state"] == "missing"   # 扩展块文件可选
         assert sb["quote"]["state"] == "missing"       # 核心块同路径不受影响
+        ev_sn = fx.fetch("600519", td)                 # 快照模式不判时段
+        assert ev_sn["meta"]["session"]["phase"] == "unknown"
+    # 联网主流程 meta.session 单一落点（全源桩替+固定 now，零网络）：
+    # fetch() 以末根日期+时钟判时段，technical 带时段推导（外推键入 evidence）
+    _rb = {"bars": bars, "state": "available", "source": "ak-em", "tried": []}
+
+    def _fake_fetch_daily(market, code, st, now):
+        return _rb["bars"], _rb["state"], _rb["source"], _rb["tried"]
+    _patch = {"_qt_batch": lambda m, c, st, now: (None, None),
+              "fetch_daily_bars": _fake_fetch_daily, "load_fetch_state": lambda: {},
+              "save_fetch_state": lambda st: None,
+              "fetch_news": lambda *a: {"state": "missing"},
+              "fetch_fundamentals": lambda *a: {"state": "missing"},
+              "fetch_chip": lambda *a, **k: {"state": "missing"}}
+    for name in fx.EXT_BLOCKS:  # market 块函数名例外（market_block，非 fetch_market）
+        _patch["fetch_" + name if name != "market" else "market_block"] = \
+            lambda *a, **k: {"state": "missing"}
+    real_fx = {k: getattr(fx, k) for k in _patch}
+    try:
+        for k, v in _patch.items():
+            setattr(fx, k, v)
+        _rb["bars"] = ib  # 末根=今日未完成 K
+        with unittest.mock.patch("fetch.time.time", return_value=1793327160):  # 10:26 +08
+            ev_live = fx.fetch("600519")
+        assert ev_live["meta"]["session"]["phase"] == "intraday" and \
+            ev_live["meta"]["session"]["last_bar_partial"], ev_live["meta"]["session"]
+        assert ev_live["blocks"]["technical"]["vol_ratio_5_projected"] == 2.01, \
+            "technical 须带时段推导出外推量比"
+        assert ev_live["blocks"]["quote"]["date"] == "2026-10-30"  # 快照无叠加价路径
+        _rb["bars"] = bars  # 末根为历史日：last_bar_partial=false、无外推键
+        ev_live2 = fx.fetch("600519")
+        assert not ev_live2["meta"]["session"]["last_bar_partial"] and \
+            "vol_ratio_5_projected" not in ev_live2["blocks"]["technical"]
+    finally:
+        for k, v in real_fx.items():
+            setattr(fx, k, v)
     print("  ok context-pack 哨兵/置信帽 · 报告七节 · 免责段")
     print("  ok 扩展九块：渲染预算截断/哨兵/缺失如实/零权重钉/快照三态/近期事件")
     print("  ok 信号登记：观察/对立失效/八元组期限")
     print("  ok 报告 rationale 挂载：风险与利好逐条溯源 · 附录原文 · 验票过滤 · 剥哨兵")
     print("  ok 结论理由支撑终裁：RiskGuard 改判挂风险理由 · 同信号/同族回落 · 置信帽径取同族 · 不硬凑")
+    print("  ok 盘中口径：时段纯函数（A/港边界）· 线性外推量比 · 警示行/盘中价/price_kind · 快照不判时段")
     print("SELFTEST PASSED ✔")
 
 

@@ -139,6 +139,36 @@ RPT_DATA_BLOCKTRADE、质押 RPT_CSDC_LIST、增减持 RPT_SHARE_HOLDER_INCREASE
 - 坑位：兜底内容**不回写 evidence.json、不改变块状态与质量分**（八态只反映
   取数层事实）；兜底摘要若进对话/报告，哨兵语义同样适用。
 
+## 盘中口径（未完成 K 线）
+
+盘中取数时，日 K 链末根常为**当日未完成 K 线**（盘中量只有部分时段的量），与
+已收盘 K 线直接混用会把量能类判据系统性看低（假缩量误触发）。时段判定为纯函数
+`fetch.session_phase(market, last_bar_date, now)`（`now` 可注入，naive 按 UTC+8 墙钟
+计）——A 股 09:30–11:30、13:00–15:00（240 分钟），港股 09:30–12:00、13:00–16:00
+（330 分钟），固定 UTC+8（沪港均无夏令时，不引 zoneinfo/tzdata），周末视为非交易
+日，判据「末根日 K 日期 == 今日（UTC+8）且时钟处于 [开盘, 收盘)」即末根未完成；
+午休按上午时段满额计已开盘分钟。取数时段**只记一处**（SSOT）：`evidence.meta.session =
+{phase: intraday|closed|unknown, as_of, elapsed_min, session_min, last_bar_partial}`；
+快照模式不判时段（标 unknown，不出盘中警示）。派生规约：
+
+- **末根未完成的量能口径**：条件：实时取数（非快照）且 `meta.session
+  .last_bar_partial`；做法：technical 原 `vol_ratio_5`/`vol_series_10` 保留不改值
+  （如实），另出 `vol_ratio_5_projected`——末根量按已开盘交易分钟线性外推全天再除
+  5 日均量（标 estimated；`elapsed_min` 为 0 不出）；context-pack 头部在 phase=
+  intraday 时加醒目警示行（末根未收盘、vol_ratio_5 / vol_series_10 末位 /
+  last_bar_pattern / 末根 OHLCV 为未完成 K 线口径、缩量放量判据参考外推值或收盘后
+  复核、报价为盘中价），收盘/快照不出此行；坑位：A 股日内成交量 U 形分布，线性
+  外推早盘偏高、午后偏低——外推值只救量级不供精确阈值判定，终判以收盘复核为准。
+- **价格的时段口径**：条件：信号登记（register_signal）与报告现价；做法：信号
+  记录新增 `price_kind: intraday|close|unknown`（由 meta.session.phase 派生），报告
+  关键价位现价在盘中时注明「盘中价」；坑位：盘中登记的 `close_at_signal` 是盘中价
+  而非收盘价（后验基准沿用登记价原样，不回改）。
+- **节假日等时段边界**（坑位，无节假日日历）：工作日休市会被判 intraday 而末根
+  仍是上一交易日（last_bar_partial=false，警示行如实报「今日 K 线未出或休市日」）；
+  港股半日市按全天 330 分钟外推会低估、收市竞价时段（16:00–16:08/16:10）时钟已过
+  16:00 判 closed 但成交量仍在累积、盘前竞价成交也计入当日 K——此三类窗口的量能
+  判据一律以收盘后复核为准。
+
 ## 快照模式（无网兜底）
 
 `--snapshot-dir <dir>`：块文件 `quote.json/daily_bars.json/…`（可含 `"state"` 字段，

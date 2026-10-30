@@ -12,6 +12,8 @@
   - 八态标注：每个数据块独立标 available/missing/not_supported/fallback/stale/
     estimated/partial/fetch_failed——缺什么写什么，绝不静默消失。
   - 技术指标（MA/RSI/MACD/量比等）由日 K 纯标准库推导，不依赖三方库。
+  - 取数时段：meta.session 记盘中/收盘（纯函数 session_phase，固定 UTC+8）；
+    末根未完成时 technical 另出线性外推量比 vol_ratio_5_projected（estimated）。
   - 快照模式：--snapshot-dir 提供预置 JSON（无网兜底），状态按文件声明或 estimated。
 
 用法（联网全量）：
@@ -357,6 +359,34 @@ def fetch_daily_bars(market, code, st, now):
     return [], "fetch_failed", "", tried
 
 
+# 取数时段（盘中口径，01-evidence「盘中口径」）：沪港固定 UTC+8（均无夏令时，
+# 不引 zoneinfo/tzdata）；连续竞价时段以当日分钟计
+TZ_CN = dt.timezone(dt.timedelta(hours=8))
+SESSIONS = {"cn": ((570, 690), (780, 900)),   # 09:30–11:30 / 13:00–15:00，240 分钟
+            "hk": ((570, 720), (780, 960))}   # 09:30–12:00 / 13:00–16:00，330 分钟
+
+
+def session_phase(market, last_bar_date, now=None):
+    """取数时段判定（纯函数，now 可注入；naive now 按 UTC+8 墙钟计）。
+    末根未完成判据：末根日 K 日期 == 今日(UTC+8) 且时钟处于 [开盘, 收盘)；周末
+    恒 closed；午休按上午时段满额计已开盘分钟；无节假日日历（坑位见 01）。"""
+    segs = SESSIONS.get(market)
+    if not segs:
+        return {"phase": "unknown", "note": "无该市场交易时段定义"}
+    now = now or dt.datetime.now(TZ_CN)
+    now = now.replace(tzinfo=TZ_CN) if now.tzinfo is None else now.astimezone(TZ_CN)
+    minute = now.hour * 60 + now.minute
+    trading_day = now.weekday() < 5
+    intraday = trading_day and segs[0][0] <= minute < segs[-1][1]
+    return {"phase": "intraday" if intraday else "closed",
+            "as_of": now.isoformat(timespec="seconds"),
+            "elapsed_min": (sum(max(0, min(minute, b) - a) for a, b in segs)
+                            if trading_day else 0),
+            "session_min": sum(b - a for a, b in segs),
+            "last_bar_partial": bool(intraday and str(last_bar_date or "")[:10]
+                                     == now.date().isoformat())}
+
+
 # 派生块（从日 K 推导，零三方依赖）
 def derive_quote(bars):
     last = bars[-1]
@@ -415,7 +445,7 @@ def _bar_pattern(bar):
             "upper_shadow_pct": round((hi - max(o, c)) / span * 100, 1)}
 
 
-def derive_technical(bars):
+def derive_technical(bars, session=None):
     closes = [b["close"] for b in bars]
     vols = [b["volume"] for b in bars]
     hi52 = max(b["high"] for b in bars)
@@ -441,7 +471,7 @@ def derive_technical(bars):
             up_days += 1
         else:
             break
-    return {
+    tech = {
         "ma5": _ma(closes, 5), "ma10": _ma(closes, 10), "ma20": _ma(closes, 20),
         "ma60": _ma(closes, 60), "rsi14": _rsi(closes), "macd": _macd(closes),
         "vol_ratio_5": round(vols[-1] / (sum(vols[-6:-1]) / 5 + 1e-9), 2),
@@ -454,6 +484,13 @@ def derive_technical(bars):
         "box_60d": box, "vol_series_10": vol_series,
         "last_bar_pattern": _bar_pattern(bars[-1]),
     }
+    # 末根未完成（session_phase 判定）：原 vol_ratio_5 如实保留，另出按交易分钟
+    # 线性外推的量比（estimated；elapsed=0 不出）
+    if session and session.get("last_bar_partial") and session.get("elapsed_min"):
+        tech["vol_ratio_5_projected"] = round(
+            vols[-1] * session["session_min"] / session["elapsed_min"]
+            / (sum(vols[-6:-1]) / 5 + 1e-9), 2)
+    return tech
 
 
 # ---------------------------------------------------------------- 新闻（三簇链 + 港股解锁）
@@ -1366,11 +1403,15 @@ def fetch(symbol, snapshot_dir=None):
     now = int(time.time())
     if snapshot_dir:
         blocks = snapshot_blocks(snapshot_dir)
-        meta = {"symbol": symbol, "snapshot": True}
+        # 快照模式不判时段：快照取于何时不可知，如实标 unknown（不出盘中警示）
+        meta = {"symbol": symbol, "snapshot": True,
+                "session": {"phase": "unknown", "note": "快照模式不判时段"}}
     else:
         market, code = detect_market(symbol)
         st = load_fetch_state()
         bars, bars_state, bars_src, tried = fetch_daily_bars(market, code, st, now)
+        session = session_phase(market, bars[-1]["date"] if bars else None,
+                                dt.datetime.fromtimestamp(now, TZ_CN))
         qt_full, qt_indices = _qt_batch(market, code, st, now)
         save_fetch_state(st)
         blocks = {"daily_bars": {"state": bars_state, "source": bars_src,
@@ -1379,7 +1420,9 @@ def fetch(symbol, snapshot_dir=None):
         if bars:
             q = derive_quote(bars)
             src_note = ""
-            if qt_full and qt_full.get("price"):  # qt 实时叠加（A股盘中新鲜度）
+            # qt 实时叠加（A股盘中新鲜度）：盘中时叠加价与末根日 K 同为未完成口径，
+            # 时段以 meta.session 为准（price_kind 由其派生）
+            if qt_full and qt_full.get("price"):
                 if abs(qt_full["price"] / q["price"] - 1) > 0.05:
                     src_note = "实时价 %s 与日K收盘 %s 偏差>5%%" % (
                         qt_full["price"], q["price"])
@@ -1405,7 +1448,8 @@ def fetch(symbol, snapshot_dir=None):
                                          else bars_state), "source": qsrc, **q}
             blocks["technical"] = {"state": ("available" if bars_state == "available"
                                              else bars_state),
-                                   "source": "derived", **derive_technical(bars)}
+                                   "source": "derived",
+                                   **derive_technical(bars, session)}
         else:
             blocks["quote"] = {"state": "missing", "source": "",
                                "note": "日 K 缺失，报价无从而来"}
@@ -1428,7 +1472,7 @@ def fetch(symbol, snapshot_dir=None):
         blocks["valuation"] = fetch_valuation(market, code, st, now, qt_full)
         save_fetch_state(st)
         market_meta = {"symbol": symbol, "market": market, "code": code,
-                       "tried": tried}
+                       "tried": tried, "session": session}
         meta = market_meta
     if blocks.get("daily_bars", {}).get("bars"):
         bars = blocks["daily_bars"]["bars"]
@@ -1436,10 +1480,10 @@ def fetch(symbol, snapshot_dir=None):
         for name in ("technical",):
             if blocks.get(name, {}).get("state") in (None, "missing"):
                 blocks[name] = {"state": bars_state, "source": "derived",
-                                **derive_technical(bars)}
+                                **derive_technical(bars, meta.get("session"))}
             else:
                 blocks[name] = {**blocks.get(name, {}),
-                                **derive_technical(bars)}
+                                **derive_technical(bars, meta.get("session"))}
         if blocks.get("quote", {}).get("state") in (None, "missing"):
             blocks["quote"] = {"state": bars_state, "source": "derived:" +
                                blocks["daily_bars"].get("source", ""),
