@@ -770,8 +770,14 @@ def cmd_report(args, now=None):
     action, invalidated = register_signal(evidence, verdict, opinions,
                                           "%s-%s" % (code, date), path,
                                           report_version=version, now=now)
+    quote_name = (evidence["blocks"].get("quote", {}) or {}).get("name")
+    try:  # 显示名写穿（存量信号经 names.json 缓存显名）；失败只降级为不缓存
+        names = (ar.update_names(STATE_DIR, market, code, quote_name)
+                 if quote_name else ar.load_names(STATE_DIR))
+    except (OSError, ValueError):
+        names = ar.load_names(STATE_DIR)
     try:
-        ar.rebuild_indexes(reports_dir, ar.load_signals(SIGNALS))
+        ar.rebuild_indexes(reports_dir, ar.load_signals(SIGNALS), names)
     except (OSError, ValueError) as e:  # 索引是派生视图：挂了不回滚已写的报告与信号
         print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s" % e)
     print("report -> %s（v%d）" % (path, version))
@@ -1957,6 +1963,16 @@ def _selftest_archive(evidence, verdict, opinions):
             except ValueError:
                 pass
             assert "无版本头正文" in read(badp), "拒绝路径不得改动原文件"
+            # T8d 名称缓存写穿（cmd_report 路径）：names.json 随 report 更新；
+            # quote 无 name 只跳过写穿，不清空既有缓存
+            stage(ev_nm)
+            assert run(cmd_report, a, d1.replace(hour=17)) == 0
+            assert ar.load_names(STATE_DIR) == {"cn:000001": "平安银行"}, \
+                ar.load_names(STATE_DIR)
+            stage(evidence)
+            assert run(cmd_report, a, d1.replace(hour=18)) == 0
+            assert ar.load_names(STATE_DIR) == {"cn:000001": "平安银行"}, \
+                "quote 无 name 不得清空既有缓存"
         # T3 链式去重：K 回溯到内容最早出现的版本；丢失版不参与比对；往返一致
         vs3 = [{"n": 1, "time": "09:00:00", "sections": [("A", "a1"), ("B", "b1")]},
                {"n": 2, "time": "10:00:00", "sections": None},
@@ -2012,6 +2028,23 @@ def _selftest_archive(evidence, verdict, opinions):
             ar.rebuild_indexes(rd, sx)
             assert "600519.cn · 贵州茅台 · 诊股时间线" in \
                 read(os.path.join(rd, "600519.cn", "index.md"))
+        # T11b 显示名缓存：信号盖的 stock_name 优先于缓存；无 stock_name 的存量
+        # 组经缓存显名；load 损坏自愈 {}；update 写穿返回全量
+        with tempfile.TemporaryDirectory() as td2:
+            write(os.path.join(td2, "names.json"), "[bad")
+            assert ar.load_names(td2) == {}, "名称缓存损坏须自愈为空（可再生缓存）"
+            assert ar.update_names(td2, "cn", "600519", "茅台缓存名") == \
+                {"cn:600519": "茅台缓存名"}
+            assert ar.update_names(td2, "hk", "00700", "腾讯控股") == \
+                {"cn:600519": "茅台缓存名", "hk:00700": "腾讯控股"}
+        with tempfile.TemporaryDirectory() as rd:
+            ar.rebuild_indexes(rd, sx, names={"cn:600519": "茅台缓存名",
+                                              "hk:00700": "腾讯控股"})
+            root = read(os.path.join(rd, "index.md"))
+            assert "| 贵州茅台 |" in root, "信号盖的 stock_name 须优先于缓存"
+            assert "| 腾讯控股 |" in root, "无 stock_name 的存量组经缓存显名"
+            assert "# 00700.hk · 腾讯控股 · 诊股时间线" in \
+                read(os.path.join(rd, "00700.hk", "index.md"))
         # T12 存量迁移：照现网形态（3 信号共用一被覆盖文件）
         legacy_md = render_report(evidence, verdict, opinions, "601888")
 

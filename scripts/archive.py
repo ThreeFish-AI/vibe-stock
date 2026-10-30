@@ -247,10 +247,42 @@ def _group_name(signals):
     return None
 
 
-def render_stock_index(signals, market, code):
+# ---------------------------------------------------------------- 显示名缓存
+
+def names_path(state_dir):
+    return os.path.join(state_dir, "names.json")
+
+
+def load_names(state_dir):
+    """code→名称 显示缓存（market:code 键）。可再生的派生缓存：缺失/损坏
+    一律回 {}（下次 report 写穿自愈），不做严格加载。"""
+    try:
+        with open(names_path(state_dir), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def update_names(state_dir, market, code, name):
+    """report 写穿：把本次取到的名称并进缓存，返回合并后全量（索引重建直用）。
+    信号侧 stock_name 是登记时刻的历史名，本缓存是显示时刻的当前名——存量
+    信号（早于名称功能）经此路径也能显名。"""
+    names = load_names(state_dir)
+    names["%s:%s" % (market, code)] = name
+    write_json_atomic(names_path(state_dir), names)
+    return names
+
+
+def _display_name(signals, market, code, names):
+    """名称解析顺序：组内最新非空 stock_name（历史名优先）→ names 缓存 → None。"""
+    return _group_name(signals) or (names or {}).get("%s:%s" % (market, code))
+
+
+def render_stock_index(signals, market, code, names=None):
     dirname = "%s.%s" % (code, market)
     rows = [s for s in signals if s.get("market") == market and s.get("code") == code]
-    name = _group_name(rows)
+    name = _display_name(rows, market, code, names)
     L = ["# %s%s · 诊股时间线" % (dirname, " · %s" % name if name else ""),
          "", INDEX_NOTE, "",
          "| 日期 | 版本 | 信号→动作 | 置信 | 登记价 | 状态 | %s |" %
@@ -267,7 +299,7 @@ def render_stock_index(signals, market, code):
     return "\n".join(L) + "\n"
 
 
-def render_root_index(signals):
+def render_root_index(signals, names=None):
     groups = {}
     for s in signals:
         groups.setdefault((s.get("market"), s.get("code")), []).append(s)
@@ -280,7 +312,7 @@ def render_root_index(signals):
     for s, g in latest:
         dirname = "%s.%s" % (s["code"], s["market"])
         L.append("| [%s](%s/index.md) | %s | %s | %s→%s | %s | %d | %d |" % (
-            dirname, dirname, _group_name(g) or "—",
+            dirname, dirname, _display_name(g, g[0].get("market"), g[0].get("code"), names) or "—",
             (s.get("created_at") or s.get("date") or "—")[:10],
             s.get("signal", "?"), s.get("action", "?"), _fmt(s.get("confidence")),
             len(g), sum(1 for x in g if x.get("status") == "pending")))
@@ -296,9 +328,10 @@ def _write_if_changed(path, text):
     _write_atomic(path, text)
 
 
-def rebuild_indexes(reports_dir, signals):
+def rebuild_indexes(reports_dir, signals, names=None):
     """整体重建 cn/hk 各股 index.md 与总览；身份不合规（如旧 4 位港码）的信号
-    不进索引（迁移 dry-run 告警）。同输入字节相同，未变不重写。"""
+    不进索引（迁移 dry-run 告警）。names=显示名缓存（report 写穿 names.json），
+    存量信号（无 stock_name）经缓存显名。同输入字节相同，未变不重写。"""
     live = []
     for s in signals:
         try:
@@ -314,9 +347,10 @@ def rebuild_indexes(reports_dir, signals):
         by_dir.setdefault(d, []).append(s)
     for d, group in by_dir.items():
         _write_if_changed(os.path.join(d, "index.md"),
-                          render_stock_index(group, group[0]["market"], group[0]["code"]))
+                          render_stock_index(group, group[0]["market"],
+                                             group[0]["code"], names))
     _write_if_changed(os.path.join(reports_dir, "index.md"),
-                      render_root_index([s for _, s in live]))
+                      render_root_index([s for _, s in live], names))
 
 
 # ---------------------------------------------------------------- 存量迁移
@@ -484,7 +518,8 @@ def apply_migration(reports_dir, signals_path, plan, base_digest, now):
         moved.append(it["name"])
     index_warn = None
     try:  # 派生视图放最后：挂了不吞迁移主流程（①-③已落盘），只告警带回
-        rebuild_indexes(reports_dir, signals)
+        rebuild_indexes(reports_dir, signals,
+                        load_names(os.path.dirname(signals_path)))
     except (OSError, ValueError) as e:
         index_warn = str(e)
     return {"backup": backup, "moved": moved, "skipped": skipped,
