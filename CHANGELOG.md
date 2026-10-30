@@ -7,10 +7,11 @@
 ### Fixed
 
 - 报告风险/利好/附录逐条接回意见与 risk.json 的 rationale
-  （RSI-20261029-02）：原风险栏/利好栏只列 source 与信号不带理由；现经
-  partition 同一验票判据按 source 挂 rationale（未过验票不挂），风险角色
-  理由标注 veto/downgrade 触发态，附录意见行附 rationale 原文，空栏仍如实
-  「（无登记）」。
+  （RSI-20261029-02）：原风险栏/利好栏恒「（无登记）」——旧实现
+  verdict.valid_opinions 只投影四键、恒无 rationale，两栏从未列出条目；现
+  经 partition 同一验票判据按 source 挂 rationale（未过验票不挂），风险
+  角色理由标注 veto/downgrade 触发态，附录意见行附 rationale 原文，空栏
+  仍如实「（无登记）」。
 - RiskGuard veto 与 downgrade 同真时各自施加、取更保守者（RSI-20261030-01）：
   原实现 veto 提前返回吞掉 downgrade——buy 经 severity=high 两档降本应
   sell、加 veto 反被截停在 hold，风险输入越多终裁越宽松；现两者对同一初判
@@ -48,11 +49,14 @@
     买入族），单条 ≥0.9 独裁终结；selftest 显式钉 9hold+4sell 板（最高
     置信 0.70 sell）旧 buy→新 hold、单条 0.95 strong_buy 混 hold 板旧
     strong_buy→新 hold。
-  - 放宽面（AGENTS.md 红线 4，逐条点名供人工评审）：低置信一致多头板
-    hold→buy（2×strong_buy 0.6）、buy→strong_buy（2×0.8）——一致方向
-    攒够幅度即进档；低置信一致空头板按 [03] 字面旧判（<1.5→strong_sell）
-    的 strong_sell→新 hold——低置信不再独裁最重卖出档；随机 20 万板扫描
-    放宽占 4.25% 且全部止于 hold，无一步跨进买入族。
+  - 放宽面（AGENTS.md 红线 4，逐条点名供人工评审）：放宽集中于一致/多数
+    多头板与低置信板，含跨入买入族的形态——selftest 已钉 `relax: 2x sb`
+    两例：2×strong_buy 0.6 旧 hold→新 buy、2×0.8 旧 buy→新 strong_buy
+    （一致方向攒够幅度即进档）；最小反例 8×strong_buy 0.60 + 2×hold 0.50
+    → 旧 hold / 新 buy——多数多头板一步跨进买入族；数学边界（可验证）：
+    一致板进 buy 须平均置信 ≥0.5、进 strong_buy 须 ≥0.75（与
+    CONFIDENCE_GATE 同量纲）。低置信一致空头板按 [03] 字面旧判
+    （<1.5→strong_sell）的 strong_sell→新 hold——低置信不再独裁最重卖出档。
   - <1.5 兜底由 hold 改 strong_sell，对齐 [03] 阈值表字面（旧代码兜底
     分支错写 hold，strong_sell 档从未可达）。
   - 共识分级锚修正：共识与高置信异见均以聚合信号为主信号（aligned 按与
