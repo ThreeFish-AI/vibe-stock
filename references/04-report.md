@@ -52,16 +52,20 @@
   5 位）须与 `--stock` 归一后一致，代码须合规范形态，signals.json 须可解析，任一
   不符 exit 2 且零写入。坑位：`.vs/` 残留上一只票的证据是最常见触发。
 - **时间线索引**（适用：report / postmortem 之后）：做法——`index.md` 由
-  signals.json 整体重建（只覆盖 cn/hk），单股表新→旧列版本、信号→动作、置信、
-  登记价、状态与 T+1/3/5/10 涨跌及判定；内容未变不重写。坑位：索引是派生视图，
-  手改会在下次重建时丢失；信号与后验的事实源始终是 signals.json。
+  signals.json 整体重建（只覆盖 cn/hk），总览表列股票、股票名称、最新日期、
+  最新信号→动作、置信、诊断次数与 pending，单股表新→旧列版本、信号→动作、
+  置信、登记价、状态与 T+1/3/5/10 涨跌及判定；内容未变不重写。坑位：索引是
+  派生视图，手改会在下次重建时丢失；信号与后验的事实源始终是 signals.json；
+  股票名称取自信号的 `stock_name`（quote 块行情面数据，A 股 qt 全量快照 / 港股
+  qt 紧凑快照，取数失败如实缺省 `—`），组内取最新非空值。
 - **存量迁移**（适用：0.2.0 及以前的平铺 `<code>-<date>.md`；须在升级后首次
   report 之前执行，否则当日新报告会让旧平铺文件被判 conflict 需人工处理）：做法——
   `diagnose.py migrate-reports` 默认 dry-run；`--apply` 依次写单日文件 → CAS 校验后
   备份 `signals.json.bak-<ts>` 并改写 `report_path`/`report_version`（丢失版加
   `report_lost: true`）→ 原文件移入 `_legacy/` → 重建索引；按 `report_id` 认领信号，
   与文件 mtime 同刻（≤2s）的最后一条为内容版。坑位：迁移期间勿并发跑 report /
-  postmortem（signals.json 无锁，CAS 只能发现不能合并）；目标已存在且内容不同记
-  conflict 原样跳过，需人工处理；mtime 漂移（备份恢复/编辑器重存）时回退按最后
+  postmortem（signals.json 无锁，CAS 只能发现不能合并）；目标已存在且内容不同、
+  或平铺文件无可解析 `## ` 节头（非本工具产物/截断）均记 conflict 原样跳过，
+  需人工处理；mtime 漂移（备份恢复/编辑器重存）时回退按最后
   运行归属内容版并列 anomaly，缺可用 created_at 的信号跳过认领不改写；回退按
   .bak 逐 signal_id 恢复，勿整文件覆盖。

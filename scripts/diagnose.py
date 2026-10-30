@@ -416,14 +416,9 @@ def load_json(path, default):
 
 
 def stock_code(evidence):
-    """报告/信号的代码身份（唯一推导处）：meta.code → meta.symbol 经
-    detect_market 归一（港股统一 5 位）；快照里无法识别的 symbol 原样返回，
-    交给 archive.stock_dir 做形态校验。"""
-    raw = str(evidence["meta"].get("code") or evidence["meta"].get("symbol") or "")
-    try:
-        return fx.detect_market(raw)[1]
-    except SystemExit:
-        return raw.strip()
+    """报告/信号的代码身份：fx.meta_stock_code（唯一推导处）的诊断侧封装——
+    无法识别的 symbol 原样返回，交给 archive.stock_dir 做形态校验。"""
+    return fx.meta_stock_code(evidence["meta"])[0]
 
 
 def register_signal(evidence, verdict, opinions, report_id, report_path,
@@ -444,11 +439,21 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
     fam = families[action]
     invalidated = 0
 
-    def _same_stock(s):  # 读时归一：存量 4 位港码与 5 位规范码是同一身份（I-002）
+    def _snap_norm(c):
+        # 快照符号历史形态不一（0700.HK / hk00700 / 裸 4 位）：读时归一，可识别
+        # 取规范码、否则原样（与写侧 stock_code 同口径，F1）
+        try:
+            return fx.detect_market(c)[1]
+        except SystemExit:
+            return c
+
+    def _same_stock(s):  # 读时归一：存量旧形态与新规范码是同一身份（I-002/F1）
         c = str(s.get("code") or "")
         if market == "hk" and s.get("market") == "hk":
             return c.zfill(5) == code
-        return s.get("market") == market and c == code
+        if s.get("market") != market:
+            return False
+        return _snap_norm(c) == _snap_norm(code) if market == "?" else c == code
 
     for s in signals:
         if (_same_stock(s)
@@ -464,7 +469,7 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
     close0 = quote.get("price") or (bars[-1]["close"] if bars else None)
     date0 = (quote.get("date") or (bars[-1]["date"] if bars else None)
              or now.date().isoformat())
-    signals.append({
+    sig = {
         "id": "sig-%s-%s-%s" % (code, date0.replace("-", ""), len(signals) + 1),
         "report_id": report_id, "report_path": report_path,
         "report_version": report_version,
@@ -477,7 +482,10 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
         "sources": [o["source"] for o in verdict["valid_opinions"]],
         "status": "pending", "evaluated": {}, "note": note,
         "created_at": now.isoformat(timespec="seconds"),
-    })
+    }
+    if quote.get("name"):  # 名称列数据源（索引侧消费）；取数失败如实缺省不落 null
+        sig["stock_name"] = quote["name"]
+    signals.append(sig)
     ar.write_json_atomic(SIGNALS, signals)
     return action, invalidated
 
@@ -697,6 +705,9 @@ def cmd_migrate_reports(args, now=None):
     print("迁移完成：归档 %d 份到 reports/_legacy/；signals.json %s" % (
         len(res["moved"]), "已改写（备份 %s）" % res["backup"] if res["signals_changed"]
         else "无需改写"))
+    if res.get("index_warn"):  # 派生视图故障不吞迁移主流程（与 report/postmortem 同口径）
+        print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s"
+              % res["index_warn"])
     for name in res["skipped"]:
         print("  未归档 %s：_legacy/ 已有同名文件" % name)
     return 0
@@ -731,7 +742,12 @@ def selftest():
             raise AssertionError("detect_market(%r) 应拒绝" % s)
         except SystemExit:
             pass
-    print("  ok detect_market：7 位前导零剥零 · 港股统一 5 位 · 规范码不动点 · 边界拒绝")
+    # qt 紧凑快照港股名称位序（2026-10-30 实测钉住，f[1]=名称；索引「股票名称」列源）
+    hk_s = fx._parse_qt_s('v_s_hk00700="100~腾讯控股~00700~386.400~8.800~2.33~'
+                          '12581407.0~4820230872.288~~35133.9796";')
+    assert hk_s == [{"name": "腾讯控股", "price": 386.4, "change_pct": 2.33}], hk_s
+    print("  ok detect_market：7 位前导零剥零 · 港股统一 5 位 · 规范码不动点 · 边界拒绝"
+          " · qt 紧凑快照港股名称位序")
     # 交易所分流回归（fetch.cn_exchange 唯一判定处；北交所边界 2026-10-28 实测钉住）
     ex = {"600519": "sh", "900901": "sh", "510300": "sh", "000001": "sz", "300750": "sz",
           "830799": "bj", "920002": "bj", "430047": "bj", "870357": "bj"}
@@ -894,8 +910,9 @@ def selftest():
             'v_pv_none_match="1";' if "s_sh" not in url else
             'v_s_sh000001="1~上证指数~000001~3681.47~33.17~0.91~1~1~~1~ZS~";')
         stq = {"breakers": {}, "cooldowns": {}}
-        fullq, idxq = fx._qt_batch("cn", "999999", stq, t0)
-        assert fullq is None and idxq and idxq[0]["price"] == 3681.47, (fullq, idxq)
+        fullq, idxq, nameq = fx._qt_batch("cn", "999999", stq, t0)
+        assert fullq is None and nameq is None and idxq \
+            and idxq[0]["price"] == 3681.47, (fullq, idxq, nameq)
         # 指数取数成功会写 fails=0 的簇条目（record 语义），判据是无失败计数
         assert stq["breakers"]["qt"]["fails"] == 0, stq["breakers"]["qt"]
         assert fx.source_allowed(stq, "qt", t0 + 1) == (True, ""), \
@@ -1593,6 +1610,27 @@ def _selftest_archive(evidence, verdict, opinions):
                                                   risk_guard={**rg, "final": "sell"}),
                                      opinions, "r", "p")
             assert inv == 1, "存量 4 位与新 5 位港码须是同一身份（读时归一）"
+            # T8b 快照存量后缀形态（F1）：market="?" 两侧读时归一后同为 00700，
+            # 对立失效不得因符号形态不一而静默断开
+            ar.write_json_atomic(SIGNALS, [
+                {"id": "old-snap", "market": "?", "code": "0700.HK", "profile": "default",
+                 "action": "buy", "family": "bull", "status": "pending",
+                 "horizons": [1, 3, 5, 10], "evaluated": {}, "sources": []}])
+            ev_snap = json.loads(json.dumps(evidence))
+            ev_snap["meta"] = {"symbol": "0700.HK", "snapshot": True}
+            _, inv_snap = register_signal(
+                ev_snap, dict(verdict, executable=True,
+                              risk_guard={**rg, "final": "sell"}), opinions, "r", "p")
+            assert inv_snap == 1, "快照存量后缀形态与新归一码须是同一身份（读时归一）"
+            # T8c 名称列数据源（Part B）：quote 块有 name 才落 stock_name
+            ev_nm = json.loads(json.dumps(evidence))
+            ev_nm["blocks"]["quote"]["name"] = "平安银行"
+            register_signal(ev_nm, verdict, opinions, "r", "p", now=d1)
+            last = ar.load_signals(SIGNALS)[-1]
+            assert last.get("stock_name") == "平安银行", last
+            register_signal(evidence, verdict, opinions, "r2", "p", now=d1)
+            assert "stock_name" not in ar.load_signals(SIGNALS)[-1], \
+                "quote 无 name 时不得落空名称键"
             # T9 快照：进 _snapshot/<code>/，不建实盘目录与索引
             stage(dict(evidence, meta={"symbol": "600519", "snapshot": True}),
                   ver=dict(verdict, stock_code="600519"))
@@ -1646,7 +1684,7 @@ def _selftest_archive(evidence, verdict, opinions):
                     "evaluated": {}}
             p28 = os.path.join(rd, "600519.cn", "2026-10-28.md")
             sx = [dict(base, id="a", created_at="2026-10-28T10:00:00", report_path=p28,
-                       report_version=1, report_lost=True),
+                       report_version=1, report_lost=True, stock_name="贵州茅台"),
                   dict(base, id="b", created_at="2026-10-28T11:00:00", report_path=p28,
                        report_version=2, status="evaluated",
                        evaluated={"1": {"close": 103.0, "date": "2026-10-29",
@@ -1666,6 +1704,12 @@ def _selftest_archive(evidence, verdict, opinions):
             root = read(os.path.join(rd, "index.md"))
             assert root.index("00700.hk") < root.index("600519.cn"), "总览按最新诊断倒序"
             assert "| 2 | 1 |" in root and "0700.hk" not in root.replace("00700.hk", "")
+            # 名称列：组内取最新非空（旧信号已知名不被最新无名牌冲掉）；未知 —
+            assert "# 600519.cn · 贵州茅台 · 诊股时间线" in \
+                read(os.path.join(rd, "600519.cn", "index.md"))
+            assert "| 贵州茅台 |" in root and "| — |" in root, root
+            assert "# 00700.hk · 诊股时间线" in \
+                read(os.path.join(rd, "00700.hk", "index.md")), "无名组标题保持原样"
             snap = tree(rd)
             m0 = os.stat(os.path.join(rd, "index.md")).st_mtime_ns
             ar.rebuild_indexes(rd, sx)
@@ -1674,7 +1718,8 @@ def _selftest_archive(evidence, verdict, opinions):
             with open(os.path.join(rd, "600519.cn", "index.md"), "wb") as f:
                 f.write(b"\xff\xfe bad index")  # 坏索引（非 UTF-8）不得让重建崩栈
             ar.rebuild_indexes(rd, sx)
-            assert "600519.cn · 诊股时间线" in read(os.path.join(rd, "600519.cn", "index.md"))
+            assert "600519.cn · 贵州茅台 · 诊股时间线" in \
+                read(os.path.join(rd, "600519.cn", "index.md"))
         # T12 存量迁移：照现网形态（3 信号共用一被覆盖文件）
         legacy_md = render_report(evidence, verdict, opinions, "601888")
 
@@ -1701,6 +1746,7 @@ def _selftest_archive(evidence, verdict, opinions):
             put(rd, "601888-2026-10-28.md", "23:59:51")
             put(rd, "00700-2026-10-28.md", "16:26:00")
             put(rd, "600000-2026-10-28.md", "12:00:00")
+            put(rd, "300001-2026-10-28.md", "12:00:00", text="手写笔记，无节头\n")
             write(os.path.join(rd, "notes.txt"), "keep")
             write(os.path.join(rd, ".DS_Store"), "x")
             write(os.path.join(rd, "600000.cn", "2026-10-28.md"), "other")
@@ -1708,7 +1754,8 @@ def _selftest_archive(evidence, verdict, opinions):
                      legacy_sig(4, "cn", "601888", "17:40:41"),
                      legacy_sig(5, "cn", "601888", "23:59:51"),
                      legacy_sig(1, "hk", "00700", "16:26:00"),
-                     legacy_sig(9, "cn", "600000", "12:00:00")]
+                     legacy_sig(9, "cn", "600000", "12:00:00"),
+                     legacy_sig(2, "cn", "300001", "12:00:00")]
             ar.write_json_atomic(SIGNALS, sigs0)
             raw0 = open(SIGNALS, "rb").read()
             t0 = tree(td)
@@ -1736,6 +1783,17 @@ def _selftest_archive(evidence, verdict, opinions):
             assert read(os.path.join(rd, "600000.cn", "2026-10-28.md")) == "other"
             assert os.path.exists(os.path.join(rd, "600000-2026-10-28.md"))
             assert "report_version" not in got["sig-600000-9"]
+            # T12b 零节头文件（F2）：非本工具产物 conflict 原样跳过，不生成空壳
+            # （300001.cn/index.md 由索引按信号重建合法存在，只验无单日文件）
+            assert read(os.path.join(rd, "300001-2026-10-28.md")) == "手写笔记，无节头\n"
+            assert not os.path.exists(os.path.join(rd, "300001.cn", "2026-10-28.md"))
+            assert "report_version" not in got["sig-300001-2"] \
+                and "report_lost" not in got["sig-300001-2"]
+            p_bare = ar.plan_migration(rd, ar.load_signals(SIGNALS))
+            it_bare = next(it for it in p_bare["items"]
+                           if it["name"] == "300001-2026-10-28.md")
+            assert it_bare["status"] == "conflict" and "无可解析节头" in it_bare["anomaly"], \
+                it_bare
             assert read(os.path.join(rd, "notes.txt")) == "keep"
             assert os.path.exists(os.path.join(rd, "601888.cn", "index.md"))
             raw1 = open(SIGNALS, "rb").read()
@@ -1748,6 +1806,30 @@ def _selftest_archive(evidence, verdict, opinions):
             assert run(cmd_migrate_reports, app, d1.replace(minute=32)) == 0
             assert open(SIGNALS, "rb").read() == raw1
             assert not os.path.exists(os.path.join(rd, "601888-2026-10-28.md"))
+        with tempfile.TemporaryDirectory() as td:  # T12c 索引重建失败（F4）：只告警
+            STATE_DIR, SIGNALS = td, os.path.join(td, "signals.json")
+            rd = os.path.join(td, "reports")
+            put(rd, "601888-2026-10-28.md", "23:59:51")
+            ar.write_json_atomic(SIGNALS, [legacy_sig(5, "cn", "601888", "23:59:51")])
+            real_ri = ar.rebuild_indexes
+
+            def boom(*a, **k):
+                raise OSError("disk full")
+
+            ar.rebuild_indexes = boom
+            try:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = cmd_migrate_reports(app, now=d1)
+            finally:
+                ar.rebuild_indexes = real_ri
+            assert rc == 0 and "迁移完成" in buf.getvalue() \
+                and "时间线索引重建失败" in buf.getvalue(), buf.getvalue()
+            assert os.path.exists(os.path.join(rd, "601888.cn", "2026-10-28.md")) \
+                and os.path.exists(os.path.join(rd, "_legacy", "601888-2026-10-28.md")), \
+                "①-③ 已落盘不得被派生视图故障回吞"
+            assert ar.load_signals(SIGNALS)[0]["report_path"].endswith(
+                os.path.join("601888.cn", "2026-10-28.md"))
         with tempfile.TemporaryDirectory() as td:
             STATE_DIR, SIGNALS = td, os.path.join(td, "signals.json")
             rd = os.path.join(td, "reports")

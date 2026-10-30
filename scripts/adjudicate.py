@@ -208,10 +208,10 @@ def adjudicate(opinions, risk, evidence=None, ledger=None):
     final, caplog = apply_confidence_cap(guarded, cap)
     executable = final in ("buy", "strong_buy") and agg["confidence"] >= CONFIDENCE_GATE
     meta = ((evidence or {}).get("meta") or {})
-    try:  # 港股统一 5 位；与 diagnose.stock_code 同口径（身份闸门比对键）
-        stock_code = fx.detect_market(str(meta.get("code") or meta.get("symbol") or ""))[1]
-    except SystemExit:
-        stock_code = None
+    # 身份闸门比对键：推导唯一实现处 fx.meta_stock_code（与 diagnose 同源），
+    # 不可识别回 None（闸门对 None 放行，兼容旧版/手写 verdict）
+    code, recognized = fx.meta_stock_code(meta)
+    stock_code = code if recognized else None
     return {
         "stock_code": stock_code,
         "valid_opinions": [{k: o[k] for k in ("source", "signal", "confidence", "weight")}
@@ -249,6 +249,10 @@ def selftest():
     _check("consensus medium(1/3 aligned)", v["aggregate"]["consensus_level"], "medium")
     _check("no-op guard", v["risk_guard"]["final"], "strong_buy")
     _check("executable gate", v["executable"], True)
+    _check("stock_code 无 meta 回退 None", v["stock_code"], None)
+    ev_hk = {"meta": {"market": "hk", "code": "0700"},
+             "blocks": {n: {"state": "available"} for n, _ in BLOCKS}}
+    _check("stock_code 港股归一 5 位", adjudicate(ops, {}, ev_hk)["stock_code"], "00700")
 
     print("== 无效意见进诊断（互斥且穷尽） ==")
     ops2 = ops + [{"source": "strategy:hot_theme", "signal": "看多!!!", "confidence": 0.95},

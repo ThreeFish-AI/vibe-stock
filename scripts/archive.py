@@ -239,10 +239,20 @@ def _ordered(signals):
                   reverse=True)
 
 
+def _group_name(signals):
+    """组内最新非空 stock_name（某次取数失败不冲掉已知名称）；未知 None。"""
+    for s in _ordered(signals):
+        if s.get("stock_name"):
+            return s["stock_name"]
+    return None
+
+
 def render_stock_index(signals, market, code):
     dirname = "%s.%s" % (code, market)
     rows = [s for s in signals if s.get("market") == market and s.get("code") == code]
-    L = ["# %s · 诊股时间线" % dirname, "", INDEX_NOTE, "",
+    name = _group_name(rows)
+    L = ["# %s%s · 诊股时间线" % (dirname, " · %s" % name if name else ""),
+         "", INDEX_NOTE, "",
          "| 日期 | 版本 | 信号→动作 | 置信 | 登记价 | 状态 | %s |" %
          " | ".join("T+%d" % h for h in HORIZONS),
          "| --- | --- | --- | --- | --- | --- | %s |" % " | ".join("---" for _ in HORIZONS)]
@@ -265,12 +275,13 @@ def render_root_index(signals):
                     key=lambda x: (x[0].get("created_at") or "", x[0].get("id") or ""),
                     reverse=True)
     L = ["# 诊股总览", "", INDEX_NOTE, "",
-         "| 股票 | 最新日期 | 最新信号→动作 | 置信 | 诊断次数 | pending |",
-         "| --- | --- | --- | --- | --- | --- |"]
+         "| 股票 | 股票名称 | 最新日期 | 最新信号→动作 | 置信 | 诊断次数 | pending |",
+         "| --- | --- | --- | --- | --- | --- | --- |"]
     for s, g in latest:
         dirname = "%s.%s" % (s["code"], s["market"])
-        L.append("| [%s](%s/index.md) | %s | %s→%s | %s | %d | %d |" % (
-            dirname, dirname, (s.get("created_at") or s.get("date") or "—")[:10],
+        L.append("| [%s](%s/index.md) | %s | %s | %s→%s | %s | %d | %d |" % (
+            dirname, dirname, _group_name(g) or "—",
+            (s.get("created_at") or s.get("date") or "—")[:10],
             s.get("signal", "?"), s.get("action", "?"), _fmt(s.get("confidence")),
             len(g), sum(1 for x in g if x.get("status") == "pending")))
     return "\n".join(L) + "\n"
@@ -390,6 +401,13 @@ def plan_migration(reports_dir, signals):
             item["anomaly"] = (item["anomaly"] + "；" if item["anomaly"] else "") + \
                 "mtime 日期与文件名日期不符"
         sections, footer = split_report(_read(old))
+        if not sections:
+            # 零节头＝非本工具产物/截断文件（render_report 恒写「## 结论」）：
+            # 与 append_version 拒绝零版本头对称，不生成空壳单日文件（否则正文
+            # 静默消失且 report_lost 不置位），原文件原地不动、信号不改写
+            item["status"], item["anomaly"] = "conflict", "无可解析节头，原样跳过"
+            claimed.discard(item["new"])  # 不占位：同目标的合法文件仍可认领
+            continue
         entries = [(_ts(s), s, None) for s in usable if s is not owner]
         entries.append((_ts(owner) if owner else mtime, owner, sections))
         entries.sort(key=lambda e: (e[0], e[2] is not None))
@@ -458,9 +476,13 @@ def apply_migration(reports_dir, signals_path, plan, base_digest, now):
         os.makedirs(legacy, exist_ok=True)
         os.replace(it["old"], dst)
         moved.append(it["name"])
-    rebuild_indexes(reports_dir, signals)
+    index_warn = None
+    try:  # 派生视图放最后：挂了不吞迁移主流程（①-③已落盘），只告警带回
+        rebuild_indexes(reports_dir, signals)
+    except (OSError, ValueError) as e:
+        index_warn = str(e)
     return {"backup": backup, "moved": moved, "skipped": skipped,
-            "signals_changed": changed}
+            "signals_changed": changed, "index_warn": index_warn}
 
 
 def migration_lines(plan):

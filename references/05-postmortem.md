@@ -13,12 +13,16 @@
   [docs/.agents/issue.md](../docs/.agents/issue.md) I-004）。
 - **对立失效**：同 market+code+profile 下，新对立族信号（bull/bear）把旧 pending
   对立信号标 invalidated——不同 profile 可并存相反动作；比对按读时归一（港股
-  补 5 位），存量 4 位港码旧信号同样失效互通。
+  补 5 位；快照符号两侧同口径归一），存量 4 位港码/带后缀旧形态信号同样互通。
 - **置信门**：buy 族置信 <0.5 → 登记 watch（不算可执行建议）。
 - 期限 horizons = [1, 3, 5, 10] 个交易日。
 - 报告指针（适用：读信号定位报告时）：做法——`report_id` = `<code>-<date>` 日级
   分组键，定位用 `report_path` + `report_version`（布局见 [04](04-report.md)
   「落盘与跟踪」）；坑位——迁移还原的丢失版带 `report_lost: true`，正文不可得。
+- 股票名称（适用：索引「股票名称」列数据源）：做法——report 时从 quote 块
+  `name`（A 股 qt 全量快照 / 港股 qt 紧凑快照 `s_hk<code>`）写入信号
+  `stock_name`，索引组内取最新非空；坑位——名称是行情面数据，取数失败如实
+  缺省 `—`，不做本地映射回退。
 
 ## 后验（postmortem 时）
 

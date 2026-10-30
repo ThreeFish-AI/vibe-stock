@@ -34,7 +34,7 @@
 | references/01-evidence.md | 八态证据与质量分 |
 | references/02-strategies.md | 策略规约与信号资格分选 |
 | references/03-synthesis.md | 聚合、分歧、RiskGuard |
-| references/04-report.md | 决策报告模板 |
+| references/04-report.md | 决策报告模板、落盘布局与时间线索引 |
 | references/05-postmortem.md | 信号后验自校准 |
 | references/PIPELINE.md | 五段流水线与命令速查 |
 | strategies/ | 策略 YAML 库 |
