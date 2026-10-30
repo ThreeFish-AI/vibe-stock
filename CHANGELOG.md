@@ -6,6 +6,54 @@
 > 存量 0.1.0–0.2.1 六版已按发布顺序一一重编号为 0.0.1–0.0.6（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.7] - 2026-10-30
+
+### Added
+
+- **港股数据面五块接入**（全部免 key 公开源，2026-10-30 逐源实测）：
+  - fundamentals（核心 10 分块）：东财 HKF10 主指标 RPT_HKF10_FN_MAININDICATOR
+    （经 akshare 币种校正）→yfinance info 兜底；概念键与 A 股 em-fin 对齐
+    （EPS/ROE/营收增速/负债率/毛利率/净利率/ROIC/归母净利同比+近 4 期 history），
+    另透出 CURRENCY 键（报表币种人民币 vs 行情 HKD，context-pack 单独成行）。
+    港股质量分 78→85（usable→good）——数据可用性的如实反映，置信帽只看核心
+    三块、口径不变。
+  - valuation：A 路 em-hk-ind 具名列快照（RPT_CUSTOM_HKF10，PE-TTM/PB/总市值
+    /股息，无位序风险）+B 路百度 5 年分位（stock_hk_valuation_baidu）；qt 港股
+    快照因实时字段位序未多标的复核不入链（backlog）。A/HK 两路均新增
+    pe_quantiles_5y 分位表（p10/25/50/75/90+n+cur，供估值透镜插值）。
+  - research：etnet（逐券商目标价去重取最新/EPS 分→元/评级分布，新簇 etnet）
+    →yfinance（目标价互验+eps_trend 90 日修正方向）双源；互差>15% 记 note 不弃；
+    etnet 活但零覆盖→yf 兜底标 fallback；东财 reportapi 港股 0 覆盖不入链。
+  - notices：em-notice-h（np-anotice ann_type=H 直连）单源；盈警/正面盈利预告
+    /股份购回标题简繁两体分型；HKEXnews 权威回退在 backlog。
+  - moneyflow：南向持股 RPT_MUTUAL_STOCK_HOLDRANKS 直连（簇 em_datacenter，
+    pageSize=10；akshare 封装翻全史禁用）；T-1=披露制度口径（available+note
+    注明 HOLD_DATE，超 10 自然日才 stale）；非港股通标的空结果=not_supported。
+- **MARKET_CAPS 市场能力表**：块级能力 SSOT 替代 10 处分散 `if market=="hk"`
+  守卫；selftest 破坏性钉（未配源块=not_supported、守卫先于网络调用）根治
+  「删守卫不换源把 _dc_rows 9201 空结果伪造成 available」的坑。
+- **A 股前瞻 EPS 零调用回收**：RPT_WEB_RESPREDICT 既有 EPS1..4+YEAR_MARK
+  此前被丢弃，consensus 新增 eps_by_year（2025A=65.85/2026E=67.18 形态）；
+  context-pack 研报节新增「目标价统计（中位/均值/离散度）」与「一致预期 EPS」
+  港 A 两用渲染行。
+- 港股 context-pack 口径行（无业绩预告制度——无预告≠无雷/南向 T-1/报表币种
+  分离）；fundamentals CURRENCY 行；南向持股节渲染。
+- CLUSTERS 15→16 簇（etnet）；em 系港股新源键（em-fin-hk/em-hk-ind/dc-hsgt/
+  em-notice-h/yf-fin/yf-analyst）归既有簇；diagnose 簇等式钉同步。
+- selftest 新增破坏性钉：CAPS 守卫（HK 未配源块必 not_supported 且不计熔断）、
+  HKF10 空表不伪 available、etnet+yf 共识合并/高盛去重取最新/互验 note、南向
+  T-1 与 .HK 后缀坑、eps_by_year 回收与缺失不虚构、quantile 单调+n 不含占位、
+  港股 pack 渲染（南向节/目标价统计/报表币种/港股口径行）。
+
+### Changed
+
+- fetch_fundamentals/FUNDAMENTALS_FETCHERS 按市场分派链（cn/hk 各自链表，
+  函数名与签名不变）；notices 链 NOTICES_CHAINS 同构化（港股单源链空结果=
+  available 事实）；valuation 双路架构按市场参数化。
+- references/01-evidence.md 六块表/扩展块表/16 簇/市场能力表/南向 T-1/forecast
+  制度差异/分位表规约句+backlog 八项（qt HK 快照/HKEXnews/CCASS/卖空/回购
+  金额/HK 行业/Reverse DCF/theses）；PIPELINE 港股速查重写；README 港股覆盖节。
+
 ## [0.0.6] - 2026-10-30
 
 ### Fixed

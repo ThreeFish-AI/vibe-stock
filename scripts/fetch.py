@@ -15,6 +15,9 @@
   - 取数时段：meta.session 记盘中/收盘（纯函数 session_phase，固定 UTC+8）；
     末根未完成时 technical 另出线性外推量比 vol_ratio_5_projected（estimated）。
   - 快照模式：--snapshot-dir 提供预置 JSON（无网兜底），状态按文件声明或 estimated。
+  - 市场能力表 MARKET_CAPS：块级能力 SSOT，未配源块首行守卫按 not_supported
+    早退（港股 fundamentals/valuation/research/notices/moneyflow 已接入，
+    chip/forecast/unlock/holder/industry 为能力边界非源故障）。
 
 用法（联网全量）：
   uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
@@ -74,7 +77,36 @@ CLUSTERS = {
     "baidu-val": "baidu_gushitong",  # 百度股市通 · 历史估值序列
     "emweb-holder": "emweb",     # 东财 F10 簇 · 股东户数（emweb.securities 子域；
                                  #  RPT_HOLDERNUM_DET 数据集实测停在 2022，弃用）
+    # —— 港股数据面 ——
+    "em-fin-hk": "em_datacenter",  # 港股财务主指标（datacenter/securities/api，
+                                   #  经 akshare，RPT_HKF10_FN_MAININDICATOR）
+    "em-hk-ind": "em_datacenter",  # 港股最新指标快照（RPT_CUSTOM_HKF10_FN_MAIN
+                                   #  INDICATORMAX：PE/PB/市值/股息，具名列无位序风险）
+    "yf-fin": "yf",              # 港股财务回退（yfinance info，字段稀疏只作兜底）
+    "yf-analyst": "yf",          # 港股研报回退+交叉源（yfinance analyst 系列）
+    "dc-hsgt": "em_datacenter",  # 南向持股（RPT_MUTUAL_STOCK_HOLDRANKS 直连）
+    "em-notice-h": "em_notice",  # 港股公告（np-anotice ann_type=H，同簇加分支）
+    "etnet": "etnet",            # ETNet 经济通簇 · 港股盈利预测（www.etnet.com.hk）
 }
+
+# 市场能力表（块级 SSOT，簇数钉的姊妹钉）：市场 → 有取数链的块集合；不在集合
+# 内的块由各 fetch_<name> 首行守卫按 not_supported 早退（守卫必须先于任何网络
+# 调用——selftest 据此零网络遍历钉「未配源块=not_supported」）。改能力只改这张
+# 表 + 对应 fetch_<name>，两处漂移会被 selftest 破坏性钉打断（先例：只删守卫
+# 不换源会把 _dc_rows 的 9201 空结果伪造成 available·无研报）。
+MARKET_CAPS = {
+    "cn": {"quote", "daily_bars", "technical", "news", "fundamentals", "chip",
+           "moneyflow", "notices", "research", "forecast", "unlock", "holder",
+           "market", "industry", "valuation"},
+    "hk": {"quote", "daily_bars", "technical", "news", "fundamentals",
+           "moneyflow", "notices", "research", "market", "valuation"},
+}
+
+
+def hk5(code):
+    """港股代码规范 5 位形态（01810/00700）——SECUCODE 过滤、np-anotice、
+    etnet 与 yf ticker 共用的唯一归一处（yf 侧再 zfill(4) 退 4 位）。"""
+    return code.zfill(5)
 
 CHAINS = {
     "cn": ["ak-em", "ef-em", "qq-tx", "yf"],
@@ -625,25 +657,75 @@ def _fund_via_ths(code):
     return {k: (None if c not in row else _num(row[c])) for k, c in mapping.items()}
 
 
-FUNDAMENTALS_FETCHERS = {"em-fin": _fund_via_em, "sina-fin": _fund_via_sina,
-                         "ths-fin": _fund_via_ths}
+def _fund_via_hk_em(code):
+    """港股主链（经 akshare）：RPT_HKF10_FN_MAININDICATOR 近 9 报告期取前 4，
+    概念键对齐 A 股 em-fin（历史可比、pack 渲染复用）。akshare 封装会做港股
+    报表币种二次校正（datacenter 原始 CURRENCY 列恒 HKD 不可信），CURRENCY 键
+    如实透出（小米=人民币：报表 CNY 与行情 HKD 分离，pack 必须可见）。"""
+    import akshare as ak
+    df = ak.stock_financial_hk_analysis_indicator_em(symbol=hk5(code),
+                                                     indicator="报告期")
+    out = {}
+    for _, row in df.head(4).iterrows():
+        period = str(row.get("REPORT_DATE", ""))[:10]
+        out[period] = {
+            "报告期": period,
+            "每股收益(元)": _num(row.get("BASIC_EPS")),
+            "净资产收益率(%)": _num(row.get("ROE_AVG")),
+            "主营业务收入增长率(%)": _num(row.get("OPERATE_INCOME_YOY")),
+            "资产负债率(%)": _num(row.get("DEBT_ASSET_RATIO")),
+            "毛利率(%)": _num(row.get("GROSS_PROFIT_RATIO")),
+            "净利率(%)": _num(row.get("NET_PROFIT_RATIO")),
+            "ROIC(%)": _num(row.get("ROIC_YEARLY")),
+            "归母净利润同比(%)": _num(row.get("HOLDER_PROFIT_YOY")),
+            "归母净利润(亿元)": (lambda v: None if v is None else round(v / 1e8, 2))(
+                _num(row.get("HOLDER_PROFIT"))),
+            "CURRENCY": (str(row.get("CURRENCY")) if row.get("CURRENCY")
+                         else None)}
+    return out
+
+
+def _fund_via_yf(code):
+    """港股回退（yfinance info 单调用）：增长率/ROE 为 TTM 口径（与主链报告期
+    累计口径不同，note 注明），字段稀疏是常态——只补拿得到的键，不虚构。"""
+    import yfinance as yf
+    info = yf.Ticker(yf_ticker("hk", code)).info or {}
+
+    def _pct(k):
+        v = info.get(k)
+        return None if v is None else round(v * 100, 2)
+
+    data = {"净资产收益率(%)": _pct("returnOnEquity"),
+            "主营业务收入增长率(%)": _pct("revenueGrowth"),
+            "归母净利润同比(%)": _pct("earningsGrowth"),
+            "每股收益(元)": info.get("trailingEps"),
+            "CURRENCY": info.get("financialCurrency")}
+    return {k: v for k, v in data.items() if v is not None}
+
+
+FUNDAMENTALS_FETCHERS = {
+    "cn": {"em-fin": _fund_via_em, "sina-fin": _fund_via_sina,
+           "ths-fin": _fund_via_ths},
+    "hk": {"em-fin-hk": _fund_via_hk_em, "yf-fin": _fund_via_yf},
+}
 
 
 def fetch_fundamentals(market, code, st, now):
-    """财务指标：em_datacenter → sina → ths（簇级计账，任一簇熔断不牵连另一簇）。
-    em-fin 返回 {报告期: 指标}，主值取最新期、近 4 期入 history（pack 渲染用）。"""
-    if market == "hk":
+    """财务指标：按市场查能力表分派链（cn: em_datacenter→sina→ths；hk:
+    em_datacenter(HKF10)→yfinance）。簇级计账，任一簇熔断不牵连另一簇。
+    em 系两链返回 {报告期: 指标}，主值取最新期、近 4 期入 history。"""
+    if market not in MARKET_CAPS or "fundamentals" not in MARKET_CAPS[market]:
         return {"state": "not_supported", "source": "",
-                "note": "港股财务指标 v1 未接入"}
+                "note": "该市场无财务指标取数链"}
     tried = []
-    for name in FUNDAMENTALS_FETCHERS:
+    for name in FUNDAMENTALS_FETCHERS[market]:
         cluster = CLUSTERS[name]
         ok, why = source_allowed(st, cluster, now)
         if not ok:
             tried.append((name, why))
             continue
         try:
-            data = FUNDAMENTALS_FETCHERS[name](code)
+            data = FUNDAMENTALS_FETCHERS[market][name](code)
             history = None
             if data and all(isinstance(v, dict) for v in data.values()):
                 history, data = data, data[max(data)]
@@ -764,9 +846,9 @@ def fetch_chip(market, code, st, now, bars=None, float_shares=None,
     """筹码分布（derive 优先）：本地自算（日K+qt 流通股本）→ estimated；
     无输入或自算失败时探 em-chip 官方接口（em_quote 簇复活位）→ available；
     港股 not_supported（能力差异摆到明面上）。"""
-    if market == "hk":
+    if market not in MARKET_CAPS or "chip" not in MARKET_CAPS[market]:
         return {"state": "not_supported", "source": "",
-                "note": "筹码数据仅 A 股"}
+                "note": "港股无公开筹码分布数据（A 股专属）"}
     if bars and float_shares:
         data = derive_chip(bars, float_shares, bars_source)
         if data:
@@ -801,15 +883,21 @@ def fetch_chip(market, code, st, now, bars=None, float_shares=None,
 _DC = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
 
-def _dc_rows(report_name, code, st, now, src_key, page_size=20, sort=""):
-    """东财数据中心直连通用壳：reportName+SECURITY_CODE 过滤，返回 rows 或抛错。"""
+def _dc_rows(report_name, code, st, now, src_key, page_size=20, sort="",
+             filter_str=None, base_url=None):
+    """东财数据中心直连通用壳：reportName+SECURITY_CODE 过滤，返回 rows 或抛错。
+    filter_str 显式给全（南向需 SECUCODE+MUTUAL_TYPE 复合过滤）；base_url 覆盖
+    _DC（港股 datacenter.eastmoney.com/securities/api 同簇不同主机，A 股消费方
+    共用 _DC 常量勿硬改）。"""
     cluster = CLUSTERS[src_key]
     ok, why = source_allowed(st, cluster, now)
     if not ok:
         raise _Skip(why)
     import urllib.parse
+    if filter_str is None:
+        filter_str = '(SECURITY_CODE="%s")' % code
     url = ("%s?reportName=%s&columns=ALL&filter=%s&pageNumber=1&pageSize=%d%s"
-           % (_DC, report_name, urllib.parse.quote('(SECURITY_CODE="%s")' % code),
+           % (base_url or _DC, report_name, urllib.parse.quote(filter_str),
               page_size, sort))
     data = json.loads(_http_text(url))
     if data.get("success") is False:
@@ -836,12 +924,61 @@ def _ext_fail(name, e):
             "note": type(e).__name__}
 
 
+def fetch_moneyflow_hk(code, st, now):
+    """扩展块·资金流（港股）：南向（港股通）持股是港股唯一日更的个股级公开
+    资金面信号（港股无 A 股四档资金流数据）。RPT_MUTUAL_STOCK_HOLDRANKS 直连
+    pageSize=10 取最新一日（akshare 封装会翻完全部 ~472 页历史，禁用）。
+    口径（无条件全局规则：披露制度≠数据陈旧）：南向持股为 T-1 披露（收盘后
+    傍晚更新），最新日=available+note 注明 HOLD_DATE；仅 HOLD_DATE 距今超过
+    STALE_DAYS["moneyflow"]（10 自然日，停牌/断更形态）才标 stale——勿把制度性
+    T-1 当陈旧降级。坑位：HOLD_SHARES_RATIO 是占总股本比（H 股公司口径），
+    TOTAL_SHARES_RATIO 字段语义不明勿消费。"""
+    rows = _dc_rows("RPT_MUTUAL_STOCK_HOLDRANKS", code, st, now, "dc-hsgt",
+                    page_size=10,
+                    sort='&sortColumns=TRADE_DATE&sortTypes=-1',
+                    filter_str='(SECUCODE="%s.HK")(MUTUAL_TYPE="002")' % hk5(code))
+    if not rows:
+        # 港股通标的之外（非互联互通名单）空结果是标的级事实
+        return {"state": "not_supported", "source": "dc-hsgt",
+                "note": "非港股通标的，无南向持股数据"}
+    r = rows[0]
+    hold_date = str(r.get("TRADE_DATE", ""))[:10]
+    try:
+        age = (dt.date.today() - dt.date.fromisoformat(hold_date)).days
+    except ValueError:
+        age = None
+    state = "available"
+    note = "南向 T-1 披露口径（HOLD_DATE=%s）" % hold_date
+    if age is None or age > STALE_DAYS["moneyflow"]:
+        state, note = "stale", ("南向持股止于 %s（距今 %s 天），不按最新事实采信"
+                                % (hold_date, "未知" if age is None else age))
+    summary = {"hold_date": hold_date,
+               "hold_shares": r.get("HOLD_SHARES"),
+               "hold_pct": r.get("HOLD_SHARES_RATIO"),
+               "net_buy_shares_1d": r.get("HOLD_SHARES_CHANGE"),
+               "net_buy_amount_1d_hkd": r.get("ADD_MARKET_CAP"),
+               "net_mv_chg_10d_hkd": r.get("HOLD_MARKETCAP_CHG10"),
+               "close_price": r.get("CLOSE_PRICE"),
+               "currency": "HKD"}
+    return {"state": state, "source": "dc-hsgt", "summary": summary, "note": note}
+
+
 def fetch_moneyflow(market, code, st, now):
-    """扩展块·资金流：新浪流量簇直连 60 日四档净额（主力净额=r0_net+r1_net 自算，
-    四档和=netamount 数值自洽校验防口径漂移）。东财族绑死 em_quote 死簇不入链、
-    同花顺全市场扫描 105 页 28s 不入链（调用预算红线）。港 not_supported。"""
+    """扩展块·资金流：A 股=新浪流量簇直连 60 日四档净额（主力净额=r0_net+r1_net
+    自算，四档和=netamount 数值自洽校验防口径漂移）；港股=南向持股（见
+    fetch_moneyflow_hk）。东财族绑死 em_quote 死簇不入链、同花顺全市场扫描
+    105 页 28s 不入链（调用预算红线）。"""
     if market == "hk":
-        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+        if "moneyflow" not in MARKET_CAPS.get(market, ()):
+            return {"state": "not_supported", "source": "",
+                    "note": "该市场无资金流取数链"}
+        try:
+            return fetch_moneyflow_hk(code, st, now)
+        except _Skip as e:
+            return _ext_fail("dc-hsgt", e)
+        except Exception as e:
+            record(st, CLUSTERS["dc-hsgt"], False, str(e), now)
+            return _ext_fail("dc-hsgt", e)
     try:
         cluster = CLUSTERS["sina-flow"]
         ok, why = source_allowed(st, cluster, now)
@@ -939,18 +1076,55 @@ def _notices_via_cninfo(code):
             for _, r in df.head(30).iterrows()]
 
 
+def _notices_via_em_hk(code):
+    """港股公告：np-anotice 直连 ann_type=H（同簇 A 股源只差参数；akshare 封装
+    不吃港股代码故直连）。columns[].column_name 为繁体类别标签、title 简体——
+    盈警/回购分型关键词两体都试。HKEXnews 权威回退挂 backlog（PDF 流无金额）。"""
+    d = json.loads(_http_text(
+        "https://np-anotice-stock.eastmoney.com/api/security/ann?sr=-1"
+        "&page_size=30&page_index=1&ann_type=H&client_source=web&stock_list="
+        + hk5(code)))
+    cutoff = (dt.date.today() - dt.timedelta(days=90)).isoformat()
+    items = []
+    for it in (d.get("data") or {}).get("list") or []:
+        date = str(it.get("notice_date", ""))[:10]
+        if date < cutoff:
+            continue
+        cols = ",".join(str(c.get("column_name")) for c in it.get("columns") or [])
+        title = str(it.get("title", ""))
+        blob = title + cols
+        typ = cols or "公告"
+        if "盈利警告" in blob:
+            typ = "盈利警告"
+        elif "正面盈利預告" in blob or "正面盈利预告" in blob:
+            typ = "正面盈利预告"
+        elif "購回" in blob or "购回" in blob:
+            typ = "股份购回"
+        items.append({"date": date, "type": typ, "title": title})
+        if len(items) >= 30:
+            break
+    return items
+
+
+NOTICES_CHAINS = {
+    "cn": (("em-notice", _notices_via_em), ("cninfo-disc", _notices_via_cninfo)),
+    "hk": (("em-notice-h", _notices_via_em_hk),),
+}
+
+
 def fetch_notices(market, code, st, now):
-    """扩展块·公告：em_notice 簇（8 类枚举）→ cninfo 簇（监管权威回退），
+    """扩展块·公告：A 股 em_notice 簇（8 类枚举）→ cninfo 簇（监管权威回退）；
+    港股 em-notice-h 单源（np-anotice ann_type=H；HKEXnews 回退在 backlog）。
     近 90 天 ≤30 条；双源覆盖面不同（东财含 H 股镜像），条数差异属正常。
     空结果语义（与 forecast/research 同钉）：90 天无公告是标的级事实非源故障
-    ——单源空不记熔断、换下一源交叉验证，双源皆空=available 空列表；任一源
+    ——单源空不记熔断、换下一源交叉验证，链上源皆空=available 空列表；任一源
     硬失败则按回退链语义如实 fetch_failed（无法确认「无公告」事实）。"""
-    if market == "hk":
-        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    if market not in NOTICES_CHAINS:
+        return {"state": "not_supported", "source": "",
+                "note": "该市场无公告取数链"}
     tried = []
     emptied = []
-    for name, fn in (("em-notice", _notices_via_em),
-                     ("cninfo-disc", _notices_via_cninfo)):
+    for name, fn in NOTICES_CHAINS[market]:
         cluster = CLUSTERS[name]
         try:
             ok, why = source_allowed(st, cluster, now)
@@ -974,9 +1148,11 @@ def fetch_notices(market, code, st, now):
         except Exception as e:
             record(st, cluster, False, str(e), now)
             tried.append((name, "fail: %s" % type(e).__name__))
-    if len(emptied) == 2:  # 双源皆空=事实：无公告非缺失（同 research 双空语义）
+    if emptied and len(emptied) == len(NOTICES_CHAINS[market]):
+        # 链上源皆空=事实：无公告非缺失（同 research 双空语义；港股单源链
+        # 空亦按事实——np-anotice 对港股标的覆盖恒在，空=窗口内确无公告）
         return {"state": "available", "source": "+".join(emptied), "items": [],
-                "note": "近 90 天无公告（双源皆空是事实，非数据缺失）",
+                "note": "近 90 天无公告（链上源皆空是事实，非数据缺失）",
                 "tried": tried}
     return {"state": "fetch_failed", "source": "", "note": "all_failed", "tried": tried}
 
@@ -997,12 +1173,182 @@ def _research_list(code):
     return out
 
 
+def _research_hk_etnet(code):
+    """etnet 主链（三表）：评级总览抽数（「综合 N 份证券商报告」文案列须正则）；
+    盈利预测概览 50 行混多财年——逐券商按更新日期去重取最新行，再算目标价
+    统计与评级分布；综合盈利预测按财年给 EPS（单位分→/100，报表币种无币种列）。
+    坑位：目标价 HKD 而 EPS 为报表币种（跨币勿混算）；平均评级刻度未经官方
+    验证，不消费数值只透传机构数/目标价/EPS。"""
+    import akshare as ak
+    sym = hk5(code)
+    rating = ak.stock_hk_profit_forecast_et(symbol=sym, indicator="评级总览")
+    org_num = None
+    if len(rating):
+        m = re.search(r"(\d+)", str(rating.iloc[0].get("评级数量", "")))
+        org_num = int(m.group(1)) if m else None
+    latest = {}
+    for _, r in (ak.stock_hk_profit_forecast_et(
+            symbol=sym, indicator="盈利预测概览")).iterrows():
+        org = str(r.get("证券商", "")).strip()
+        d = str(r.get("更新日期", ""))[:10]
+        if not org:
+            continue
+        if org not in latest or d > latest[org]["date"]:
+            latest[org] = {"date": d, "target": _num(r.get("目标价")),
+                           "rating": str(r.get("评级", "")).strip()}
+    targets = [v["target"] for v in latest.values() if v["target"]]
+    consensus, reports = None, []
+    if latest:
+        srt = sorted(latest.values(), key=lambda v: v["date"], reverse=True)
+        dist = {}
+        for v in latest.values():
+            dist[v["rating"]] = dist.get(v["rating"], 0) + 1
+        med = sorted(targets)[len(targets) // 2] if targets else None
+        consensus = {
+            "org_num": org_num or len(latest),
+            "target_min": min(targets) if targets else None,
+            "target_median": round(med, 2) if med is not None else None,
+            "target_mean": round(sum(targets) / len(targets), 2),
+            "target_max": max(targets) if targets else None,
+            "dispersion": (round((max(targets) - min(targets)) / med, 2)
+                           if targets and len(targets) > 1 and med else None),
+            "rating_dist": dist,
+            "note": "目标价 HKD；EPS 为报表币种（etnet 无币种列）"}
+        reports = [{"date": v["date"], "org": org, "rating": v["rating"],
+                    "title": "目标价 %s" % v["target"]}
+                   for org, v in sorted(latest.items(),
+                                        key=lambda kv: kv[1]["date"],
+                                        reverse=True)]
+    # EPS 逐年（综合盈利预测：每股盈利/每股亏损，分→元）
+    eps_by_year = []
+    for _, r in (ak.stock_hk_profit_forecast_et(
+            symbol=sym, indicator="综合盈利预测")).iterrows():
+        eps = _num(r.get("每股盈利/每股亏损"))
+        year = _num(r.get("财政年度"))
+        if eps is not None and year is not None:
+            eps_by_year.append({"year": int(year), "eps": round(eps / 100, 3),
+                                "mark": "E"})
+    return consensus, eps_by_year, reports
+
+
+def _research_hk_yf(code):
+    """yf 交叉/回退：目标价统计（low/mean/median/high）+ 评级计数 + eps_trend
+    90 日修正方向（etnet 无此增量信号）。坑位：EPS 币种=报表币种而目标价 HKD；
+    upgrades_downgrades 港股恒空表不可依赖。"""
+    import yfinance as yf
+    t = yf.Ticker(yf_ticker("hk", code))
+    apt = t.analyst_price_targets or {}
+    rs = t.recommendations_summary
+    et = t.eps_trend
+    consensus = {}
+    tgt_keys = (("target_min", "low"), ("target_mean", "mean"),
+                ("target_median", "median"), ("target_max", "high"))
+    for k, src in tgt_keys:
+        v = _num(apt.get(src))
+        if v is not None:
+            consensus[k] = round(v, 2)
+    row = rs[rs["period"] == "0m"].iloc[0] if len(rs) and "0m" in set(
+        rs["period"]) else None
+    if row is not None:
+        consensus["org_num"] = int(sum(row.get(k, 0) or 0 for k in
+                                       ("strongBuy", "buy", "hold", "sell",
+                                        "strongSell")))
+        consensus["rating_dist"] = {"买入": int(row.get("strongBuy", 0) or 0),
+                                    "增持": int(row.get("buy", 0) or 0),
+                                    "中性": int(row.get("hold", 0) or 0),
+                                    "减持": int((row.get("sell", 0) or 0)
+                                                + (row.get("strongSell", 0) or 0))}
+    revision = None
+    if et is not None and len(et) and "0y" in set(et.index):
+        cur, ago = _num(et.loc["0y", "current"]), _num(et.loc["0y", "90daysAgo"])
+        if cur is not None and ago:
+            revision = {"label": "FY+0", "current": cur, "ago_90d": ago,
+                        "direction": "up" if cur > ago else
+                        "down" if cur < ago else "flat",
+                        "currency": et.loc["0y", "currency"]}
+    return consensus, revision
+
+
+def fetch_research_hk(code, st, now):
+    """扩展块·研报（港股）：etnet 主链（逐券商目标价/EPS/评级分布）→ yf 交叉
+    （目标价互验 + eps 90 日修正方向）。互差 >15% 记 note 不弃；etnet 失败 yf
+    兜底标 fallback；双方都无覆盖=available 空共识（同 A 股双空语义）。"""
+    consensus, eps_by_year, reports, fails = None, [], [], []
+    etnet_empty = False  # etnet 活但零覆盖（小盘股常态）：共识改由 yf 承担
+    try:
+        ok, why = source_allowed(st, CLUSTERS["etnet"], now)
+        if not ok:
+            raise _Skip(why)
+        consensus, eps_by_year, reports = _research_hk_etnet(code)
+        etnet_empty = consensus is None
+        record(st, CLUSTERS["etnet"], True, "", now)
+    except _Skip as e:
+        fails.append("etnet:%s" % e)
+    except ImportError:
+        fails.append("etnet:import_missing")
+    except Exception as e:
+        record(st, CLUSTERS["etnet"], False, str(e), now)
+        fails.append("etnet:%s" % type(e).__name__)
+    try:
+        ok, why = source_allowed(st, CLUSTERS["yf-analyst"], now)
+        if not ok:
+            raise _Skip(why)
+        yf_consensus, revision = _research_hk_yf(code)
+        record(st, CLUSTERS["yf-analyst"], True, "", now)
+        if consensus is None:
+            consensus = yf_consensus  # etnet 失败：yf 兜底（状态尾部统判）
+        elif yf_consensus:
+            # 目标价互验：互差>15% 记 note 不弃（两源覆盖面不同属正常）
+            for k in ("target_median", "target_mean"):
+                a, b = consensus.get(k), yf_consensus.get(k)
+                if a and b and abs(a / b - 1) > 0.15:
+                    consensus["note"] = (consensus.get("note", "")
+                                         + "；etnet %s=%s 与 yf %s=%s 互差>15%%"
+                                         % (k, a, k, b))
+        if consensus and revision:
+            consensus["eps_revision_90d"] = revision
+    except _Skip as e:
+        fails.append("yf-analyst:%s" % e)
+    except ImportError:
+        fails.append("yf-analyst:import_missing")
+    except Exception as e:
+        record(st, CLUSTERS["yf-analyst"], False, str(e), now)
+        fails.append("yf-analyst:%s" % type(e).__name__)
+    if consensus:
+        if not etnet_empty and eps_by_year:
+            consensus["eps_by_year"] = eps_by_year
+        state, src = "available", "etnet+yf-analyst"
+        if etnet_empty:
+            state, src = "fallback", "yf-analyst"
+        elif "etnet:" in ";".join(fails):
+            state, src = "fallback", "yf-analyst"
+        elif fails:
+            state = "partial"
+            src = "etnet"
+        blk = {"state": state, "source": src, "reports": reports[:15],
+               "consensus": consensus}
+        if etnet_empty:
+            blk["note"] = "etnet 无该标的覆盖，共识与 EPS 修正来自 yfinance"
+        elif fails:
+            blk["note"] = "部分失败：%s" % ";".join(fails)
+        return blk
+    if not fails:
+        return {"state": "available", "source": "etnet+yf-analyst",
+                "reports": [], "consensus": None,
+                "note": "无券商覆盖（双源皆空是事实，非数据缺失）"}
+    return {"state": "fetch_failed", "source": "", "note": "all_failed",
+            "tried": fails}
+
+
 def fetch_research(market, code, st, now):
-    """扩展块·研报与评级：em_report 簇逐篇列表 + datacenter 直连评级共识与
-    机构目标价（RPT_WEB_RESPREDICT——akshare 封装丢弃目标价列，必须直连）。
-    单边失败标 partial 不谎报全成。港 not_supported。"""
+    """扩展块·研报与评级：A 股 em_report 簇逐篇列表 + datacenter 直连评级共识
+    与机构目标价（RPT_WEB_RESPREDICT——akshare 封装丢弃目标价列，必须直连）；
+    港股 etnet→yf 双源（见 fetch_research_hk）。单边失败标 partial 不谎报全成。"""
     if market == "hk":
-        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+        if "research" not in MARKET_CAPS.get(market, ()):
+            return {"state": "not_supported", "source": "",
+                    "note": "该市场无研报取数链"}
+        return fetch_research_hk(code, st, now)
     blk = {"state": "fetch_failed", "source": "", "note": "all_failed"}
     reports, consensus, fails = None, None, []
     try:
@@ -1024,12 +1370,23 @@ def fetch_research(market, code, st, now):
         rows = _dc_rows("RPT_WEB_RESPREDICT", code, st, now, "dc-respredict")
         if rows:  # 零行=无机构覆盖（事实非失败，_dc_rows 已按空语义计成功）
             r = rows[0]
+            # 前瞻 EPS 零调用回收：该数据集本就返回 EPS1..4+YEAR1..4+YEAR_MARK
+            # （A=实际/E=一致预期），此前被丢弃；EPS 币种=报表币种（与现价同币，
+            # 前瞻 PE 可直除）
+            eps_by_year = []
+            for i in (1, 2, 3, 4):
+                eps = _num(r.get("EPS%d" % i))
+                if eps is not None:
+                    eps_by_year.append({"year": _num(r.get("YEAR%d" % i)),
+                                        "mark": r.get("YEAR_MARK%d" % i),
+                                        "eps": round(eps, 3)})
             consensus = {"org_num": r.get("RATING_ORG_NUM"),
                          "buy": r.get("RATING_BUY_NUM"), "add": r.get("RATING_ADD_NUM"),
                          "neutral": r.get("RATING_NEUTRAL_NUM"),
                          "reduce": r.get("RATING_REDUCE_NUM"),
                          "target_min": r.get("DEC_AIMPRICEMIN"),
-                         "target_max": r.get("DEC_AIMPRICEMAX")}
+                         "target_max": r.get("DEC_AIMPRICEMAX"),
+                         "eps_by_year": eps_by_year or None}
     except Exception as e:
         if not isinstance(e, _Skip):  # 计账对称：真实失败记败（同簇其余调用点皆然）
             record(st, CLUSTERS["dc-respredict"], False, str(e), now)
@@ -1052,9 +1409,11 @@ def fetch_research(market, code, st, now):
 def fetch_forecast(market, code, st, now):
     """扩展块·业绩预告+披露日历（datacenter 直连两条 reportName）。
     语义（无条件全局规则）：空结果=available 且字段 null——「无预告」是事实
-    不是失败；只有网络/解析失败才 fetch_failed。港 not_supported。"""
-    if market == "hk":
-        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    不是失败；只有网络/解析失败才 fetch_failed。"""
+    if market not in MARKET_CAPS or "forecast" not in MARKET_CAPS[market]:
+        return {"state": "not_supported", "source": "",
+                "note": "港股无业绩预告制度——无预告≠无雷（盈警走 notices 块"
+                        "「盈利警告」分型），勿把 A 股预告习惯外推港股"}
     try:
         # NOTICE_DATE 降序（无条件全局规则）：该数据集默认升序且只取第 1 页——
         # 不带 sort 时历史预告 ≥20 条的股票最新预告落在后页读不到、窗口内多条
@@ -1101,8 +1460,9 @@ def fetch_forecast(market, code, st, now):
 def fetch_unlock(market, code, st, now):
     """扩展块·限售解禁（RPT_LIFT_STAGE，列名 2026-10-28 探针实测）：
     未来批次全列+过往近 24 月 ≤5 条。空 upcoming 是事实非失败。港 not_supported。"""
-    if market == "hk":
-        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    if market not in MARKET_CAPS or "unlock" not in MARKET_CAPS[market]:
+        return {"state": "not_supported", "source": "",
+                "note": "港股无限售解禁披露形态（A 股专属）"}
     try:
         rows = _dc_rows("RPT_LIFT_STAGE", code, st, now, "dc-unlock",
                         page_size=50,
@@ -1134,8 +1494,9 @@ def fetch_holder(market, code, st, now):
     """扩展块·股东户数（emweb F10 gdrs，季度披露，近 8 期）：户数环比是官方口径
     的筹码集中/分散信号。坑位：datacenter 侧 RPT_HOLDERNUM_DET 数据集停在
     2022（服务端排序亦不生效），股东户数事实源在 emweb F10。港 not_supported。"""
-    if market == "hk":
-        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    if market not in MARKET_CAPS or "holder" not in MARKET_CAPS[market]:
+        return {"state": "not_supported", "source": "",
+                "note": "港股无股东户数披露形态（A 股专属）"}
     try:
         cluster = CLUSTERS["emweb-holder"]
         ok, why = source_allowed(st, cluster, now)
@@ -1211,8 +1572,9 @@ def fetch_industry(market, code, st, now):
     """扩展块·行业板块：申万归属（sina_flow 直连 GBK F10）+ 同花顺 90 板块表
     （涨跌排名/净流入）。申万↔ths 名模糊匹配不足置信 → 只给归属不带板块统计
     （taxonomy_note 标注口径）。ths 全表一次调用（单页）在预算内。"""
-    if market == "hk":
-        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    if market not in MARKET_CAPS or "industry" not in MARKET_CAPS[market]:
+        return {"state": "not_supported", "source": "",
+                "note": "港股行业归属待接入（backlog：东财 HKCVALUE 同业锚）"}
     blk = {"state": "fetch_failed", "source": "", "note": "all_failed"}
     sw, board, note = None, None, []
     try:
@@ -1272,42 +1634,90 @@ def fetch_industry(market, code, st, now):
     return blk
 
 
-def _baidu_percentile(code, indicator):
-    """百度股市通历史估值序列（近五年）→ 当前值百分位 + 序列尾 5 点。"""
+def _baidu_percentile(code, indicator, market="cn"):
+    """百度股市通历史估值序列（近五年，A/HK 同 host 同实现仅换函数）→
+    (当前值百分位, 序列尾 5 点, 分位表)。分位公式钉 (<=cur)/n（与 A 股既有
+    口径一致，勿改 pct(<cur)/n——两种约定差一个计数点）。分位表供估值透镜
+    对任意参考价插值（p10/25/50/75/90 + n + cur，免整序列落盘）。"""
     import akshare as ak
-    df = ak.stock_zh_valuation_baidu(symbol=code, indicator=indicator,
-                                     period="近五年")
+    fn = (ak.stock_zh_valuation_baidu if market == "cn"
+          else ak.stock_hk_valuation_baidu)
+    df = fn(symbol=hk5(code) if market == "hk" else code,
+            indicator=indicator, period="近五年")
     vals = [_fnum(v) for v in df["value"]]  # "--"→NaN 归 None：不虚构 0.0 分位
     dates = [str(d) for d in df["date"]]
-    if not vals or vals[-1] is None:
+    clean = [v for v in vals if v is not None]
+    if not clean or vals[-1] is None:
         raise ValueError("empty %s" % indicator)
     cur = vals[-1]
-    below = sum(1 for v in vals if v is not None and v <= cur)
-    pct = round(100.0 * below / len([v for v in vals if v is not None]), 1)
+    below = sum(1 for v in clean if v <= cur)
+    pct = round(100.0 * below / len(clean), 1)
     tail = [{"date": dates[i], "value": vals[i]}
             for i in range(max(0, len(vals) - 5), len(vals))]
-    return pct, tail
+    s = sorted(clean)
+    quants = {"n": len(s), "cur": cur,
+              "p10": round(s[int(0.10 * (len(s) - 1))], 3),
+              "p25": round(s[int(0.25 * (len(s) - 1))], 3),
+              "p50": round(s[int(0.50 * (len(s) - 1))], 3),
+              "p75": round(s[int(0.75 * (len(s) - 1))], 3),
+              "p90": round(s[int(0.90 * (len(s) - 1))], 3)}
+    return pct, tail, quants
+
+
+def _hk_indicator_snapshot(code):
+    """港股估值 A 路：RPT_CUSTOM_HKF10_FN_MAININDICATORMAX（经 akshare
+    stock_hk_financial_indicator_em）——中文具名列无位序风险，PE-TTM/PB/总市值
+    (港元)/股息率一次取齐。坑位：单行表混报告期指标与行情时点估值（PE/市值随
+    最新收盘刷新）；无股息标的字段 None 非占位符。"""
+    import akshare as ak
+    df = ak.stock_hk_financial_indicator_em(symbol=hk5(code))
+    if not len(df):
+        raise ValueError("empty hk indicator")
+    r = df.iloc[0]
+    mv = _num(r.get("总市值(港元)"))
+    return {"pe_ttm": _num(r.get("市盈率")), "pb": _num(r.get("市净率")),
+            "mktcap_total_yi": None if mv is None else round(mv / 1e8, 1),
+            "dps_ttm": _num(r.get("每股股息TTM(港元)")),
+            "dividend_yield_ttm": _num(r.get("股息率TTM(%)"))}
 
 
 def fetch_valuation(market, code, st, now, qt_full):
-    """扩展块·估值：A 路=qt 快照（PE-TTM/PB/市值/股息率，双路校验后的字段），
-    B 路=百度股市通近五年历史分位（增强）。A 缺 B 在 → fallback；单路缺失如实
-    记 note 不谎报。港 not_supported（qt 港股字段位序未验证）。"""
-    if market == "hk":
-        return {"state": "not_supported", "source": "", "note": "A 股专属"}
+    """扩展块·估值：A 股 A 路=qt 快照（PE-TTM/PB/市值/股息率，双路校验后的
+    字段）、B 路=百度股市通近五年历史分位；港股 A 路=em-hk-ind 具名列快照
+    （qt 港股字段位序未验证不入链，backlog）、B 路同百度。两市场都另存
+    pe_quantiles_5y 分位表（估值透镜对任意参考价插值用）。A 缺 B 在 →
+    fallback；单路缺失如实记 note 不谎报。"""
     a = None
-    # A 路门槛=任一字段在即采信（亏损股 pe_ttm 为空，但 PB/市值/股息率可得，
-    # 双字段与门槛会连坐丢弃全部可得字段；缺失字段如实留 None）
-    if qt_full and any(qt_full.get(k) is not None for k in
-                       ("pe_ttm", "pb", "total_mv_yi", "float_mv_yi",
-                        "dividend_yield_ttm", "dps_ttm")):
+    a_src = "qt-snap"
+    if market == "hk":
+        if "valuation" not in MARKET_CAPS.get(market, ()):
+            return {"state": "not_supported", "source": "",
+                    "note": "该市场无估值取数链"}
+        try:
+            ok, why = source_allowed(st, CLUSTERS["em-hk-ind"], now)
+            if not ok:
+                raise _Skip(why)
+            a = _hk_indicator_snapshot(code)
+            a_src = "em-hk-ind"
+            record(st, CLUSTERS["em-hk-ind"], True, "", now)
+        except _Skip:
+            pass
+        except ImportError:
+            pass
+        except Exception as e:
+            record(st, CLUSTERS["em-hk-ind"], False, str(e), now)
+    elif qt_full and any(qt_full.get(k) is not None for k in
+                         ("pe_ttm", "pb", "total_mv_yi", "float_mv_yi",
+                          "dividend_yield_ttm", "dps_ttm")):
+        # A 路门槛=任一字段在即采信（亏损股 pe_ttm 为空，但 PB/市值/股息率可得，
+        # 双字段与门槛会连坐丢弃全部可得字段；缺失字段如实留 None）
         a = {"pe_ttm": qt_full.get("pe_ttm"), "pb": qt_full.get("pb"),
              "mktcap_total_yi": qt_full.get("total_mv_yi"),
              "mktcap_float_yi": qt_full.get("float_mv_yi"),
              "dividend_yield_ttm": qt_full.get("dividend_yield_ttm"),
              "dps_ttm": qt_full.get("dps_ttm")}
     pe_pct = pb_pct = None
-    tail = []
+    tail, pe_q = [], None
     try:
         ok, why = source_allowed(st, CLUSTERS["baidu-val"], now)
         if not ok:
@@ -1316,11 +1726,11 @@ def fetch_valuation(market, code, st, now, qt_full):
         # 吞掉后继续取 PB——串行耦合会把「单指标无数据」误记整簇源故障并
         # 连坐后续股票；真网络/解析错误仍上抛记败。
         try:
-            pe_pct, tail = _baidu_percentile(code, "市盈率(TTM)")
+            pe_pct, tail, pe_q = _baidu_percentile(code, "市盈率(TTM)", market)
         except ValueError:
             pass
         try:
-            pb_pct, _t = _baidu_percentile(code, "市净率")
+            pb_pct, _t, _q = _baidu_percentile(code, "市净率", market)
         except ValueError:
             pass
         record(st, CLUSTERS["baidu-val"], True, "", now)
@@ -1331,23 +1741,29 @@ def fetch_valuation(market, code, st, now, qt_full):
     except Exception as e:
         record(st, CLUSTERS["baidu-val"], False, str(e), now)
     if a and (pe_pct is not None or pb_pct is not None):
-        blk = {"state": "available", "source": "qt-snap+baidu-val", **a,
+        blk = {"state": "available", "source": a_src + "+baidu-val", **a,
                "pe_percentile_5y": pe_pct, "pb_percentile_5y": pb_pct,
                "pe_series_tail": tail}
+        if pe_q:
+            blk["pe_quantiles_5y"] = pe_q
         if pe_pct is None or pb_pct is None:  # 半失败如实记 note 不谎报（docstring）
             # 措辞不臆断成因：空序列（标的无数据）与网络失败同走此路径
             blk["note"] = "历史分位部分缺失（%s序列无数据或获取失败）" % (
                 "市盈率" if pe_pct is None else "市净率")
         return blk
     if a:
-        return {"state": "available", "source": "qt-snap", **a,
+        return {"state": "available", "source": a_src, **a,
+                "pe_quantiles_5y": pe_q or None,
                 "note": "历史分位缺失（baidu 序列无数据或源不可用）"}
     if pe_pct is not None or pb_pct is not None:
-        return {"state": "fallback", "source": "baidu-val",
-                "pe_percentile_5y": pe_pct, "pb_percentile_5y": pb_pct,
-                "note": "qt 快照缺失，仅历史分位"}
+        blk = {"state": "fallback", "source": "baidu-val",
+               "pe_percentile_5y": pe_pct, "pb_percentile_5y": pb_pct}
+        if pe_q:
+            blk["pe_quantiles_5y"] = pe_q
+        blk["note"] = "快照缺失，仅历史分位"
+        return blk
     return {"state": "fetch_failed", "source": "",
-            "note": "qt 与 baidu 均不可用（或 qt 双路校验弃字段）"}
+            "note": "快照与 baidu 均不可用（或快照双路校验弃字段）"}
 
 
 
