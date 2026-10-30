@@ -13,4 +13,5 @@
   质量分 good；零权重样本——扩展块 moneyflow=available/valuation=fetch_failed
   不扰动 verdict 与 quality（零权重钉）。
 - 回归执法：`scripts/adjudicate.py --selftest`、`scripts/diagnose.py --selftest`、
-  `scripts/postmortem.py --selftest` 三件全绿是提交前置（AGENTS.md）。
+  `scripts/postmortem.py --selftest`、`scripts/lens.py --selftest` 四件全绿是
+  提交前置（AGENTS.md）。

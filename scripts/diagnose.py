@@ -310,11 +310,14 @@ def _render_lens_block(lines, workdir):
         lines.append("- %s；现价 PE %s（免汇率比值法）" % (seg, imp.get("cur_pe")))
     con = a.get("consensus")
     if con:
-        lines.append("- 共识目标价 min %s / 中位 %s / max %s（参考价%s中位 %s%%）"
-                     % (_nd(con.get("target_min")), _nd(con.get("target_median")),
-                        _nd(con.get("target_max")),
-                        "高于" if (con.get("ref_vs_median_pct") or 0) > 0 else "低于",
-                        _nd(abs(con.get("ref_vs_median_pct") or 0))))
+        rvm = con.get("ref_vs_median_pct")
+        tail = ""
+        if rvm is not None:
+            w = "高于" if rvm > 0 else ("低于" if rvm < 0 else "持平")
+            tail = "（参考价%s中位 %s%%）" % (w, _nd(abs(rvm)))
+        lines.append("- 共识目标价 min %s / 中位 %s / max %s%s" % (
+            _nd(con.get("target_min")), _nd(con.get("target_median")),
+            _nd(con.get("target_max")), tail))
         if con.get("ge_ref_total"):
             lines.append("- ≥参考价目标价：%s/%s 家" % (
                 con.get("ge_ref_count"), con.get("ge_ref_total")))
@@ -324,11 +327,14 @@ def _render_lens_block(lines, workdir):
         lines.append("- 一致预期 EPS 90 日%s" % arrow.get(rv.get("direction"), "—"))
     tp = a.get("touch_probability_12m")
     if tp and tp.get("p") is not None:
-        lines.append("- 12 个月波动触及参考价概率 %s%%（%s；%s）" % (
+        lines.append("- 12 个月波动触及参考价概率 %s%%（σ%s %s；%s）" % (
             round(tp["p"] * 100, 1),
-            "σ120d %s" % tp.get("sigma_120d"), "波动可达≠基本面支持"))
-    lines.append("- **三档：%s（置信 %s）**——%s" % (
-        lens.get("tier"), lens.get("confidence"),
+            tp.get("sigma_used_src", "120d"), _nd(tp.get("sigma_used")),
+            "波动可达≠基本面支持"))
+    tier = str(lens.get("tier", ""))
+    head = "单锚" if tier.startswith("中性（单锚") else "三档"
+    lines.append("- **%s：%s（置信 %s）**——%s" % (
+        head, tier, lens.get("confidence"),
         "期限正交：不进聚合/置信帽/T+1/3/5/10 后验；极端高估只作风险角色 "
         "downgrade 线索（只降不升）"))
     if lens.get("dispersion_warning"):
@@ -541,6 +547,13 @@ def cmd_prepare(args):
         print("lens -> %s/lens.json（%s·置信 %s）" % (
             args.workdir, lens_out.get("tier", lens_out.get("state")),
             lens_out.get("confidence", "—")))
+    else:
+        # 未给 --cost：清除 workdir 里上次运行的陈旧透镜——防旧参考价的
+        # 「目标可达性」拼进新证据（与 selftest「无 cost 不出节」同一不变式）
+        for stale in ("lens.json", "user_ref.json"):
+            p = os.path.join(args.workdir, stale)
+            if os.path.exists(p):
+                os.remove(p)
     pack = render_context_pack(evidence, args.workdir)
     for name, default in (("opinions.json", []), ("risk.json",
                          {"veto": False, "downgrade": False, "severity": "medium"})):
@@ -750,12 +763,18 @@ def _report_lens_section(lens):
         if con.get("ge_ref_total"):
             ge = "，%s/%s 家 ≥ 参考价" % (con.get("ge_ref_count"),
                                            con.get("ge_ref_total"))
-        L.append("- 共识位置：目标价 min %s / 中位 %s / 均值 %s / max %s（参考价"
-                 "%s中位 %s%%%s）" % (
-                     _nd(con.get("target_min")), _nd(con.get("target_median")),
-                     _nd(con.get("target_mean")), _nd(con.get("target_max")),
-                     "高于" if (con.get("ref_vs_median_pct") or 0) > 0 else "低于",
-                     _nd(abs(con.get("ref_vs_median_pct") or 0)), ge))
+        rvm = con.get("ref_vs_median_pct")
+        tail = ""
+        if rvm is not None:
+            w = "高于" if rvm > 0 else ("低于" if rvm < 0 else "持平")
+            tail = "（参考价%s中位 %s%%%s）" % (w, _nd(abs(rvm)), ge)
+        elif ge:
+            tail = "（%s）" % ge.lstrip("，")
+        disp = "，离散度 %s" % _nd(con.get("dispersion")) \
+            if con.get("dispersion") is not None else ""
+        L.append("- 共识位置：目标价 min %s / 中位 %s / 均值 %s / max %s%s%s" % (
+            _nd(con.get("target_min")), _nd(con.get("target_median")),
+            _nd(con.get("target_mean")), _nd(con.get("target_max")), tail, disp))
     rv = a.get("eps_revision_90d")
     if rv:
         arrow = {"up": "↑上修", "down": "↓下修", "flat": "→持平"}
@@ -764,9 +783,10 @@ def _report_lens_section(lens):
             _nd(rv.get("current")), _nd(rv.get("currency"))))
     tp = a.get("touch_probability_12m")
     if tp and tp.get("p") is not None:
-        L.append("- 波动触及：12 个月零漂移触及概率 %s%%（σ120d %s 年化；连续监测"
+        L.append("- 波动触及：12 个月零漂移触及概率 %s%%（σ%s %s 年化；连续监测"
                  "口径约高估 2–4pp；**波动可达≠基本面支持**）" % (
-                     round(tp["p"] * 100, 1), _nd(tp.get("sigma_120d"))))
+                     round(tp["p"] * 100, 1), tp.get("sigma_used_src", "120d"),
+                     _nd(tp.get("sigma_used"))))
     conf_cn = {"high": "高", "medium": "中", "low": "低"}.get(
         lens.get("confidence"), lens.get("confidence"))
     L.append("- **结论：%s（置信%s）**——中长期参考（12 个月量级），不进裁决聚"
@@ -863,7 +883,7 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None):
         L.extend(_report_lens_section(lens))
     L.append("")
     L.append("## 风险与利好")
-    # 逐条可溯源（04 §4）：意见带 source 与 signal/置信；风险栏另挂风险角色
+    # 逐条可溯源（04 §5）：意见带 source 与 signal/置信；风险栏另挂风险角色
     # risk.json.rationale（RiskGuard 输入的论证面），标注触发态
     def _items(fam):
         return ["%s（%s·置信 %.2f）：%s" % (o["source"], o["signal"],

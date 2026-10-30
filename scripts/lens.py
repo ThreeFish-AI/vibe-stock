@@ -56,7 +56,8 @@ def implied_multiple(cur_multiple, price, ref):
     条件：price>0 且 cur_multiple>0；坑位：亏损股 cur PE 为 None → 该锚整体
     缺席（不得用 PB 混算冒充 PE 锚）。"""
     price, ref, cur = _f(price), _f(ref), _f(cur_multiple)
-    if not price or ref is None or not cur or cur <= 0:
+    if price is None or price <= 0 or ref is None or ref <= 0 \
+            or cur is None or cur <= 0:
         return None
     return round(cur * ref / price, 2)
 
@@ -67,8 +68,7 @@ def band_percentile(value, quants):
     p90 返回 (None, "below_p10"/"above_p90") 不外推虚构分位。"""
     if value is None or not quants:
         return None, ""
-    knots = [(10, quants["p10"]), (25, quants["p25"]), (50, quants["p50"]),
-             (75, quants["p75"]), (90, quants["p90"])]
+    knots = [(p, quants.get("p%d" % p)) for p in (10, 25, 50, 75, 90)]
     knots = [(p, _f(v)) for p, v in knots if _f(v) is not None]
     if len(knots) < 2:
         return None, ""
@@ -86,15 +86,22 @@ def band_percentile(value, quants):
 
 def realized_vol(closes, window):
     """年化已实现波动率：近 window 日 ln 收益 std × √252。
-    条件：有效收益 ≥ window/2 且 ≥10；坑位：末根未完成 K 线的收盘为盘中价
+    条件：有效收益 ≥ window/2 且 ≥10（不足返回 None，不虚构 0.0）；
+    坑位：①序列短于 window 时不得自配对（旧实现 zip 两切片重叠、ln(c/c)=0
+    恒零收益骗过门槛、虚构 σ=0.0 入报告）；②收盘为 None/0/负的坏点断链——
+    只与相邻有效收盘配对，不跨坏点拼收益；③末根未完成 K 线的收盘为盘中价
     （session 口径在 evidence.meta，透镜不擅自修值，波动率量级影响可忽略）。"""
-    if not closes:
-        return None
     rets = []
-    for a, b in zip(closes[-(window + 1):], closes[-window:]):
-        a, b = _f(a), _f(b)
-        if a and a > 0 and b is not None:
-            rets.append(math.log(b / a))
+    prev = None
+    for x in closes or []:
+        v = _f(x)
+        if v is None or v <= 0:
+            prev = None  # 坏点断链
+            continue
+        if prev is not None:
+            rets.append(math.log(v / prev))
+        prev = v
+    rets = rets[-window:]
     if len(rets) < max(10, window // 2):
         return None
     mean = sum(rets) / len(rets)
@@ -202,6 +209,7 @@ def derive_lens(evidence, ref_price):
     if sigma:
         anchors["touch_probability_12m"] = {
             "p": touch_probability(price, ref, sigma, 1.0),
+            "sigma_used": sigma, "sigma_used_src": "120d" if vol120 else "60d",
             "sigma_60d": vol60, "sigma_120d": vol120,
             "horizon_days": HORIZON_DAYS,
             "note": "零漂移 first-passage（连续监测口径，日频监测约高估 2–4pp）；"
@@ -311,8 +319,9 @@ def selftest():
     p2 = touch_probability(25.68, 36.3, s)
     p3 = touch_probability(25.68, 60.0, s)
     assert p1 > p2 > p3 >= 0, (p1, p2, p3)
-    assert touch_probability(25.68, 24.6, s) == p1 + 0 or True  # 对称性：
-    assert abs(touch_probability(25.68, 25.68 * 36.3 / 25.68, s) - p2) < 1e-9
+    # 对称性：屏障比 b=max(ref/price, price/ref) 同构——price/ref 互换同概率
+    assert touch_probability(27.0, 25.68, s) == p1, "上穿/下穿同屏障比须同概率"
+    assert touch_probability(36.3, 25.68, s) == p2, "远屏障下穿同屏障比须同概率"
     assert touch_probability(25.68, 25.68, s) is None
     assert 0 <= touch_probability(25.68, 26.0, 0.9) <= 1
     # ④ 波动率：常数收益列 σ=0 → 0.0；短列 None
@@ -320,6 +329,14 @@ def selftest():
     assert realized_vol([10.0, 10.5], 60) is None
     vol = realized_vol([b["close"] for b in bars], 120)
     assert vol and 0 < vol < 5, vol
+    # 窗口自配对回归钉（len≤window 旧实现恒 0 收益虚构 σ=0.0）+ 坏点断链
+    for n in (40, 50, 80):
+        s2 = [round(25.0 * (1.04 if i % 2 else 0.965), 4) for i in range(n)]
+        r60, r120 = realized_vol(s2, 60), realized_vol(s2, 120)
+        assert r60 is None or r60 > 0.1, (n, r60)
+        assert r120 is None or r120 > 0.1, (n, r120)
+    assert realized_vol([10.0, 0, 10.5, None, 11.0], 60) is None, \
+        "坏点断链：不崩、不跨点拼收益"
 
     # ⑤ 全链：小米实测形态（36.3 → 中性：ref>中位 但 ≤max、分位 ~50）
     lens = derive_lens(ev(), 36.3)
