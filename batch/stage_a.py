@@ -177,7 +177,7 @@ def main():
     ap.add_argument("--w-max", type=float, default=0.145, help="单仓权重上限（价格硬滤用）")
     ap.add_argument("--min-turnover", type=float, default=1e8, help="流动性下限（日成交额，元）")
     ap.add_argument("--max-price", type=float, default=None,
-                    help="价格硬滤上限；缺省按 w_max*budget/100/100 自动")
+                    help="价格硬滤上限；缺省按 w_max*budget/100（单手 100 股可配）自动")
     ap.add_argument("--industry-cap", type=int, default=3, help="同行业入选上限")
     ap.add_argument("--scan-root", required=True, help="批量运行根目录（产物 SSOT）")
     ap.add_argument("--skill-scripts", default=os.path.expanduser(
@@ -186,7 +186,7 @@ def main():
     if a.pool not in POOL_INDEX:
         sys.exit(f"FATAL: 未知池 {a.pool}（已内置：{'/'.join(POOL_INDEX)}）")
     index_code, pool_name, n_expect = POOL_INDEX[a.pool]
-    max_price = a.max_price if a.max_price is not None else a.w_max * a.budget / 100.0 / 100.0
+    max_price = a.max_price if a.max_price is not None else a.w_max * a.budget / 100.0  # 单手 100 股可配
     out = out_dirs(a.scan_root)
 
     print(f"akshare {ak.__version__}", flush=True)

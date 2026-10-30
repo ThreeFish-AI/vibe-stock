@@ -76,7 +76,7 @@ def main():
     ap.add_argument("--budget", type=float, default=1e5, help="总预算（G5 价格门用）")
     ap.add_argument("--w-max", type=float, default=0.145, help="单仓权重上限")
     ap.add_argument("--max-price", type=float, default=None,
-                    help="G5 价格上限；缺省按 w_max*budget/100/100（与 Stage A 同式）")
+                    help="G5 价格上限；缺省按 w_max*budget/100（单手 100 股可配，与 Stage A 同式）")
     a = ap.parse_args()
     aj = load_adjudicate(a.skill_scripts)
     BUY = ("strong_buy", "buy")
@@ -158,7 +158,7 @@ def main():
             + 0.10 * (r["f_momentum"] if r["f_momentum"] is not None else 0.3), 4)
 
     # 门限筛 G2-G5 → G1 逐档（不足 min_pass 如实交付不硬凑）
-    max_price = a.max_price if a.max_price is not None else a.w_max * a.budget / 100.0 / 100.0
+    max_price = a.max_price if a.max_price is not None else a.w_max * a.budget / 100.0
 
     def base_gates(r):
         if r["risk"]["veto"]:
