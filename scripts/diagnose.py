@@ -2039,6 +2039,7 @@ def _selftest_archive(evidence, verdict, opinions):
             put(rd, "00700-2026-10-28.md", "16:26:00")
             put(rd, "600000-2026-10-28.md", "12:00:00")
             put(rd, "300001-2026-10-28.md", "12:00:00", text="手写笔记，无节头\n")
+            put(rd, "hk00700-2026-10-28.md", "11:00:00")  # 快照前缀形态主干
             write(os.path.join(rd, "notes.txt"), "keep")
             write(os.path.join(rd, ".DS_Store"), "x")
             write(os.path.join(rd, "600000.cn", "2026-10-28.md"), "other")
@@ -2047,7 +2048,8 @@ def _selftest_archive(evidence, verdict, opinions):
                      legacy_sig(5, "cn", "601888", "23:59:51"),
                      legacy_sig(1, "hk", "00700", "16:26:00"),
                      legacy_sig(9, "cn", "600000", "12:00:00"),
-                     legacy_sig(2, "cn", "300001", "12:00:00")]
+                     legacy_sig(2, "cn", "300001", "12:00:00"),
+                     legacy_sig(7, "?", "hk00700", "11:00:00")]
             ar.write_json_atomic(SIGNALS, sigs0)
             raw0 = open(SIGNALS, "rb").read()
             t0 = tree(td)
@@ -2081,6 +2083,11 @@ def _selftest_archive(evidence, verdict, opinions):
             assert not os.path.exists(os.path.join(rd, "300001.cn", "2026-10-28.md"))
             assert "report_version" not in got["sig-300001-2"] \
                 and "report_lost" not in got["sig-300001-2"]
+            # T12d 快照前缀形态主干（GF5）：读时归一进 _snapshot/00700/，与写侧同口径
+            assert os.path.exists(os.path.join(rd, "_snapshot", "00700",
+                                               "2026-10-28.md")), "快照主干须归一"
+            assert got["sig-hk00700-7"]["report_path"].endswith(
+                os.path.join("_snapshot", "00700", "2026-10-28.md"))
             p_bare = ar.plan_migration(rd, ar.load_signals(SIGNALS))
             it_bare = next(it for it in p_bare["items"]
                            if it["name"] == "300001-2026-10-28.md")

@@ -34,7 +34,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fetch as fx  # noqa: E402  （仅 detect_market：verdict 绑定股票身份）
+import fetch as fx  # noqa: E402  （仅 meta_stock_code：verdict 绑定股票身份）
 
 # ---------------------------------------------------------------- 常量（SSOT：references/03）
 

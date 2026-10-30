@@ -359,7 +359,13 @@ def plan_migration(reports_dir, signals):
         markets = {s.get("market") for s in owners}
         try:
             if markets == {"?"}:
-                market, code = "?", m.group(1)
+                # 快照主干读时归一（与写侧 stock_code 同口径）：hk00700/0700.HK
+                # 等历史形态统一进 _snapshot/<规范码>，不可识别原样交形态校验
+                try:
+                    code = fx.detect_market(m.group(1))[1]
+                except SystemExit:
+                    code = m.group(1)
+                market = "?"
             else:
                 market, code = fx.detect_market(m.group(1))
             sdir = stock_dir(reports_dir, market, code)
@@ -389,7 +395,7 @@ def plan_migration(reports_dir, signals):
                 plan["warnings"].append("%s 缺可用 created_at，跳过认领（不改写）"
                                         % s.get("id"))
         if owner is None and usable:
-            # mtime 漂移（备份恢复/编辑器重存）：0.2.0 平铺是最后写者胜，回退按
+            # mtime 漂移（备份恢复/编辑器重存）：0.2.1 及以前平铺是最后写者胜，回退按
             # 最后一次运行归属内容版，避免把当日全部信号误标丢失
             owner = max(usable, key=_ts)
             item["anomaly"] = "mtime %s 与任何信号不同刻，按最后运行归属内容版" \

@@ -27,9 +27,9 @@
 
 - **问题描述**：`0700.HK` / `hk0700` 归一成 `0700`，`hk00700` / `00700` 归一成 `00700`，同一只腾讯会落两个报告目录、两组信号，对立失效也互不可见。
 - **表因根因**：[fetch.py](../../scripts/fetch.py) `detect_market` 港股分支原样返回 4–5 位捕获组；下游 `yf_ticker` 各自补 4 位掩盖了问题，`_news_via_qq` 拼出 `hk0700` 实际取不到数。
-- **处理方式**：港股分支统一 `zfill(5)`；`diagnose.stock_code` 作为报告/信号代码身份唯一推导处，吸收旧 evidence 里的 4 位码。
+- **处理方式**：港股分支统一 `zfill(5)`；`fetch.meta_stock_code`（0.2.2 起，`diagnose.stock_code` 为其诊断侧封装、adjudicate 同源消费）作为报告/信号代码身份唯一推导处，吸收旧 evidence 里的 4 位码。
 - **后续防范**：selftest 断言各输入形态→`00700`、规范码是不动点且定宽（cn 6 / hk 5）。
-- **注意事项**：其他安装若已存在 4 位港码的信号，不自动改写身份字段，`migrate-reports` 只告警，这类信号不进索引；对立失效比对已按读时归一（补 5 位），旧信号与新信号互通；report 身份闸门另绑定 verdict `stock_code`（0.2.1 起裁决产出携带）。
+- **注意事项**：其他安装若已存在 4 位港码的信号，不自动改写身份字段，`migrate-reports` 只告警，这类信号不进索引；对立失效比对已按读时归一（补 5 位），旧信号与新信号互通；report 身份闸门另绑定 verdict `stock_code`（0.2.2 起裁决产出携带）。
 
 <a id="I-003"></a>
 
@@ -46,8 +46,8 @@
 ## I-004：八元组去重未实现
 
 - **问题描述**：[05-postmortem](../../references/05-postmortem.md) 声明信号按 (report_id, source_type, market, code, profile, action, horizon, regime) 去重，实现只追加；同日重跑会登记多条同向信号，buy/sell 族后验时同一意见源被重复归因，绩效因子失真。
-- **表因根因**：`register_signal` 未实现去重；0.2.1 前 diagnose.py docstring 还写着「八元组去重」，已改为如实描述。
-- **处理方式**：暂不处理。0.2.1 保留日级 `report_id` 作为后续去重或 superseded 语义的挂点，[05](../../references/05-postmortem.md) 已改口为「去重未实现」如实描述。
+- **表因根因**：`register_signal` 未实现去重；0.2.2 前 diagnose.py docstring 还写着「八元组去重」，已改为如实描述。
+- **处理方式**：暂不处理。0.2.2 保留日级 `report_id` 作为后续去重或 superseded 语义的挂点，[05](../../references/05-postmortem.md) 已改口为「去重未实现」如实描述。
 - **后续防范**：实现时须同步 05 规约与 selftest，且只许收严（不得让重复样本抬高绩效因子）。
 - **注意事项**：当前现网同日多信号均为 watch（只观察不记分），尚未污染 ledger。
 
