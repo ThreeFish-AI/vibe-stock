@@ -100,7 +100,7 @@ MARKET_CAPS = {
            "moneyflow", "notices", "research", "forecast", "unlock", "holder",
            "market", "industry", "valuation"},
     "hk": {"quote", "daily_bars", "technical", "news", "fundamentals",
-           "moneyflow", "notices", "research", "market", "valuation"},
+           "moneyflow", "notices", "research", "market", "valuation", "fx"},
 }
 
 
@@ -913,7 +913,7 @@ def fetch_chip(market, code, st, now, bars=None, float_shares=None,
                 "note": type(e).__name__}
 
 
-# ---------------------------------------------------------------- 扩展证据块（九块零权重）
+# ---------------------------------------------------------------- 扩展证据块（零权重，现十块）
 
 _DC = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
@@ -1834,6 +1834,53 @@ def fetch_valuation(market, code, st, now, qt_full):
             "note": "快照与 baidu 均不可用（或快照双路校验弃字段）"}
 
 
+def hkd_cny_daily(st, now):
+    """HKD/CNY 日线收盘 {date: close}（yfinance 近 1 年，SSOT——fetch_fx 扩展块
+    与 postmortem --cny 共用本函数，勿在消费侧各自直连）。返回 (series, note)：
+    成功 (series, None)；失败/熔断 ({}, 原因)。"""
+    try:
+        cluster = CLUSTERS["yf"]
+        ok, why = source_allowed(st, cluster, now)
+        if not ok:
+            raise _Skip(why)
+        import yfinance
+        df = yfinance.Ticker("HKDCNY=X").history(period="1y")
+        if df.empty:
+            raise ValueError("empty HKDCNY=X")
+        record(st, cluster, True, "", now)
+        return {str(i.date()): float(r.Close) for i, r in df.iterrows()}, None
+    except ImportError:
+        # 缺库不记熔断（环境问题非源问题）——与 fetch_daily_bars 等位点同款，
+        # 勿把缺 yfinance 记成 yf 簇失败连坐日 K 回退链
+        return {}, "import_missing"
+    except Exception as e:
+        if not isinstance(e, _Skip):
+            record(st, CLUSTERS["yf"], False, str(e), now)
+        return {}, _ext_fail("yf-fx", e).get("note", "")
+
+
+def fetch_fx(market, st, now):
+    """扩展块·汇率（港股人民币敞口）：HKD/CNY 当前值、近 20 日与年内变动入
+    情报面——人民币投资者实际收益含汇兑项，量级可在 ±2% 判定带附近翻转体感。
+    cn 以人民币计价、无投资者本币汇兑敞口，恒 not_supported（holder 块的镜像
+    分流）。坑位：汇率仅情报面，不进信号判定、聚合、置信帽与策略 YAML
+    （SKILL.md 红线）；postmortem 的人民币口径仅展示，判定与归因仍港币。"""
+    if market not in MARKET_CAPS or "fx" not in MARKET_CAPS[market]:
+        return {"state": "not_supported", "source": "",
+                "note": "cn 标的以人民币计价，无投资者本币汇兑敞口"}
+    series, err = hkd_cny_daily(st, now)
+    if not series:
+        return {"state": "fetch_failed", "source": "yf-fx",
+                "note": err or "HKD/CNY 不可用"}
+    dates = sorted(series)
+    cur, last = series[dates[-1]], dates[-1]
+    d20 = dates[-21] if len(dates) > 20 else dates[0]
+    ytd = [d for d in dates if d[:4] == last[:4]] or dates
+    return {"state": "available", "source": "yf-fx", "date": last,
+            "hkd_cny": round(cur, 4),
+            "chg_pct_20d": round((cur / series[d20] - 1) * 100, 2),
+            "chg_pct_ytd": round((cur / series[ytd[0]] - 1) * 100, 2),
+            "note": "人民币敞口提示：汇率仅情报面，不进信号判定与策略 YAML"}
 
 
 BLOCK_WEIGHTS = [("quote", 25), ("daily_bars", 25), ("technical", 25),
@@ -1842,7 +1889,7 @@ BLOCK_WEIGHTS = [("quote", 25), ("daily_bars", 25), ("technical", 25),
 # 链可用性，与情报丰富度正交），可见性由八态状态行与策略 required_evidence 承担。
 # 快照模式文件可选、缺省 missing。某块要进权重属 minor 级语义变更（golden 重建）。
 EXT_BLOCKS = ["moneyflow", "notices", "research", "forecast", "unlock",
-              "holder", "market", "industry", "valuation"]
+              "holder", "market", "industry", "valuation", "fx"]
 ALL_BLOCKS = [n for n, _ in BLOCK_WEIGHTS] + EXT_BLOCKS
 STATE_SCORE = {"available": 100, "fallback": 85, "partial": 70, "stale": 60,
                "estimated": 55, "missing": 30, "not_supported": 30, "fetch_failed": 25}
@@ -1946,7 +1993,7 @@ def fetch(symbol, snapshot_dir=None):
         blocks["chip"] = fetch_chip(market, code, st, now, bars=bars,
                                     float_shares=(qt_full or {}).get("float_shares"),
                                     bars_source=bars_src)
-        # 扩展九块（零权重）：顺序执行预算 ~17 次 HTTP、15–25s；失败如实八态标注
+        # 扩展十块（零权重）：顺序执行预算 ~17 次 HTTP、15–25s；失败如实八态标注
         blocks["moneyflow"] = fetch_moneyflow(market, code, st, now)
         blocks["notices"] = fetch_notices(market, code, st, now)
         blocks["research"] = fetch_research(market, code, st, now)
@@ -1956,6 +2003,7 @@ def fetch(symbol, snapshot_dir=None):
         blocks["market"] = market_block(qt_indices)
         blocks["industry"] = fetch_industry(market, code, st, now)
         blocks["valuation"] = fetch_valuation(market, code, st, now, qt_full)
+        blocks["fx"] = fetch_fx(market, st, now)
         save_fetch_state(st)
         market_meta = {"symbol": symbol, "market": market, "code": code,
                        "tried": tried, "session": session}

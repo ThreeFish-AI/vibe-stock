@@ -46,7 +46,7 @@ CONFIDENCE_GATE = 0.5
 # 扩展块渲染预算（pack 有界性护栏）：每块条数/行数上限；全局护栏 16k 字符
 EXT_PACK_BUDGET = {"moneyflow": 12, "notices": 12, "research": 10,
                    "forecast": 6, "unlock": 6, "holder": 8, "market": 8,
-                   "industry": 8, "valuation": 6}
+                   "industry": 8, "valuation": 6, "fx": 2}
 PACK_CHAR_CAP = 16000
 
 
@@ -76,7 +76,7 @@ def _nz(v):
 
 
 def render_ext_blocks(lines, b):
-    """扩展九块渲染（零权重、每块有界）：本地数值直出，外部文本（公告标题/
+    """扩展块渲染（零权重、每块有界）：本地数值直出，外部文本（公告标题/
     研报标题）包哨兵。缺块不渲染（状态行已如实标注 missing）。"""
     mf = b.get("moneyflow", {})
     if mf.get("summary"):
@@ -249,6 +249,16 @@ def render_ext_blocks(lines, b):
         lines.append(" · ".join("%s %s（%+.2f%%）" % (
             i.get("name"), _nd(i.get("price")), _nz(i.get("change_pct")))
             for i in mk["indices"][:EXT_PACK_BUDGET["market"]]))
+    fxb = b.get("fx", {})
+    if fxb.get("state") == "available":
+        lines.append("")
+        lines.append("## 汇率（人民币敞口，%s，%s）" % (
+            fxb.get("state"), fxb.get("source")))
+        lines.append("HKD/CNY %s（%s）· 近 20 日 %+.2f%% · 年内 %+.2f%%——"
+                     "人民币投资者实际收益含汇兑项；汇率仅情报面，不进信号判定"
+                     "与策略 YAML（cn 标的以人民币计价，无此敞口）" % (
+                         _nd(fxb.get("hkd_cny")), fxb.get("date"),
+                         _nz(fxb.get("chg_pct_20d")), _nz(fxb.get("chg_pct_ytd"))))
     ind = b.get("industry", {})
     if ind.get("industry_sw") or ind.get("board_ths"):
         lines.append("")
@@ -496,8 +506,8 @@ def render_context_pack(evidence, workdir):
     text = "\n".join(lines)
     if len(text) > PACK_CHAR_CAP:  # 全局护栏：超限整截扩展节（状态行仍可见）
         heads = ("## 资金流", "## 近期公告", "## 研报与评级", "## 业绩预告",
-                 "## 限售解禁", "## 股东户数", "## 大盘指数", "## 行业板块", "## 估值",
-                 "## 基本面锚")
+                 "## 限售解禁", "## 股东户数", "## 大盘指数", "## 汇率", "## 行业板块",
+                 "## 估值", "## 基本面锚")
         cut = next((i for i, ln in enumerate(lines) if ln.startswith(heads)), None)
         if cut is not None:
             # 只切扩展节：尾部「## 意见产出要求」是意见段产出契约（opinions/
@@ -878,6 +888,14 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None):
         for e in events:
             L.append("- %s" % e)
         L.append("")
+    fxb = evidence["blocks"].get("fx", {})
+    if fxb.get("state") == "available":
+        L.append("## 汇率（人民币敞口）")
+        L.append("- HKD/CNY %s · 近 20 日 %+.2f%% · 年内 %+.2f%%——人民币投资者"
+                 "实际收益含汇兑项；汇率仅情报面，信号判定与后验口径仍以港币计"
+                 % (_nd(fxb.get("hkd_cny")), _nz(fxb.get("chg_pct_20d")),
+                    _nz(fxb.get("chg_pct_ytd"))))
+        L.append("")
     L.append("## 关键价位")
     L.append("- 现价 %s%s · 20 日低 %s / 高 %s · MA20 %s" % (
         _fmt_price(price),
@@ -1217,6 +1235,57 @@ def selftest():
         assert st2["breakers"]["em_search"]["fails"] == 0, "成功取数须重置簇失败计数"
     finally:
         del sys.modules["akshare"]
+    # -- fx 扩展块（0.0.11）：hk 汇率取数/年内变动 · cn not_supported · 空序列计熔断
+    #    （sys.modules 桩替 yfinance，零依赖零网络；index 用 datetime 供 .date()） --
+    class _FxRow:
+        def __init__(self, close):
+            self.Close = close
+    class _FxDF:
+        empty = False
+        def iterrows(self):
+            import datetime as _dtt
+            return iter([(_dtt.datetime(2026, 1, 2), _FxRow(0.8931)),
+                         (_dtt.datetime(2026, 10, 29), _FxRow(0.8490))])
+    class _FxTk:
+        def __init__(self, sym):
+            assert sym == "HKDCNY=X", "汇率对须为 HKDCNY=X，取到 %s" % sym
+        def history(self, period=None):
+            assert period == "1y"
+            return _FxDF()
+    sys.modules["yfinance"] = types.SimpleNamespace(Ticker=_FxTk)
+    try:
+        st_fx = {"breakers": {}, "cooldowns": {}}
+        blk_fx = fx.fetch_fx("hk", st_fx, t0 + 4)
+        assert blk_fx["state"] == "available" and blk_fx["source"] == "yf-fx", blk_fx
+        assert blk_fx["hkd_cny"] == 0.849 and blk_fx["date"] == "2026-10-29", blk_fx
+        assert abs(blk_fx["chg_pct_ytd"]
+                   - (0.849 / 0.8931 - 1) * 100) < 0.01, blk_fx
+        assert st_fx["breakers"]["yf"]["fails"] == 0, "成功取数须重置 yf 簇计数"
+        cn_fx = fx.fetch_fx("cn", st_fx, t0 + 5)
+        assert cn_fx["state"] == "not_supported" and "人民币计价" in cn_fx["note"], \
+            "cn 标的无汇兑敞口，须如实 not_supported 而非取数"
+        class _EmptyDF:
+            empty = True
+            def iterrows(self):
+                return iter([])
+        sys.modules["yfinance"] = types.SimpleNamespace(
+            Ticker=lambda s: type("T", (), {"history":
+                                            staticmethod(lambda period=None: _EmptyDF())})())
+        st_fx2 = {"breakers": {}, "cooldowns": {}}
+        blk_fx2 = fx.fetch_fx("hk", st_fx2, t0 + 6)
+        assert blk_fx2["state"] == "fetch_failed" and blk_fx2["source"] == "yf-fx", \
+            "空序列属端点异常（HKDCNY=X 必然有数据），须按失败计熔断"
+        assert st_fx2["breakers"]["yf"]["fails"] == 1
+        # 缺库钉（0.0.11）：sys.modules 置 None 使 import 确定性抛 ImportError——
+        # hkd_cny_daily 须返回 import_missing 且不记 yf 簇熔断（缺库≠源故障，
+        # 勿连坐日 K 回退链）
+        sys.modules["yfinance"] = None
+        st_imp = {"breakers": {}, "cooldowns": {}}
+        s_imp, n_imp = fx.hkd_cny_daily(st_imp, t0 + 7)
+        assert s_imp == {} and n_imp == "import_missing", (s_imp, n_imp)
+        assert "yf" not in st_imp["breakers"], "缺库不得记熔断"
+    finally:
+        del sys.modules["yfinance"]
     print("  ok 熔断按簇计账：行情簇熔断不连坐 em_search/sina/ths；日K链跳过同簇源走腾讯")
     print("  ok 财务回退链 fallback/all_failed · _num 百分号与 NaN · 情报块成功重置簇计数")
     # -- qt/sina 解析器罐体（零网络）· derive_chip · 簇绑定 --
@@ -2013,7 +2082,7 @@ def selftest():
                                 "time": "2026-10-20", "src": "腾讯网"}]},
                            "fundamentals": {"state": "available", "data": {"每股收益(元)": 1.2}},
                            "chip": {"state": "missing"},
-                           # 扩展块：5 块有数据（含满额截断路径）+ 4 块故意缺失
+                           # 扩展块：6 块有数据（含满额截断路径）+ 4 块故意缺失
                            "moneyflow": {"state": "available", "source": "sina-flow",
                                          "summary": {"main_net_yi": 0.31,
                                                      "main_net_3d_yi": 0.72,
@@ -2051,7 +2120,11 @@ def selftest():
                                             "appoint_date": "2026-10-31",
                                             "actual_date": None}},
                            "unlock": {"state": "available", "source": "dc-unlock",
-                                      "upcoming": [], "past": []}},
+                                      "upcoming": [], "past": []},
+                           "fx": {"state": "available", "source": "yf-fx",
+                                  "date": "2026-10-29", "hkd_cny": 0.849,
+                                  "chg_pct_20d": -1.25, "chg_pct_ytd": -4.94,
+                                  "note": "人民币敞口提示：汇率仅情报面"}},
                 "quality": {"score": 90, "tier": "good", "confidence_cap": "high"}}
     with tempfile.TemporaryDirectory() as td:
         pack = render_context_pack(evidence, td)
@@ -2090,6 +2163,10 @@ def selftest():
         assert "holder=missing" in text and "market=missing" in text, \
             "缺失扩展块须在状态行如实标注"
         assert len(text) < PACK_CHAR_CAP, "pack 须守住 %d 字符护栏" % PACK_CHAR_CAP
+        # fx 块渲染钉（0.0.11）：汇率入 pack 情报面且明示不进信号判定
+        assert "## 汇率（人民币敞口" in text and "HKD/CNY 0.849" in text, \
+            "fx 块 available 须渲染人民币敞口行"
+        assert "不进信号判定" in text, "汇率行须携带仅情报面口径声明"
         # 零权重钉（跨层互证）：扩展块状态任意变化不扰动裁决侧质量分
         ev_base = {"blocks": {n: {"state": "available"}
                               for n, _ in aj.BLOCKS}}
@@ -2098,6 +2175,12 @@ def selftest():
                                 for n in aj.EXT_BLOCKS}}}
         assert aj.evidence_cap(ev_ext) == aj.evidence_cap(ev_base), \
             "扩展块零权重被破坏（E4 互证）"
+        # fx 零权重钉（0.0.11）：SSOT 清单含 fx，其状态扰动同不扰质量分/置信帽
+        assert "fx" in fx.EXT_BLOCKS, "fx 块须在扩展块 SSOT 清单"
+        ev_fx = {"blocks": {**{n: {"state": "available"} for n, _ in aj.BLOCKS},
+                            "fx": {"state": "fetch_failed"}}}
+        assert aj.evidence_cap(ev_fx) == aj.evidence_cap(ev_base), \
+            "fx 块零权重被破坏（质量分/置信帽不得因汇率块改变）"
         opinions = [
             {"source": "strategy:ma_golden_cross", "signal": "buy", "confidence": 0.8,
              "rationale": "MA5 上穿 MA20"},
@@ -2113,6 +2196,8 @@ def selftest():
         for section in ("# 诊股报告", "## 结论", "## 证据状态", "## 关键价位",
                         "## 操作建议", "## 检查清单", "不构成投资建议"):
             assert section in report, "报告缺节：%s" % section
+        assert "## 汇率（人民币敞口）" in report and "HKD/CNY 0.849" in report, \
+            "报告情报面须含人民币敞口行（与 pack 同源）"
         assert "untrusted" not in report, "报告不得复述哨兵原文"
         assert "- **风险**：（无登记）" in report, "既有调用（无 risk 参数）兼容且空栏如实"
         # rationale 挂载钉（风险与利好/附录）：SSOT 在 opinions/risk.json，只挂过
@@ -2492,7 +2577,7 @@ def selftest():
         for k, v in real_fx.items():
             setattr(fx, k, v)
     print("  ok context-pack 哨兵/置信帽 · 报告七节 · 免责段")
-    print("  ok 扩展九块：渲染预算截断/哨兵/缺失如实/零权重钉/快照三态/近期事件")
+    print("  ok 扩展十块：渲染预算截断/哨兵/缺失如实/零权重钉（含 fx）/快照三态/近期事件")
     _selftest_archive(evidence, verdict, opinions)
     print("  ok 信号登记：观察/对立失效/期限")
     print("  ok 报告 rationale 挂载：风险与利好逐条溯源 · 附录原文 · 验票过滤 · 剥哨兵（诊断行同通道 · markdown 注入掐断）")

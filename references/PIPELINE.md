@@ -6,9 +6,9 @@
 reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](04-report.md)，不入仓）。
 
 ```text
-① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；15 块=核心六块
-              （计分）+扩展九块（资金流/公告/研报/预告/解禁/股东户数/大盘/
-              行业/估值，零权重）；A 股全链实测 ~17s/17 次 HTTP）
+① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；16 块=核心六块
+              （计分）+扩展十块（资金流/公告/研报/预告/解禁/股东户数/大盘/
+              行业/估值/汇率，零权重）；A 股全链实测 ~17s/17 次 HTTP）
 ② 拼上下文    diagnose.py prepare → context-pack.md（有界证据包+哨兵+置信帽+
               盘中警示行；--cost 时另附基本面锚节——取数时段口径见
               [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)）
@@ -71,3 +71,6 @@ fundamentals（东财 HKF10→yf，质量分 85 good）、valuation（em-hk-ind 
 moneyflow（南向持股 T-1 披露）、news（qq_news 单源）、market（港股指数）。
 仍 not_supported：chip/forecast/unlock/holder/industry（港股无对应披露形态，
 见 01 backlog）。港股全链约 +12 次 HTTP（16 簇之 etnet 为港股唯一新簇）。
+fx 块取 HKD/CNY 入 pack 与 report 情报面（人民币敞口；汇率不进信号判定与
+策略 YAML）；postmortem 加 `--cny` 可对 hk 信号附人民币口径展示（判定与
+归因仍港币，见 [05](05-postmortem.md)）。

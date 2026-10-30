@@ -65,6 +65,11 @@
 - 绩效因子：见 [03](03-synthesis.md)（Beta(15,15)、钳 0.83–1.2、<30 样本中性）。
 - 画像升降档：命中率 ≥60% 且样本 ≥10 → promote；≤40% 且样本 ≥10 → demote；
   其余 observe（<10 样本只观察不动手）。
+- **人民币口径展示（`--cny`）**（条件：港股信号且需投资者本币视角；做法：经
+  [01](01-evidence.md) fx 块同源的 `hkd_cny_daily` 取 HKD/CNY 日线，hk 信号
+  evaluated 附 cny_close / cny_chg_pct（含汇兑项），汇率缺根如实缺省、取数失败
+  不阻断评估；坑位：人民币只是展示维度——outcome 判定与台账归因**默认仍按
+  港币**，不改判定口径即不改自校准语义）。
 - 时间线索引（适用：postmortem 落盘末尾）：做法——台账写盘成功后重建
   reports/ 索引，T+n 结果进 `index.md`；坑位——索引是派生视图，重建失败只告警
   不回滚（事实源 signals.json / ledger.json 已先落盘）。
