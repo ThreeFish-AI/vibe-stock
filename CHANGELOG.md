@@ -13,14 +13,17 @@
   market/code 的记录逐条打印跳过诊断（id/code/market 实际值）、保持 pending
   不动、不借同 code 已知市场的日 K 代评，其余信号照常评估；`--stock` 经
   detect_market 归一后只评该 code 的 pending（识别失败如实报错退出、无匹配
-  如实打印且不写文件），缺省保持全量。
+  如实打印且不写文件），缺省保持全量。收尾口径同收紧——全部跳过/未到期时
+  如实打印「本次无台账变动」，不落「已更新」失实陈述、不空写台账文件。
 - 快照模式登记市场推导（RSI-20261030-04）：原 `register_signal` 对 meta 无
   market 的 evidence（快照模式真实路径——fetch 快照分支不判市场）一律兜底
   `?`，正是后验坏记录的源头；现可推导时经 detect_market 从 meta 的 code/symbol
   推 (market, 归一 code) 成对登记（同源成对防「market 已知而 code 仍是原始
   symbol 形态、取不到日 K」），推不出维持 `?`（与 postmortem 跳过守卫构成双层
   防线）；坑位——合成快照（evals 演示 fixture）勿跑 report 登记信号，推得市场
-  后后验将以真实日 K 评虚构基准价、台账遭污染。
+  后后验将以真实日 K 评虚构基准价、台账遭污染。对立失效匹配对 market 不在取数链的
+  存量（`?` + 原始 symbol 形态 code）记录同经 detect_market 归一比对（推不出维持
+  不匹配），防归一身份切换后同股对立记录漏失效沦为僵尸 pending。
 
 ## [0.2.1] - 2026-10-30
 

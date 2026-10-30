@@ -22,9 +22,11 @@
   从 meta 的 code/symbol 推导 (market, 归一 code) 成对落账（market 与 code 必须同源，
   只推 market 会留下原始 symbol 形态的 code 而取不到日 K）；推不出（symbol 非
   A/港代码形态，如合成符号）维持兜底 `?` + 原样 code，由后验侧未知市场跳过守卫
-  兜底（双层防线）；坑位——快照基准价 `close_at_signal` 是快照价，推得市场后
-  后验会以真实日 K 评分——合成快照（如 evals 演示 fixture）勿跑 report 登记信号，
-  否则虚构基准价与真实行情混算、台账遭污染。
+  兜底（双层防线）；对立失效匹配对 market 不在取数链的存量记录（`?` + 原始
+  symbol 形态 code）同经 detect_market 归一比对（推不出维持不匹配）——归一身份
+  切换不得使存量同股对立记录漏失效；坑位——快照基准价 `close_at_signal` 是
+  快照价，推得市场后后验会以真实日 K 评分——合成快照（如 evals 演示 fixture）
+  勿跑 report 登记信号，否则虚构基准价与真实行情混算、台账遭污染。
 
 ## 后验（postmortem 时）
 

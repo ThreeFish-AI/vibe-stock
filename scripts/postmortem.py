@@ -168,11 +168,15 @@ def run(args):
             bars_by_code[code] = bars
     delta = evaluate_signals(evaluable, bars_by_code)
     _save(SIGNALS, signals)
-    ledger = merge_ledger(_load(LEDGER, {}), delta)
-    _save(LEDGER, ledger)
-    print("评估完成；台账与绩效已更新（%s）" % LEDGER)
-    for src, d in delta.items():
-        print("  归因 %s：+%d 胜 / +%d 负" % (src, d["wins"], d["losses"]))
+    if delta:
+        ledger = merge_ledger(_load(LEDGER, {}), delta)
+        _save(LEDGER, ledger)
+        print("评估完成；台账与绩效已更新（%s）" % LEDGER)
+        for src, d in delta.items():
+            print("  归因 %s：+%d 胜 / +%d 负" % (src, d["wins"], d["losses"]))
+    else:  # 全部跳过/未到期时不落「已更新」失实陈述，亦不空写台账文件
+        ledger = _load(LEDGER, {})
+        print("评估完成；本次无台账变动（无可评估项或未到期）")
     rows = profile_report(ledger)
     if rows:
         print("画像升降档：")
@@ -215,8 +219,9 @@ def selftest():
           "horizons": [1, 3, 5, 10], "evaluated": {}}
     evaluate_signals([s2], {"000001": bars})
     assert s2["evaluated"] == {} and s2["status"] == "pending"
-    # run() 市场守卫 + --stock 过滤（零网络：fetch_state 与日 K 全走桩替，
-    # CHAINS[market] 查表在真实 fetch_daily_bars 内执行——守卫回退即 KeyError 复发）
+    # run() 市场守卫 + --stock 过滤（零网络：fetch_state 与日 K 全走桩替；
+    # 守卫回退时坏记录流入 symbols——market=None 在 sorted() 即 TypeError、
+    # market='?' 在真实 fetch_daily_bars 的 CHAINS 查表 KeyError，任一必被本段捕获）
     import argparse
     import contextlib
     import io
@@ -239,7 +244,8 @@ def selftest():
                     "status": "pending", "evaluated": {}, "sources": ["strategy:demo"]}
         def _state():
             return [_mk("x1", "?", "000001", "buy"), _mk("n1", None, "000002", "buy"),
-                    _mk("c1", "cn", "000001", "buy"), _mk("c2", "cn", "600519", "reduce")]
+                    _mk("c1", "cn", "000001", "buy"), _mk("c2", "cn", "600519", "reduce"),
+                    _mk("k1", "cn", None, "buy"), _mk("k2", None, None, "buy")]
         try:
             _save(SIGNALS, _state())
             out = io.StringIO()
@@ -247,12 +253,16 @@ def selftest():
                 assert run(argparse.Namespace(stock=None)) == 0
             txt = out.getvalue()
             assert "跳过 x1" in txt and "跳过 n1" in txt, txt
-            assert "market='?'" in txt and "market=None" in txt and "缺 code" not in txt
+            assert "market='?'" in txt and "market=None" in txt
+            assert "跳过 k1（code=None）：缺 code；" in txt, txt
+            assert "跳过 k2（code=None）：market=None 不在取数链（cn/hk）、缺 code；" in txt, txt
             assert sorted(calls) == [("cn", "000001"), ("cn", "600519")], calls
             sigs = {s["id"]: s for s in _load(SIGNALS, [])}
             assert sigs["x1"]["status"] == "pending" and sigs["x1"]["evaluated"] == {}, \
                 "坏市场记录须保持 pending 不动（即便与可评估记录同 code）"
             assert sigs["n1"]["status"] == "pending" and sigs["n1"]["evaluated"] == {}
+            assert sigs["k1"]["status"] == "pending" and sigs["k2"]["status"] == "pending", \
+                "缺 code 记录须保持 pending 不动"
             assert "1" in sigs["c1"]["evaluated"] and "1" in sigs["c2"]["evaluated"]
             assert sigs["c1"]["status"] == "observed" and sigs["c2"]["status"] == "observed"
             # --stock 过滤：归一（sh600519→cn:600519）后只评该股；未入过滤集的坏记录不报

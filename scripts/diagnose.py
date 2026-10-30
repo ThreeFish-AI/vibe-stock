@@ -471,12 +471,22 @@ def register_signal(evidence, verdict, opinions, report_id, report_path):
     fam = families[action]
     invalidated = 0
     for s in signals:
-        if (s.get("market") == market and s.get("code") == code
-                and s.get("status") == "pending"
+        if (s.get("status") == "pending"
                 and families.get(s.get("action"), "neutral") != fam
                 and fam != "neutral"):
-            s["status"] = "invalidated"
-            invalidated += 1
+            m, c = s.get("market"), s.get("code")
+            if m not in fx.CHAINS:
+                # 存量快照兜底记录（'?' + 原始 symbol 形态 code）与本登记的归一
+                # 身份精确等值永远匹配不上（归一切换前同股对立可失效）——经
+                # detect_market 归一后比对恢复该语义；推不出维持不匹配，由
+                # postmortem 侧未知市场跳过守卫兜底。
+                try:
+                    m, c = fx.detect_market(str(c))
+                except SystemExit:
+                    pass
+            if (m, c) == (market, code):
+                s["status"] = "invalidated"
+                invalidated += 1
     bars = evidence["blocks"].get("daily_bars", {}).get("bars", [])
     quote = evidence["blocks"].get("quote", {}) or {}
     # 与 render_report/pack 报价节同口径（qt 实时叠加价优先）：报告展示价、
@@ -1616,6 +1626,22 @@ def selftest():
         assert (sn_sigs[-2]["market"], sn_sigs[-2]["code"]) == ("cn", "600519"), sn_sigs[-2]
         assert (sn_sigs[-1]["market"], sn_sigs[-1]["code"]) == ("?", "TEST"), sn_sigs[-1]
         print("  ok 快照登记：meta 无 market 时 detect_market 推导（推不出维持 ?）")
+        # 存量 ('?', 原始 symbol) 对立失效漏配修复：新归一身份登记对立族时，
+        # 存量经 detect_market 归一比对恢复失效；推不出的存量记录维持不匹配
+        json.dump([{"id": "sig-legacy", "market": "?", "code": "sh600519",
+                    "action": "buy", "family": "bull", "status": "pending",
+                    "horizons": [1], "evaluated": {}, "sources": []},
+                   {"id": "sig-legacy-bad", "market": "?", "code": "TEST",
+                    "action": "buy", "family": "bull", "status": "pending",
+                    "horizons": [1], "evaluated": {}, "sources": []}],
+                  open(SIGNALS, "w", encoding="utf-8"))
+        ev_leg = {"meta": {"symbol": "sh600519"}, "blocks": {}}
+        _, inv_leg = register_signal(ev_leg, verdict_sell, opinions, "r-leg", "p-leg")
+        assert inv_leg == 1, "存量 ('?', 原始 symbol) 同股对立记录须失效（归一比对）"
+        leg = json.load(open(SIGNALS, encoding="utf-8"))
+        assert leg[0]["status"] == "invalidated", leg[0]
+        assert leg[1]["status"] == "pending", "推不出的存量记录维持不匹配不动"
+        print("  ok 对立失效：存量 ('?', 原始 symbol) 归一比对恢复失效语义")
     # 快照模式扩展块三态：声明态 / 缺省 estimated / 文件缺失 missing
     with tempfile.TemporaryDirectory() as td:
         json.dump({"state": "available", "summary": {}},
