@@ -2,8 +2,8 @@
 
 路径变量（唯一定义处）：`$T` = skill 根（SKILL.md 所在目录；Claude Code 下即
 `${CLAUDE_SKILL_DIR}`）；`$W` = 本次诊股工作区（默认 `.vs/`）；状态目录
-`~/.vibe-stock/`（signals.json / ledger.json / reports/ / fetch_state.json，
-不入仓）。
+`~/.vibe-stock/`（signals.json / ledger.json / fetch_state.json /
+reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](04-report.md)，不入仓）。
 
 ```text
 ① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；15 块=核心六块
@@ -37,6 +37,9 @@ uv run --no-project $T/scripts/adjudicate.py \
 # ⑤ 报告 + 信号登记
 uv run --no-project $T/scripts/diagnose.py report --stock 600519 --workdir .vs
 
+# 存量平铺报告迁入分级布局（一次性；默认 dry-run，确认后加 --apply）
+uv run --no-project $T/scripts/diagnose.py migrate-reports [--apply]
+
 # 后验（隔若干交易日）
 uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance \
   $T/scripts/postmortem.py --stock 600519
@@ -56,6 +59,7 @@ CHANGELOG 记录并同步本文件锁版本。
 
 ## 港股速查
 
-代码形态 `hk00700` / `0700.HK`；Yahoo 侧自动归一 4 位（0700.HK）。news 走
+代码形态 `hk00700` / `0700.HK` / `00700` 统一归一 5 位（`00700`，报告目录
+`00700.hk`）；Yahoo 侧再转 4 位（0700.HK）。news 走
 qq_news 单源（0.2.0 解除 not_supported）；fundamentals/chip 与扩展块（除
 market 港股指数）对港股为 not_supported，报告与质量分如实反映。
