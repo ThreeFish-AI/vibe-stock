@@ -6,9 +6,9 @@
 不入仓）。
 
 ```text
-① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；15 块=核心六块
-              （计分）+扩展九块（资金流/公告/研报/预告/解禁/股东户数/大盘/
-              行业/估值，零权重）；A 股全链实测 ~17s/17 次 HTTP）
+① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；16 块=核心六块
+              （计分）+扩展十块（资金流/公告/研报/预告/解禁/股东户数/大盘/
+              行业/估值/汇率，零权重）；A 股全链实测 ~17s/17 次 HTTP）
 ② 拼上下文    diagnose.py prepare → context-pack.md（有界证据包+哨兵+置信帽+
               盘中警示行——取数时段口径见
               [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)）
@@ -58,4 +58,7 @@ CHANGELOG 记录并同步本文件锁版本。
 
 代码形态 `hk00700` / `0700.HK`；Yahoo 侧自动归一 4 位（0700.HK）。news 走
 qq_news 单源（0.2.0 解除 not_supported）；fundamentals/chip 与扩展块（除
-market 港股指数）对港股为 not_supported，报告与质量分如实反映。
+market 港股指数、fx 汇率两块）对港股为 not_supported，报告与质量分如实反映。
+fx 块取 HKD/CNY 入 pack 与 report 情报面（人民币敞口；汇率不进信号判定与
+策略 YAML）；postmortem 加 `--cny` 可对 hk 信号附人民币口径展示（判定与
+归因仍港币，见 [05](05-postmortem.md)）。

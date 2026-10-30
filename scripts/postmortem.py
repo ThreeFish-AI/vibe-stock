@@ -63,9 +63,20 @@ def score(action, base, later):
     return None  # watch/hold 等只观察
 
 
-def evaluate_signals(signals, bars_by_code):
-    """就 bars（按代码）评估已到期 horizon；原位更新 signals，返回归因增量。"""
+def _fx_on(series, keys, date):
+    """汇率序列按日取值：回退到 ≤ date 的最近一根（与信号日非交易日回退同
+    思路）；date 早于首根（序列窗口不足）返回 None，消费侧如实缺省不附字段。"""
+    i = bisect.bisect_right(keys, date) - 1
+    return series[keys[i]] if i >= 0 else None
+
+
+def evaluate_signals(signals, bars_by_code, cny_by_date=None):
+    """就 bars（按代码）评估已到期 horizon；原位更新 signals，返回归因增量。
+    cny_by_date（--cny 时传入 fx.hkd_cny_daily 产物）：hk 信号的 evaluated 附
+    cny_close / cny_chg_pct 展示字段（人民币口径收益，含汇兑项）——仅展示，
+    outcome 判定与台账归因仍按标的币种收盘（默认口径不变）。"""
     ledger_delta = {}
+    fx_keys = sorted(cny_by_date) if cny_by_date else []
     for s in signals:
         if s.get("status") != "pending":
             continue
@@ -92,9 +103,18 @@ def evaluate_signals(signals, bars_by_code):
             if j >= len(closes):
                 continue  # 未到期
             outcome = score(s["action"], s["close_at_signal"], closes[j])
-            s.setdefault("evaluated", {})[str(h)] = {
-                "close": closes[j], "date": dates[j],
-                "outcome": outcome or "observed"}
+            entry = {"close": closes[j], "date": dates[j],
+                     "outcome": outcome or "observed"}
+            if fx_keys and s.get("market") == "hk":
+                fx0 = _fx_on(cny_by_date, fx_keys, s["date"])
+                fx1 = _fx_on(cny_by_date, fx_keys, dates[j])
+                if fx0 and fx1:
+                    base_cny = s["close_at_signal"] * fx0
+                    if base_cny:
+                        entry["cny_close"] = round(closes[j] * fx1, 4)
+                        entry["cny_chg_pct"] = round(
+                            (closes[j] * fx1 / base_cny - 1) * 100, 2)
+            s.setdefault("evaluated", {})[str(h)] = entry
             if outcome in ("hit", "miss"):
                 for src in s.get("sources", []):
                     d = ledger_delta.setdefault(src, {"wins": 0, "losses": 0})
@@ -146,7 +166,19 @@ def run(args):
         fx.save_fetch_state(st)
         if bars:
             bars_by_code[code] = bars
-    delta = evaluate_signals(signals, bars_by_code)
+    cny_by_date = None
+    if getattr(args, "cny", False):
+        if any(m == "hk" for m, _ in symbols):
+            # 汇率仅展示口径：取数失败不阻断评估，outcome 照常按港币判定
+            st_fx = fx.load_fetch_state()
+            cny_by_date, err = fx.hkd_cny_daily(
+                st_fx, int(dt.datetime.now().timestamp()))
+            fx.save_fetch_state(st_fx)
+            if not cny_by_date:
+                print("人民币口径不可用（%s）：outcome 仍按港币评估" % err)
+        else:
+            print("--cny：待评估信号无港股标的，人民币口径不适用")
+    delta = evaluate_signals(signals, bars_by_code, cny_by_date)
     _save(SIGNALS, signals)
     ledger = merge_ledger(_load(LEDGER, {}), delta)
     _save(LEDGER, ledger)
@@ -209,7 +241,36 @@ def selftest():
     evaluate_signals([s4], {"000001": bars_g})
     assert s4["evaluated"] == {} and s4["status"] == "pending", \
         "信号日新于最新 bar 属未到期，不得提前评估"
+    # 人民币口径展示（--cny）：hk 信号附 cny_close/cny_chg_pct（含汇兑项），
+    # outcome 判定与归因不变——默认口径（不传 cny_by_date）不附 cny 字段
+    cny_map = {"2026-10-%02d" % d: 0.90 - 0.001 * d for d in range(1, 31)}
+    sig_hk = {**sig_buy, "id": "h1", "market": "hk", "code": "01810",
+              "close_at_signal": 100.0, "status": "pending", "evaluated": {}}
+    sig_hk_base = {**sig_hk, "id": "h2", "evaluated": {}}
+    evaluate_signals([sig_hk], {"01810": bars}, cny_map)
+    evaluate_signals([sig_hk_base], {"01810": bars})
+    for h in ("1", "3", "5", "10"):
+        assert sig_hk["evaluated"][h]["outcome"] == \
+            sig_hk_base["evaluated"][h]["outcome"], "人民币口径不得改变 outcome"
+        assert "cny_close" in sig_hk["evaluated"][h] and \
+            "cny_chg_pct" in sig_hk["evaluated"][h], h
+    assert "cny_close" not in sig_hk_base["evaluated"]["1"], \
+        "默认口径不得附 cny 展示字段"
+    # 数学钉：h=1 → 10-02 收盘 101.49×汇率 0.898 / 基准 100×0.899 − 1
+    ev1 = sig_hk["evaluated"]["1"]
+    assert abs(ev1["cny_close"] - 101.49 * 0.898) < 0.01, ev1
+    assert abs(ev1["cny_chg_pct"]
+               - (101.49 * 0.898 / (100 * 0.899) - 1) * 100) < 0.01, ev1
+    # 汇率序列窗口不足（信号日早于汇率首根）：如实缺省不附字段、不误报
+    s5 = {**sig_buy, "id": "h3", "market": "hk", "code": "01810",
+          "close_at_signal": 100.0, "status": "pending", "date": "2026-10-05",
+          "horizons": [1], "evaluated": {}}
+    evaluate_signals([s5], {"01810": bars}, {"2026-10-15": 0.89})
+    assert s5["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral"), \
+        "汇率缺根不得影响 outcome 本身"
+    assert "cny_close" not in s5["evaluated"]["1"], "汇率缺根须如实缺省"
     print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动 · 非交易日回退")
+    print("  ok 人民币口径展示：hk 附 cny 字段 · outcome/归因仍港币 · 缺根如实缺省")
     print("SELFTEST PASSED ✔")
 
 
@@ -217,6 +278,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--stock", help="提示性参数：实际按 signals.json 待评估项取数")
+    ap.add_argument("--cny", action="store_true",
+                    help="港股信号附人民币口径展示（cny_close/cny_chg_pct，含汇兑项）；"
+                         "outcome 判定与台账归因仍按港币（默认口径不变）")
     args = ap.parse_args()
     if args.selftest:
         selftest()

@@ -80,7 +80,7 @@
 做法：包裹 + 声明 + 报告不复述；
 坑位：哨兵声明写在外层、不进外文正文，报告引用新闻事实时不得携带哨兵标记。
 
-## 扩展证据块（0.2.0 · 九块零权重）
+## 扩展证据块（0.2.0 起 · 零权重，现十块）
 
 扩展块是**信息面不是裁决面**：不进六块质量分与置信帽（置信帽只反映核心行情链
 可用性，与情报丰富度正交——资金流缺失不该压低 strong_sell 的可信度表达）。可见
@@ -99,6 +99,7 @@
 | market | qt 指数快照（与个股快照共用调用） | qt | qt 港股指数 |
 | industry | 申万归属(新浪 F10)+同花顺板块表 | sina_flow/ths | not_supported |
 | valuation | qt 快照→baidu 历史分位 | qt/baidu_gushitong | not_supported |
+| fx（0.2.2） | yfinance HKDCNY=X 日线（近 1 年，`hkd_cny_daily` 为 SSOT） | yf | 港股专属（cn=not_supported） |
 
 规约句（三属性）：
 - **qt 位序双路校验**（无条件全局规则：qt.gtimg 无官方文档、~ 分隔字段序随版本
@@ -124,6 +125,12 @@
   标 estimated；坑位：历史换手按当前流通股本回溯，增发/解禁期误差放大；
   volume 手/股单位按源判定（ak-em/ef-em=手，qq-tx/yf=股），判错方向会把换手率
   放大百倍。
+- **汇率仅情报面**（条件：港股标的的人民币敞口呈现；做法：fx 块取 HKD/CNY 当前
+  值、近 20 日与年内变动入 pack 与 report 情报面，postmortem `--cny` 对 hk 信号
+  附 cny_close/cny_chg_pct 展示字段，cn 标的以人民币计价恒 not_supported；坑位：
+  汇兑项量级可在 ±2% 判定带附近翻转体感，但**不得**进信号判定、聚合、置信帽、
+  策略 YAML 与 RiskGuard（SKILL.md 红线 4），postmortem 的 outcome 判定与台账
+  归因默认仍按标的币种——人民币只是展示维度，不是第二裁决口径）。
 
 backlog 插件位（未实现，reportName/簇已验证）：龙虎榜 RPT_DAILYBILLBOARD_
 DETAILSNEW、两融（sse/szse 官网直连）、十大股东/机构持仓（emweb F10）、大宗
@@ -175,5 +182,5 @@ RPT_DATA_BLOCKTRADE、质押 RPT_CSDC_LIST、增减持 RPT_SHARE_HOLDER_INCREASE
 ## 快照模式（无网兜底）
 
 `--snapshot-dir <dir>`：块文件 `quote.json/daily_bars.json/…`（可含 `"state"` 字段，
-缺省 estimated）；扩展九块文件**可选**，缺失标 missing 如实可见。条件：联网全链失败或离线环境；坑位：快照不比实时——estimated/
+缺省 estimated）；扩展块文件**可选**，缺失标 missing 如实可见。条件：联网全链失败或离线环境；坑位：快照不比实时——estimated/
 stale 状态如实进质量分，置信帽随之收紧，禁止把快照当 available。

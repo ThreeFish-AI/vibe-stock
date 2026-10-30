@@ -2,6 +2,22 @@
 
 本文件只登记版本级变化；条目遵循 Keep a Changelog、[SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Added
+
+- 港股人民币口径：fx 扩展块与 postmortem `--cny` 展示（RSI-20261030-05）：
+  港股诊断的 context-pack 与报告全程无 HKD/CNY 信息、postmortem 对 hk 信号只
+  比港币收盘——人民币投资者实际收益含汇兑项（2026 年内 HKD/CNY 约 −5%，量级
+  可在 ±2% 判定带附近翻转体感）；现新增第十个零权重扩展块 fx（hk 经 yfinance
+  HKDCNY=X 近 1 年日线，取当前值/近 20 日/年内变动，cn 标的以人民币计价恒
+  not_supported，取数封装 `hkd_cny_daily` 为 SSOT、熔断走 yf 簇），pack 与
+  report 情报面同源渲染人民币敞口行，postmortem `--cny` 对 hk 信号 evaluated
+  附 cny_close/cny_chg_pct 展示字段（汇率缺根如实缺省、取数失败不阻断评估）；
+  红线明文：汇率不进信号判定、聚合、置信帽、策略 YAML 与 RiskGuard——outcome
+  判定与台账归因默认仍按港币，selftest 钉住 fx hk/cn 状态、cny 字段不改变
+  outcome、fx 状态扰动不扰质量分/置信帽。
+
 ## [0.2.1] - 2026-10-30
 
 ### Fixed
