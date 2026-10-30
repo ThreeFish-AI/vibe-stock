@@ -2,6 +2,24 @@
 
 本文件只登记版本级变化；条目遵循 Keep a Changelog、[SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-10-30
+
+### Added
+
+- 批量诊股子技能（RSI-20261030-05）：「指数成分股批量诊股→精选 N 只→深评
+  排名→资金配置」方法沉淀为 references/06-batch-scan.md（SSOT）+ batch/
+  参考实现。四阶段编排——Stage A 机械粗筛（bulk 接口+回退链、均衡复合分、
+  价格可配性硬滤、行业帽选 N+断崖弹性）；Stage B 单股全管线批量（取数强制
+  串行——fetch_state.json 整体写竞态属正确性问题；波次+波后健康门+retry；
+  意见层宿主子代理并行、纪律与单股一致）；Stage C 门限筛 G1–G5（降档逐档
+  如实记录、不足不硬凑）+ 对抗核验（只降不升）+ 三 lens 独立评审 + 确定性
+  合分；Stage D 手数贴合+三段建仓+三价纪律+一致性校验。产物 SSOT 落
+  `~/.vibe-stock/reports/_scans/<date>-<pool>/`（每类信息唯一落点、digest
+  按需派生不落盘、index.md 渲染勿手改），批量登记信号照常走 postmortem
+  后验。边界改写：SKILL.md 原「不用于选股批量扫描」改为批量走子技能
+  （编排层不触碰单股裁决链），仍不用于回测引擎、自动交易、盯盘推送。
+  版本依据：新增常规兼容能力，按 SemVer 升 minor。
+
 ## [0.2.1] - 2026-10-30
 
 ### Fixed
