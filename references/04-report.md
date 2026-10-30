@@ -84,7 +84,7 @@
   `~/.vibe-stock/names.json` 显示名缓存（report 取到名称时写穿，存量信号经此
   显名）→ `—`（名称是行情面数据，A 股 qt 全量快照 / 港股 qt 紧凑快照，取数
   失败如实缺省）。
-- **存量迁移**（适用：0.2.1 及以前的平铺 `<code>-<date>.md`；须在升级后首次
+- **存量迁移**（适用：分级布局引入前（0.0.6 及以前）的平铺 `<code>-<date>.md`；须在升级后首次
   report 之前执行，否则当日新报告会让旧平铺文件被判 conflict 需人工处理）：做法——
   `diagnose.py migrate-reports` 默认 dry-run；`--apply` 依次写单日文件 → CAS 校验后
   备份 `signals.json.bak-<ts>` 并改写 `report_path`/`report_version`（丢失版加

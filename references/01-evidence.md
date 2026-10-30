@@ -27,7 +27,7 @@
 | daily_bars | 25 | em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq，不含北交所)→yfinance | em_quote(akshare)→yfinance |
 | technical | 25 | 由日 K 纯标准库推导（MA/RSI/MACD/量比/52 周位置） | 同左 |
 | news | 10 | em_search→qq_news（腾讯资讯）→sina_flow（个股资讯页）；港股 qq_news 单源 | qq_news（腾讯资讯） |
-| fundamentals | 10 | em_datacenter(主指标全量)→sina(财务指标)→ths(财务摘要) | not_supported（v1） |
+| fundamentals | 10 | em_datacenter(主指标全量)→sina(财务指标)→ths(财务摘要)；港股 em_datacenter(HKF10 主指标)→yfinance(info 兜底) | em_datacenter(HKF10)→yfinance |
 | chip | 5 | 本地自算 derive（日K+qt 流通股本，CYQ 同口径，标 estimated）→em_quote 复活位 | not_supported |
 
 - 总分 → 档位：≥85 good / ≥70 usable / ≥55 limited / 更低 poor。
@@ -40,7 +40,7 @@
 - **回退链**：临时失败——按链逐源换，成功即标 fallback 继续。条件：同一块存在
   多簇可选；做法：A 股日K链 em_quote(akshare→efinance，efinance 为簇内次选——
   同端点冗余，簇熔断开启时两源一并跳过)→qq(腾讯 qfq)→yfinance，fundamentals 链
-  em_datacenter(主指标全量)→sina(财务指标)→ths(财务摘要)，news 链
+  em_datacenter(主指标全量)→sina(财务指标)→ths(财务摘要)（港股 em_datacenter(HKF10)→yfinance），news 链
   em_search→qq_news(腾讯资讯)→sina_flow(个股资讯页)，chip 为本地 derive(日K+qt
   流通股本)→em_quote 复活位；坑位：新浪 stock_zh_a_daily 实测不复权，不入链（不复权数据禁混入
   qfq 链）；腾讯源不覆盖北交所（43/83/87/92 号段，2026-10-28 实测 bj 前缀被端点
@@ -48,6 +48,13 @@
   他股），该跳必败落 yf(.BJ) 兜底、暂无数据则如实 fetch_failed，北交所 em 系源走
   akshare/efinance 既有 secid 规则；链外仍单源的块（如扩展块 emweb-holder、
   baidu-val）失败如实 fetch_failed，不虚构回退。
+- **市场能力表（MARKET_CAPS）**（条件：任一 fetch_<块> 按市场分派）：市场→有
+  取数链的块集合是能力 SSOT（fetch.py `MARKET_CAPS`）；不在集合内的块由
+  fetch_<name> 首行守卫按 not_supported 早退，守卫必须先于任何网络调用（selftest
+  零网络遍历钉）；做法：改能力只改能力表+对应 fetch_<name>，notices/fundamentals
+  另有市场分派表（NOTICES_CHAINS/FUNDAMENTALS_FETCHERS）须与能力表对齐（selftest
+  一致性钉）；坑位：只删守卫不换源会把 datacenter 空结果（9201）伪造成
+  available·无研报（先例入册）。
 - **熔断**：持续失败——单簇连续 3 败停 300s（半开放行单次探测）；状态持久化
   `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（16 簇：
   em_quote/em_search/em_datacenter/em_notice/em_report/emweb/cninfo/sina/
@@ -117,8 +124,8 @@
   （em_datacenter）无同级回退——失败如实 fetch_failed，零权重保证其失败不动摇
   裁决核心，状态行可见。
 - **南向 T-1 披露口径**（条件：港股 moneyflow 块取南向持股）：南向为收盘后
-  傍晚更新的 T-1 披露制度——最新日=available 且 note 注明 HOLD_DATE，仅
-  HOLD_DATE 距今超 STALE_DAYS["moneyflow"]（10 自然日，停牌/断更形态）才标
+  傍晚更新的 T-1 披露制度——最新日=available 且 note 注明披露日，仅
+  披露日距今超 STALE_DAYS["moneyflow"]（10 自然日，停牌/断更形态）才标
   stale；坑位：勿把制度性 T-1 当数据陈旧降级；非港股通标的空结果=标的级事实
   （not_supported），且南向过滤必须带 `.HK` 规范后缀（缺后缀恒空结果、会被
   误判成非港股通，实测坑已入 selftest）。
@@ -129,7 +136,9 @@
 - **估值分位表（pe_quantiles_5y）**：baidu 历史序列在 percentile 之外另落
   p10/25/50/75/90+n+cur 分位表（A/HK 同构）——消费方（估值透镜等）对任意
   参考价插值无需整序列落盘；坑位：分位公式钉 `(<=cur)/n`，分母不含「--」
-  占位（NaN 不进分母，selftest 钉）。
+  占位（NaN 不进分母，selftest 钉）；港股侧 akshare `stock_hk_valuation_baidu`
+  docstring 的 period 域（近一年/近三年/全部）陈旧——实测「近五年」有效
+  （恰 5 年序列），勿按文档把港股窗口改窄
 - **北向个股永不接入**（无条件全局规则：监管性终局）：2024-08-19 起港交所永久
   停止披露沪深股通个股级成交与持股，冻结数据（止于 2024-08-16）只能标 stale 作
   历史背景、**永不重试**——重试逻辑会把它误报为可恢复故障。
