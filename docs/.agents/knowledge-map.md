@@ -13,6 +13,8 @@
 | [references/04-report.md](../../references/04-report.md) | 报告模板、落盘布局与时间线索引 | Agent |
 | [references/05-postmortem.md](../../references/05-postmortem.md) | 信号登记与后验自校准 | Agent |
 | [references/PIPELINE.md](../../references/PIPELINE.md) | 五段流水线与命令速查 | Agent / 用户 |
+| [references/06-batch-scan.md](../../references/06-batch-scan.md) | 批量子技能：指数成分精选与资金配置 | Agent |
+| [batch/README.md](../../batch/README.md) | 批量参考实现命令序与文件清单 | Agent |
 | [strategies/README.md](../../strategies/README.md) | 策略 YAML 库说明 | 贡献者 |
 | [evals/README.md](../../evals/README.md) | 合成 Fixture 与黄金样本 | 贡献者 |
 | [RSI.md](../../RSI.md) | 自改进回路指针 | 贡献者 / Agent |
