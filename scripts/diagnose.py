@@ -648,14 +648,18 @@ def cmd_report(args, now=None):
     sections, footer = ar.split_report(
         render_report(evidence, verdict, opinions, args.stock))
     path = os.path.join(sdir, date + ".md")
-    version = ar.append_version(path, ar.day_title(os.path.basename(sdir), date),
-                                sections, footer, now.strftime("%H:%M:%S"))
+    try:
+        version = ar.append_version(path, ar.day_title(os.path.basename(sdir), date),
+                                    sections, footer, now.strftime("%H:%M:%S"))
+    except ValueError as e:
+        print("未写报告：%s" % e)
+        return 2
     action, invalidated = register_signal(evidence, verdict, opinions,
                                           "%s-%s" % (code, date), path,
                                           report_version=version, now=now)
     try:
         ar.rebuild_indexes(reports_dir, ar.load_signals(SIGNALS))
-    except OSError as e:  # 索引是派生视图：挂了不回滚已写的报告与信号
+    except (OSError, ValueError) as e:  # 索引是派生视图：挂了不回滚已写的报告与信号
         print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s" % e)
     print("report -> %s（v%d）" % (path, version))
     print("signal: action=%s（对立信号失效 %d 条）" % (action, invalidated))
@@ -666,10 +670,15 @@ def cmd_report(args, now=None):
 def cmd_migrate_reports(args, now=None):
     reports_dir = os.path.join(STATE_DIR, "reports")
     try:
-        digest = ar.signals_digest(SIGNALS)
-        plan = ar.plan_migration(reports_dir, ar.load_signals(SIGNALS))
+        signals = ar.load_signals(SIGNALS)
     except ValueError as e:
         print("signals.json 无法解析，迁移中止：%s" % e)
+        return 2
+    digest = ar.signals_digest(SIGNALS)
+    try:  # 报告文件解码失败（UnicodeDecodeError⊂ValueError）不得误报成 signals 问题
+        plan = ar.plan_migration(reports_dir, signals)
+    except ValueError as e:
+        print("报告文件无法读取，迁移中止：%s" % e)
         return 2
     for line in ar.migration_lines(plan):
         print(line)
@@ -1609,6 +1618,15 @@ def _selftest_archive(evidence, verdict, opinions):
             c2 = ar.compose_day("T", [{"n": 1, "time": "01:02:03", "sections": secs}], "*f*")
             assert "\\#伪" in c2 and ar.parse_day(c2)[1][0]["sections"] == secs, \
                 "文件层转义、解析层还原，须往返对称"
+            secs2, _ = ar.split_report("# T\n\n## 结论\nx\n\n---\n*f*")
+            badp = os.path.join(rd, "000001.cn", "2026-11-01.md")
+            write(badp, "# 诊股报告 · x · 2026-11-01\n\n无版本头正文\n")
+            try:
+                ar.append_version(badp, "t", secs2, "f", "09:00:00")
+                raise AssertionError("零版本头文件须拒绝重写")
+            except ValueError:
+                pass
+            assert "无版本头正文" in read(badp), "拒绝路径不得改动原文件"
         # T3 链式去重：K 回溯到内容最早出现的版本；丢失版不参与比对；往返一致
         vs3 = [{"n": 1, "time": "09:00:00", "sections": [("A", "a1"), ("B", "b1")]},
                {"n": 2, "time": "10:00:00", "sections": None},
@@ -1653,6 +1671,10 @@ def _selftest_archive(evidence, verdict, opinions):
             ar.rebuild_indexes(rd, sx)
             assert tree(rd) == snap and \
                 os.stat(os.path.join(rd, "index.md")).st_mtime_ns == m0, "重建须幂等且未变不重写"
+            with open(os.path.join(rd, "600519.cn", "index.md"), "wb") as f:
+                f.write(b"\xff\xfe bad index")  # 坏索引（非 UTF-8）不得让重建崩栈
+            ar.rebuild_indexes(rd, sx)
+            assert "600519.cn · 诊股时间线" in read(os.path.join(rd, "600519.cn", "index.md"))
         # T12 存量迁移：照现网形态（3 信号共用一被覆盖文件）
         legacy_md = render_report(evidence, verdict, opinions, "601888")
 
@@ -1733,10 +1755,13 @@ def _selftest_archive(evidence, verdict, opinions):
             sigs0 = [legacy_sig(3, "cn", "601888", "16:41:16"),
                      legacy_sig(5, "cn", "601888", "23:59:51")]
             sigs0.append(dict(sigs0[0], id="bad", created_at=None))  # 缺 created_at
+            sigs0.append(dict(sigs0[0], id="bad2", created_at="not-a-date"))
             ar.write_json_atomic(SIGNALS, sigs0)
             dig = ar.signals_digest(SIGNALS)
             plan = ar.plan_migration(rd, ar.load_signals(SIGNALS))
             assert "bad 缺可用 created_at" in " ".join(plan["warnings"])
+            assert "bad2 缺可用 created_at" in " ".join(plan["warnings"]), \
+                "非 ISO 串同样按不可用跳过，不得误报 signals.json 解析失败"
             assert "bad" not in {u for it in plan["items"]
                                  for u in it["updates"]}, "不可用信号不得被改写"
             # mtime 漂移（备份恢复/重存）：回退按最后运行归属，不误标全部丢失
@@ -1770,6 +1795,36 @@ def _selftest_archive(evidence, verdict, opinions):
             assert got["sig-601888-5"]["report_version"] == 2 \
                 and got["sig-601888-3"]["report_lost"] is True
             assert not os.path.exists(old)
+        with tempfile.TemporaryDirectory() as td:  # 带时区 created_at：转本地后可认领
+            STATE_DIR, SIGNALS = td, os.path.join(td, "signals.json")
+            rd = os.path.join(td, "reports")
+            local = dt.datetime.fromisoformat(
+                "2026-10-28T16:00:00+08:00").astimezone().replace(tzinfo=None)
+            put(rd, "300624-2026-10-28.md", local.strftime("%H:%M:%S"))
+            sig_tz = legacy_sig(1, "cn", "300624", "16:00:00")
+            sig_tz["created_at"] = "2026-10-28T16:00:00+08:00"
+            ar.write_json_atomic(SIGNALS, [sig_tz])
+            plan = ar.plan_migration(rd, ar.load_signals(SIGNALS))
+            assert plan["items"][0]["updates"]["sig-300624-1"] == {
+                "report_path": plan["items"][0]["new"], "report_version": 1}, \
+                "带时区 created_at 须转本地 naive 后正常认领，不得 TypeError 崩栈"
+            for z in ("2026-10-28T16:00:00+00:00", "2026-10-28T16:00:00Z"):
+                t = ar._ts({"created_at": z})
+                assert t is not None and t.tzinfo is None and \
+                    isinstance(dt.datetime(2026, 10, 29) - t, dt.timedelta), \
+                    "零偏移时区形态须摘 tzinfo 后与本地 naive 可比：%r" % z
+        with tempfile.TemporaryDirectory() as td:  # 报告文件解码失败：归因正确
+            STATE_DIR, SIGNALS = td, os.path.join(td, "signals.json")
+            rd = os.path.join(td, "reports")
+            os.makedirs(rd)
+            with open(os.path.join(rd, "600519-2026-10-28.md"), "wb") as f:
+                f.write(b"\xff\xfe\x00bad")
+            ar.write_json_atomic(SIGNALS, [])
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = cmd_migrate_reports(ns(apply=False), now=d1)
+            assert rc == 2 and "报告文件无法读取" in buf.getvalue() \
+                and "signals.json 无法解析" not in buf.getvalue(), buf.getvalue()
     finally:
         STATE_DIR, SIGNALS = saved
     print("  ok 归档：单日多版本去冗余/链式回溯 · 身份闸门/路径穿越/损坏不覆盖 · "

@@ -152,9 +152,10 @@ def run(args):
     _save(SIGNALS, signals)
     ledger = merge_ledger(_load(LEDGER, {}), delta)
     _save(LEDGER, ledger)
-    try:  # 派生视图放最后：挂了不吞台账（事实源已落盘）
+    try:  # 派生视图放最后：挂了不吞台账（事实源已落盘）；坏索引的
+        # UnicodeDecodeError ⊂ ValueError 一并只告警
         ar.rebuild_indexes(os.path.join(STATE_DIR, "reports"), signals)
-    except OSError as e:
+    except (OSError, ValueError) as e:
         print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s" % e)
     print("评估完成；台账与绩效已更新（%s）" % LEDGER)
     for src, d in delta.items():

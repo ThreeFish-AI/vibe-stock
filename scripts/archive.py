@@ -199,6 +199,11 @@ def append_version(path, title, sections, footer, hhmmss):
     versions = []
     if os.path.exists(path):
         title, versions, _ = parse_day(_read(path))
+        if not versions:
+            # 零版本头＝非本工具产物（compose 恒写版本头）：拒绝重写，防外部
+            # 损坏文件被静默重置 v1、存量信号的 report_version 悬空
+            raise ValueError("单日文件 %s 无可解析版本头（外部损坏？），拒绝重写"
+                             % path)
     n = max([v["n"] for v in versions] or [0]) + 1
     versions.append({"n": n, "time": hhmmss, "sections": sections})
     _write_atomic(path, compose_day(title, versions, footer))
@@ -272,8 +277,11 @@ def render_root_index(signals):
 
 
 def _write_if_changed(path, text):
-    if os.path.exists(path) and _read(path) == text:
-        return
+    try:
+        if os.path.exists(path) and _read(path) == text:
+            return
+    except (OSError, ValueError):
+        pass  # 旧索引损坏/不可读：视为有差异直接覆盖，坏索引须能被重建自愈
     _write_atomic(path, text)
 
 
@@ -303,9 +311,19 @@ def rebuild_indexes(reports_dir, signals):
 # ---------------------------------------------------------------- 存量迁移
 
 def _ts(s):
-    """认领信号的 created_at；缺失/非 ISO 视为不可用（None，不参与认领）。"""
+    """认领信号的 created_at；缺失/非 ISO 视为不可用（None，不参与认领）。
+    带时区形态先转本地再摘 tzinfo——mtime 是本地 naive，直接相减会抛
+    TypeError，只 replace 不换时区则偏移量错算。"""
     t = s.get("created_at")
-    return dt.datetime.fromisoformat(t) if isinstance(t, str) else None
+    if not isinstance(t, str):
+        return None
+    try:
+        t = dt.datetime.fromisoformat(t)
+    except ValueError:
+        return None
+    # is not None 而非真值：零偏移（+00:00/Z）utcoffset() 是 timedelta(0)，
+    # 按真值判会把 aware 原样放行，与 naive mtime 相减仍抛 TypeError
+    return t.astimezone().replace(tzinfo=None) if t.utcoffset() is not None else t
 
 
 def plan_migration(reports_dir, signals):

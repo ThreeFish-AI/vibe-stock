@@ -10,9 +10,13 @@
   同日重跑追加 `vN` 版本，与上一个有内容版本逐字相同的节写「同 vK。」去冗余；快照模式隔离到
   `_snapshot/<code>/`。
 - 时间线索引：各股 `index.md`（版本、信号→动作、置信、登记价、T+1/3/5/10 后验）与
-  总览 `reports/index.md`，由 signals.json 派生，report / postmortem 后整体重建。
+  总览 `reports/index.md`，由 signals.json 派生，report / postmortem 后整体重建；
+  postmortem 侧重建排在台账落盘之后且失败只告警——派生视图故障不吞后验归因。
 - `diagnose.py migrate-reports [--apply]`：平铺旧报告一次性迁入分级布局（默认
   dry-run；CAS + `signals.json.bak-<ts>` 备份；原文件归档 `_legacy/` 不删；可重入）。
+  认领容错：缺/非 ISO created_at 跳过不改写、带时区形态转本地 naive、mtime 漂移
+  （备份恢复/编辑器重存）回退按最后运行归属内容版并列 anomaly、非规范港码信号
+  （含 evaluated 等非 pending 态）一律告警；报告文件解码失败按文件归因中止。
 - 信号新增 `report_version`（单日文件内版本号）；迁移还原的丢失版带 `report_lost`。
 
 ### Changed
@@ -23,23 +27,18 @@
 ### Fixed
 
 - 同日重跑覆盖报告，导致多条信号指向同一份被覆盖的文件（信号→报告指针失真）。
-- report 身份闸门此前只校验 evidence：verdict 现绑定 `stock_code`（adjudicate 产出），
-  `.vs/` 残留他票裁决会被拒（exit 2 零写入）。
-- 对立失效比对按读时归一（港股补 5 位）：存量 4 位港码旧 pending 信号同样失效互通。
-- 证据块 note 与 rationale 同口径压单行，防多行文本伪造节头/拆坏表格。
-- migrate-reports 容错：认领信号缺可用 created_at 跳过不改写（原为裸崩栈）；文件
-  mtime 漂移时回退按最后运行归属内容版并列 anomaly（原会把当日全部信号误标丢失）；
-  非规范港码信号（含 evaluated 等非 pending 态）一律 dry-run 告警。
-- postmortem 时间线索引重建挪到台账落盘之后且失败只告警：派生视图故障不再吞掉
-  本次后验归因。
 - 港股代码归一：`0700.HK` / `hk0700` 原得 `0700`、`hk00700` 得 `00700`，同一标的
   分裂成两个身份；`detect_market` 统一补 5 位（腾讯资讯 `hk0700` 拼码顺带修正）。
+  对立失效比对同步按读时归一：存量 4 位港码旧 pending 信号与 5 位新信号互通。
 - signals.json 解析失败被静默当空列表，下次 report 覆盖全部历史：改严格加载 +
   原子写，损坏时 report exit 2 且零写入。
-- report 写盘前增加身份交叉校验（证据身份须与 `--stock` 一致，防 `.vs/` 残留）与
-  代码形态闸门（防路径穿越）。
-- 报告文件日期、版本时刻与信号 `created_at` 同取一次 now（跨零点不再分裂）。
-- rationale 压单行，防多行文本拆坏 bullet 或伪造单日文件版本头。
+- report 写盘前无任何身份校验：`.vs/` 残留上一只票的证据/裁决会被写进当前股票
+  报告并登记错误归因信号。现三方交叉校验（证据身份 ↔ `--stock`、verdict 绑定
+  `stock_code`）不符即 exit 2 零写入，另加代码形态闸门防路径穿越。
+- 报告文件日期与信号 `created_at` 各取各的时钟，跨零点运行会对不上：现同取一次
+  now（文件日期、版本时刻、created_at 三处一致）。
+- rationale 与证据块 note 原样内插：多行文本会拆坏 bullet、伪造单日文件的
+  版本/节头，现统一压单行。
 
 ### Notes
 
