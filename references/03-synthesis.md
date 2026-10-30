@@ -18,8 +18,8 @@
   置信 ≥0.70 就被映射成 buy，单条 ≥0.9 意见可无视全板产出 strong_buy）；
   纯加权均值 Σ(权重ᵢ×档位值ᵢ)/Σ权重ᵢ 对置信等比缩放不变，两条 0.1 置信
   strong_sell 也出 strong_sell——绝对置信必须衰减幅度：strong_buy 板进
-  strong_buy 须平均置信 ≥0.75、sell 板进 sell 须 >0.5、strong_sell 板进
-  strong_sell 须 >0.75（恰 0.5 时 score=2.5 落 hold；与 CONFIDENCE_GATE
+  strong_buy 须平均置信 ≥0.75、sell 板进 sell 须 >0.5（恰 0.5 时 score=2.5
+  落 hold）、strong_sell 板进 strong_sell 须 >0.75（与 CONFIDENCE_GATE
   同量纲）；坑位：strong_* 板进相邻档门槛减半——strong_buy 板 ≥0.25 即
   聚合 buy、strong_sell 板 >0.25 即聚合 sell。
 - 聚合置信：只取与聚合信号同方向族（买入族 strong_buy/buy · hold · 卖出族
