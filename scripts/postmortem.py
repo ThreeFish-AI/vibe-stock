@@ -8,6 +8,7 @@
   - 每个判定结果按信号记录时的 sources 归因，累计进 ledger.json（wins/losses）。
   - 绩效因子与画像升降档由 adjudicate.performance_factor / profile 消费：
     命中率 ≥60% 且样本 ≥10 → promote；≤40% 且样本 ≥10 → demote；否则 observe。
+  - 评估后重建 reports/ 时间线索引（archive.rebuild_indexes），T+n 结果进 index.md。
 
 用法：
   uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance \
@@ -23,6 +24,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import archive as ar  # noqa: E402
 import fetch as fx  # noqa: E402
 
 STATE_DIR = os.path.expanduser("~/.vibe-stock")
@@ -150,6 +152,12 @@ def run(args):
     _save(SIGNALS, signals)
     ledger = merge_ledger(_load(LEDGER, {}), delta)
     _save(LEDGER, ledger)
+    try:  # 派生视图放最后：挂了不吞台账（事实源已落盘）；坏索引的
+        # UnicodeDecodeError ⊂ ValueError 一并只告警
+        ar.rebuild_indexes(os.path.join(STATE_DIR, "reports"), signals,
+                           ar.load_names(STATE_DIR))
+    except (OSError, ValueError) as e:
+        print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s" % e)
     print("评估完成；台账与绩效已更新（%s）" % LEDGER)
     for src, d in delta.items():
         print("  归因 %s：+%d 胜 / +%d 负" % (src, d["wins"], d["losses"]))
@@ -180,6 +188,11 @@ def selftest():
     assert sig_buy["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral")
     assert sig_watch["evaluated"]["1"]["outcome"] == "observed", "watch 只观察"
     assert sig_buy["status"] in ("evaluated", "observed"), "全部 horizon 到期应收口"
+    # 时间线索引吃到后验结果：T+1 格带涨跌幅与判定
+    row = [ln for ln in ar.render_stock_index([sig_buy], "cn", "000001").splitlines()
+           if ln.startswith("| 2026-10-01")][0]
+    assert "%+.1f%% %s" % ((sig_buy["evaluated"]["1"]["close"] / 100.0 - 1) * 100,
+                           sig_buy["evaluated"]["1"]["outcome"]) in row, row
     assert delta["strategy:bull_trend"]["wins"] + \
         delta["strategy:bull_trend"]["losses"] <= 4
     ledger = merge_ledger({}, delta)
@@ -209,7 +222,7 @@ def selftest():
     evaluate_signals([s4], {"000001": bars_g})
     assert s4["evaluated"] == {} and s4["status"] == "pending", \
         "信号日新于最新 bar 属未到期，不得提前评估"
-    print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动 · 非交易日回退")
+    print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动 · 非交易日回退 · 索引后验格")
     print("SELFTEST PASSED ✔")
 
 
