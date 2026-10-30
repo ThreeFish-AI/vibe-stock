@@ -3,10 +3,11 @@
 本文件只登记版本级变化；条目遵循 Keep a Changelog、[SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
 > 版本序列说明（2026-10-30 起）：项目未到稳定发布，版本号统一回归 **0.0.x** patch 序列；
-> 存量 0.1.0–0.2.1 六版已按发布顺序一一重编号为 0.0.1–0.0.6（仅改 header，条目正文维持原样），
+> 存量 0.1.0–0.2.1 六版已按发布顺序一一重编号为 0.0.1–0.0.6，合并时又把并行合入的
+> 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
-## [0.0.7] - 2026-10-30
+## [0.0.9] - 2026-10-30
 
 ### Added
 
@@ -53,9 +54,82 @@
 - references/01-evidence.md 六块表/扩展块表/16 簇/市场能力表/南向 T-1/forecast
   制度差异/分位表规约句+backlog 八项（qt HK 快照/HKEXnews/CCASS/卖空/回购
   金额/HK 行业/Reverse DCF/theses）；PIPELINE 港股速查重写；README 港股覆盖节。
+## [0.0.8] - 2026-10-30
 
+### Fixed
+
+- postmortem 未知市场跳过守卫 + `--stock` 过滤生效（RSI-20261030-04）：原
+  `run()` 把全部 pending 信号的 (market, code) 去重后无条件取日 K，market 不在
+  取数链（如快照兜底登记的 `?`）一条即 `CHAINS` KeyError 崩溃、全量后验被
+  阻塞；且 `--stock` 实参从未被消费（全量扫描，参数装饰性）。现无有效
+  market/code 的记录逐条打印跳过诊断（id/code/market 实际值）、保持 pending
+  不动、不借同 code 已知市场的日 K 代评，其余信号照常评估；`--stock` 经
+  detect_market 归一后只评该 code 的 pending（识别失败如实报错退出、无匹配
+  如实打印且不写文件），缺省保持全量。收尾口径同收紧——全部跳过/未到期时
+  如实打印「本次无台账变动」，不落「已更新」失实陈述、不空写台账文件。
+- 快照模式登记市场推导（RSI-20261030-04）：原 `register_signal` 对 meta 无
+  market 的 evidence（快照模式真实路径——fetch 快照分支不判市场）一律兜底
+  `?`，正是后验坏记录的源头；现可推导时经 detect_market 从 meta 的 code/symbol
+  推 (market, 归一 code) 成对登记（同源成对防「market 已知而 code 仍是原始
+  symbol 形态、取不到日 K」），推不出维持 `?`（与 postmortem 跳过守卫构成双层
+  防线）；坑位——合成快照（evals 演示 fixture）勿跑 report 登记信号，推得市场
+  后后验将以真实日 K 评虚构基准价、台账遭污染。对立失效匹配对 market 不在取数链的
+  存量（`?` + 原始 symbol 形态 code）记录同经 detect_market 归一比对（推不出维持
+  不匹配），防归一身份切换后同股对立记录漏失效沦为僵尸 pending。
+- 与 0.2.2 报告归档层的合并裁决：快照登记信号带 `snapshot: true` 稀疏标记——
+  市场推导后身份虽为 (cn/hk, 归一码)，报告路由不随推导变（仍 `_snapshot/`），
+  实盘时间线索引与总览显式排除快照信号（0.2.2 前以 market='?' 天然排除，
+  推导后须显式排除，防合成信号混入实盘索引）。
+## [0.0.7] - 2026-10-30
+
+### Added
+
+- `scripts/archive.py` 报告归档层：`reports/<code>.<market>/<date>.md` 一股一日一文件，
+  同日重跑追加 `vN` 版本，与上一个有内容版本逐字相同的节写「同 vK。」去冗余；快照模式隔离到
+  `_snapshot/<code>/`。
+- 时间线索引：各股 `index.md`（版本、信号→动作、置信、登记价、T+1/3/5/10 后验）与
+  总览 `reports/index.md`，由 signals.json 派生，report / postmortem 后整体重建；
+  postmortem 侧重建排在台账落盘之后且失败只告警——派生视图故障不吞后验归因。
+- `diagnose.py migrate-reports [--apply]`：平铺旧报告一次性迁入分级布局（默认
+  dry-run；CAS + `signals.json.bak-<ts>` 备份；原文件归档 `_legacy/` 不删；可重入）。
+  认领容错：缺/非 ISO created_at 跳过不改写、带时区形态转本地 naive、mtime 漂移
+  （备份恢复/编辑器重存）回退按最后运行归属内容版并列 anomaly、非规范港码信号
+  （含 evaluated 等非 pending 态）一律告警；报告文件解码失败按文件归因中止、
+  零节头文件（非工具产物/截断）conflict 原样跳过。
+- 信号新增 `report_version`（单日文件内版本号）；迁移还原的丢失版带 `report_lost`。
+- 时间线索引增「股票名称」列（信号 `stock_name`：A 股取 qt 全量快照、港股取 qt
+  紧凑快照 `s_hk<code>`——紧凑位序三市一致 f[1]=名称，2026-10-30 实测钉住；
+  report 另写穿 `names.json` 显示名缓存，存量信号（早于本功能的）经缓存显名；
+  解析顺序组内最新非空→缓存→`—`）。
+
+### Changed
+
+- 报告落盘从平铺 `reports/<code>-<date>.md` 改为分级布局（规则见 references/04
+  「落盘与跟踪」）；`report_id` 仍为日级 `<code>-<date>`。
+
+### Fixed
+
+- 同日重跑覆盖报告，导致多条信号指向同一份被覆盖的文件（信号→报告指针失真）。
+- 港股代码归一：`0700.HK` / `hk0700` 原得 `0700`、`hk00700` 得 `00700`，同一标的
+  分裂成两个身份；`detect_market` 统一补 5 位（腾讯资讯 `hk0700` 拼码顺带修正）。
+  对立失效比对同步按读时归一：存量 4 位港码旧 pending 信号与 5 位新信号、
+  快照存量后缀形态（`0700.HK` / `hk00700`）与新归一码均互通。
+- signals.json 解析失败被静默当空列表，下次 report 覆盖全部历史：改严格加载 +
+  原子写，损坏时 report exit 2 且零写入。
+- report 写盘前无任何身份校验：`.vs/` 残留上一只票的证据/裁决会被写进当前股票
+  报告并登记错误归因信号。现三方交叉校验（证据身份 ↔ `--stock`、verdict 绑定
+  `stock_code`）不符即 exit 2 零写入，另加代码形态闸门防路径穿越。
+- 报告文件日期与信号 `created_at` 各取各的时钟，跨零点运行会对不上：现同取一次
+  now（文件日期、版本时刻、created_at 三处一致）。
+- 证据块 note 原样内插进报告表格：多行会拆坏表格、伪造单日文件的版本/
+  节头，现折单行（rationale 折单行与剥哨兵已由 0.2.1 交付）。
+
+### Notes
+
+- 升级后先跑 `migrate-reports` 预览再 `--apply`；旧平铺路径的外部链接以迁移打印的
+  映射为准。601888 2026-10-28 前两次运行的报告在 0.2.2 之前已被覆盖，迁移后如实
+  标为丢失版。
 ## [0.0.6] - 2026-10-30
-
 ### Fixed
 
 - 报告风险/利好/附录逐条接回意见与 risk.json 的 rationale

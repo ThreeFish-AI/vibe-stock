@@ -123,8 +123,8 @@ def detect_market(symbol):
     if re.fullmatch(r"(sh|sz|bj)?\d{6}", s):
         return "cn", re.sub(r"^(sh|sz|bj)", "", s)
     m = re.fullmatch(r"(?:hk)?(\d{4,5})(?:\.hk)?", s)
-    if m:
-        return "hk", m.group(1)
+    if m:  # 港股统一 5 位（0700.HK→00700）：报告目录与信号身份只认一个形态
+        return "hk", m.group(1).zfill(5)
     raise SystemExit("无法识别市场，示例：600519 / 0601888 / sz000001 / bj830799 / hk00700 / 0700.HK")
 
 
@@ -134,6 +134,18 @@ def cn_exchange(code):
     if code.startswith(("43", "83", "87", "92")):
         return "bj"
     return "sh" if code.startswith(("6", "9", "5")) else "sz"
+
+
+def meta_stock_code(meta):
+    """evidence.meta → (代码身份, 可识别)。代码身份唯一推导处：meta.code →
+    meta.symbol 经 detect_market 归一（港股统一 5 位）；不可识别返回
+    (原始符号去空白, False)。诊断侧闸门用原串比对、裁决侧据此回 None——
+    消费语义由调用方定，推导只此一份（diagnose / adjudicate 共用）。"""
+    raw = str((meta or {}).get("code") or (meta or {}).get("symbol") or "")
+    try:
+        return detect_market(raw)[1], True
+    except SystemExit:
+        return raw.strip(), False
 
 
 class NotSupportedSymbol(ValueError):
@@ -264,13 +276,15 @@ def _parse_qt_s(text):
 
 def _qt_batch(market, code, st, now):
     """qt 簇取齐快照数据：个股全量（quote 叠加/估值/股本消费，仅 A 股——港股
-    全量快照位序未验证，不取）+ 指数紧凑（market 消费）。
-    qt 簇熔断/失败返回 (None, None)，各消费方自行降级。"""
+    全量快照位序未验证，不取）+ 指数紧凑（market 消费）+ 个股名称（cn 取自
+    全量快照；hk 走紧凑快照 s_hk<code>，紧凑位序三市一致 f[1]=名称，
+    2026-10-30 实测钉住）。qt 簇熔断/失败返回 (None, None, None)，各消费方
+    自行降级。"""
     ok, why = source_allowed(st, CLUSTERS["qt-snap"], now)
     if not ok:
-        return None, None
+        return None, None, None
     try:
-        full = None
+        full, name = None, None
         if market == "cn":
             sym = cn_exchange(code) + code
             try:
@@ -279,14 +293,23 @@ def _qt_batch(market, code, st, now):
                 # 标的不在 qt 覆盖：能力边界拒绝非源故障，不计熔断（quote 叠加/
                 # 股本/估值消费方自行降级），指数快照照取
                 pass
+            name = (full or {}).get("name")
         idx = ("s_sh000001,s_sz399001,s_sz399006,s_sh000300,s_sh000688"
                if market == "cn" else "s_hkHSI,s_hkHSCEI")
         indices = _parse_qt_s(_http_text("https://qt.gtimg.cn/q=" + idx))
+        if market == "hk":
+            # 名称是纯增益数据：失败不连坐指数/market 块、不计熔断（同主机
+            # 健康度由同批在先的指数请求如实记录）
+            try:
+                rows = _parse_qt_s(_http_text("https://qt.gtimg.cn/q=s_hk" + code))
+                name = rows[0]["name"] if rows else None
+            except Exception:
+                name = None
         record(st, CLUSTERS["qt-snap"], True, "", now)
-        return full, indices
+        return full, indices, name
     except Exception as e:
         record(st, CLUSTERS["qt-snap"], False, str(e), now)
-        return None, None
+        return None, None, None
 
 
 def _sina_json(text):
@@ -1828,7 +1851,7 @@ def fetch(symbol, snapshot_dir=None):
         bars, bars_state, bars_src, tried = fetch_daily_bars(market, code, st, now)
         session = session_phase(market, bars[-1]["date"] if bars else None,
                                 dt.datetime.fromtimestamp(now, TZ_CN))
-        qt_full, qt_indices = _qt_batch(market, code, st, now)
+        qt_full, qt_indices, qt_name = _qt_batch(market, code, st, now)
         save_fetch_state(st)
         blocks = {"daily_bars": {"state": bars_state, "source": bars_src,
                                  "tried": tried,
@@ -1860,6 +1883,8 @@ def fetch(symbol, snapshot_dir=None):
                 "price") else "derived:" + bars_src
             if src_note:
                 q["note"] = src_note
+            if qt_name:  # 名称进 quote 块（行情面数据；report 侧消费进信号/索引）
+                q["name"] = qt_name
             blocks["quote"] = {"state": ("available" if bars_state == "available"
                                          else bars_state), "source": qsrc, **q}
             blocks["technical"] = {"state": ("available" if bars_state == "available"
