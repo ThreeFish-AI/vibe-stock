@@ -132,12 +132,32 @@ def profile_report(ledger):
 
 
 def run(args):
+    # --stock 先归一：识别失败 detect_market 以 SystemExit 如实报错退出（不碰状态文件）
+    want = fx.detect_market(args.stock) if args.stock else None
     signals = _load(SIGNALS, [])
     if not signals:
         print("signals.json 为空：先跑 diagnose.py report 登记信号")
         return 0
-    symbols = sorted({(s["market"], s["code"]) for s in signals
-                      if s.get("status") == "pending"})
+    pending = [s for s in signals if s.get("status") == "pending"]
+    if want:  # 只评该股；同码未知市场记录留给下方守卫如实报跳过，不静默吞
+        pending = [s for s in pending if s.get("code") == want[1] and
+                   (s.get("market") == want[0] or s.get("market") not in fx.CHAINS)]
+        if not pending:
+            print("无 %s:%s 的 pending 信号，无可评估项" % want)
+            return 0
+    evaluable = []
+    for s in pending:  # 不可取数的坏记录（如快照兜底 market='?'）跳过并保持 pending，不阻塞其余后验
+        why = []
+        if s.get("market") not in fx.CHAINS:
+            why.append("market=%r 不在取数链（%s）" % (s.get("market"), "/".join(sorted(fx.CHAINS))))
+        if not s.get("code"):
+            why.append("缺 code")
+        if why:
+            print("跳过 %s（code=%s）：%s；保持 pending，人工修正后重跑"
+                  % (s.get("id"), s.get("code"), "、".join(why)))
+        else:
+            evaluable.append(s)
+    symbols = sorted({(s["market"], s["code"]) for s in evaluable})
     bars_by_code = {}
     for market, code in symbols:
         st = fx.load_fetch_state()
@@ -146,7 +166,7 @@ def run(args):
         fx.save_fetch_state(st)
         if bars:
             bars_by_code[code] = bars
-    delta = evaluate_signals(signals, bars_by_code)
+    delta = evaluate_signals(evaluable, bars_by_code)
     _save(SIGNALS, signals)
     ledger = merge_ledger(_load(LEDGER, {}), delta)
     _save(LEDGER, ledger)
@@ -195,6 +215,90 @@ def selftest():
           "horizons": [1, 3, 5, 10], "evaluated": {}}
     evaluate_signals([s2], {"000001": bars})
     assert s2["evaluated"] == {} and s2["status"] == "pending"
+    # run() 市场守卫 + --stock 过滤（零网络：fetch_state 与日 K 全走桩替，
+    # CHAINS[market] 查表在真实 fetch_daily_bars 内执行——守卫回退即 KeyError 复发）
+    import argparse
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        global SIGNALS, LEDGER
+        _old_paths = (SIGNALS, LEDGER, fx.STATE_DIR, fx.FETCH_STATE)
+        _old_fns = (fx.load_fetch_state, fx.save_fetch_state, dict(fx.DAILY_FETCHERS))
+        SIGNALS, LEDGER = os.path.join(td, "signals.json"), os.path.join(td, "ledger.json")
+        fx.STATE_DIR, fx.FETCH_STATE = td, os.path.join(td, "fetch_state.json")
+        fx.load_fetch_state = lambda: {"breakers": {}, "cooldowns": {}}
+        fx.save_fetch_state = lambda st: None
+        rbars = [{"date": "2026-10-%02d" % d, "open": 1, "high": 1, "low": 1,
+                  "close": 100.0 + d, "volume": 1} for d in range(1, 31)]
+        calls = []
+        for k in list(fx.DAILY_FETCHERS):
+            fx.DAILY_FETCHERS[k] = lambda m, c, _k=k: (calls.append((m, c)), rbars)[1]
+        def _mk(i, market, code, action):
+            return {"id": i, "market": market, "code": code, "action": action,
+                    "horizons": [1], "date": "2026-10-01", "close_at_signal": 102.0,
+                    "status": "pending", "evaluated": {}, "sources": ["strategy:demo"]}
+        def _state():
+            return [_mk("x1", "?", "000001", "buy"), _mk("n1", None, "000002", "buy"),
+                    _mk("c1", "cn", "000001", "buy"), _mk("c2", "cn", "600519", "reduce")]
+        try:
+            _save(SIGNALS, _state())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert run(argparse.Namespace(stock=None)) == 0
+            txt = out.getvalue()
+            assert "跳过 x1" in txt and "跳过 n1" in txt, txt
+            assert "market='?'" in txt and "market=None" in txt and "缺 code" not in txt
+            assert sorted(calls) == [("cn", "000001"), ("cn", "600519")], calls
+            sigs = {s["id"]: s for s in _load(SIGNALS, [])}
+            assert sigs["x1"]["status"] == "pending" and sigs["x1"]["evaluated"] == {}, \
+                "坏市场记录须保持 pending 不动（即便与可评估记录同 code）"
+            assert sigs["n1"]["status"] == "pending" and sigs["n1"]["evaluated"] == {}
+            assert "1" in sigs["c1"]["evaluated"] and "1" in sigs["c2"]["evaluated"]
+            assert sigs["c1"]["status"] == "observed" and sigs["c2"]["status"] == "observed"
+            # --stock 过滤：归一（sh600519→cn:600519）后只评该股；未入过滤集的坏记录不报
+            calls.clear()
+            _save(SIGNALS, _state())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert run(argparse.Namespace(stock="sh600519")) == 0
+            txt2 = out.getvalue()
+            assert calls == [("cn", "600519")], calls
+            sigs = {s["id"]: s for s in _load(SIGNALS, [])}
+            assert "1" in sigs["c2"]["evaluated"] and sigs["c2"]["status"] == "observed", \
+                "--stock 过滤只评目标股"
+            assert sigs["c1"]["status"] == "pending" and sigs["c1"]["evaluated"] == {}, \
+                "--stock 过滤下未指定股票的 pending 信号不得被评估"
+            assert "跳过" not in txt2, "过滤集外的坏记录不报跳过"
+            # --stock 命中 + 同码坏记录：坏记录走守卫报跳过、好记录照常评估
+            calls.clear()
+            _save(SIGNALS, _state())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert run(argparse.Namespace(stock="000001")) == 0
+            sigs = {s["id"]: s for s in _load(SIGNALS, [])}
+            assert "1" in sigs["c1"]["evaluated"] and sigs["c1"]["status"] == "observed"
+            assert sigs["x1"]["status"] == "pending" and sigs["x1"]["evaluated"] == {}
+            assert "跳过 x1" in out.getvalue()
+            # 无匹配 / 识别失败：如实报、不取数
+            calls.clear()
+            _save(SIGNALS, _state())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert run(argparse.Namespace(stock="hk01888")) == 0
+            assert "无 hk:01888 的 pending" in out.getvalue() and calls == []
+            try:
+                run(argparse.Namespace(stock="abc"))
+                raise AssertionError("--stock 不可识别应 SystemExit 报错退出")
+            except SystemExit:
+                pass
+            assert calls == []
+        finally:
+            SIGNALS, LEDGER = _old_paths[:2]
+            fx.STATE_DIR, fx.FETCH_STATE = _old_paths[2:]
+            (fx.load_fetch_state, fx.save_fetch_state) = _old_fns[:2]
+            fx.DAILY_FETCHERS.clear()
+            fx.DAILY_FETCHERS.update(_old_fns[2])
+    print("  ok run() 守卫：未知市场跳过不阻塞 · --stock 过滤/归一/无匹配/识别失败")
     # 非交易日登记信号（周末 qt 静态快照使 date 落在非交易日）：回退 ≤ 信号日
     # 最近 bar 评估，不静默永久失配；信号日新于最新 bar 仍属未到期跳过
     bars_g = [{"date": "2026-10-%02d" % d, "open": 1.0, "high": 1.0, "low": 1.0,
@@ -216,7 +320,7 @@ def selftest():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--selftest", action="store_true")
-    ap.add_argument("--stock", help="提示性参数：实际按 signals.json 待评估项取数")
+    ap.add_argument("--stock", help="只评该股的 pending 信号（经 detect_market 归一）；不给则全量")
     args = ap.parse_args()
     if args.selftest:
         selftest()
