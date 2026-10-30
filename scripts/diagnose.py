@@ -84,8 +84,8 @@ def render_ext_blocks(lines, b):
         lines.append("")
         if "hold_date" in s:
             # 港股：南向持股是唯一日更个股资金面信号（T-1 披露口径见 note）
-            def _yi(v):  # HKD 元 → 亿
-                return "—" if v is None else round(v / 1e8, 2)
+            def _yi(v):  # HKD 元 → 亿（NaN 同归 —，契约对齐 _nd）
+                return "—" if v is None or v != v else round(v / 1e8, 2)
             lines.append("## 资金流·南向持股（%s，%s；%s）" % (
                 mf.get("state"), mf.get("source"), mf.get("note", "")))
             lines.append("持股 %s 股（占总股本 %s%%）· 当日净增持 %s 股"
@@ -139,10 +139,19 @@ def render_ext_blocks(lines, b):
                                            _nd(c.get("target_max")))
                    if c.get("target_min") is not None
                    or c.get("target_max") is not None else "")
-            lines.append("评级共识(近六月)：%s 家 = 买入 %s/增持 %s/中性 %s/减持 %s%s"
-                         % (_nd(c.get("org_num")), _nd(c.get("buy")),
-                            _nd(c.get("add")), _nd(c.get("neutral")),
-                            c.get("reduce") or 0, tgt))
+            rd = c.get("rating_dist")
+            if rd:
+                # 港股双源共识按 rating_dist 分桶直出（etnet 券商原语/yf 四档）；
+                # A 股 buy/add/... 键不存在，硬套旧行会渲染「减持 0」失实
+                lines.append("评级共识(近六月)：%s 家 = %s%s" % (
+                    _nd(c.get("org_num")),
+                    " / ".join("%s %s" % (k, _nd(v)) for k, v in rd.items()),
+                    tgt))
+            else:
+                lines.append("评级共识(近六月)：%s 家 = 买入 %s/增持 %s/中性 %s/减持 %s%s"
+                             % (_nd(c.get("org_num")), _nd(c.get("buy")),
+                                _nd(c.get("add")), _nd(c.get("neutral")),
+                                c.get("reduce") or 0, tgt))
             if any(c.get(k) is not None for k in
                    ("target_median", "target_mean", "dispersion")):
                 # 目标价统计（港股双源 / A 股扩展）：离散度=(max−min)/中位，
@@ -1414,6 +1423,13 @@ def selftest():
                getattr(fx, "fetch_%s" % name)("hk", "00700", st_hk, t0))
         assert blk["state"] == "not_supported" and blk.get("note"), (name, blk)
     assert not st_hk["breakers"], "能力边界拒绝不得计任何簇熔断"
+    # CAPS↔分派表一致性钉：notices/fundamentals 的市场分派表必须与 MARKET_CAPS
+    # 对齐——两套机制并存，单改一侧会让守卫与能力表互相矛盾（守卫永不触达）
+    assert set(fx.NOTICES_CHAINS) == {m for m, caps in fx.MARKET_CAPS.items()
+                                      if "notices" in caps}, fx.NOTICES_CHAINS
+    assert set(fx.FUNDAMENTALS_FETCHERS) == {
+        m for m, caps in fx.MARKET_CAPS.items()
+        if "fundamentals" in caps}, fx.FUNDAMENTALS_FETCHERS
 
     class _RowDF:
         """迷你 DataFrame 桩：dict 行 + head/iterrows/iloc（etnet/HKF10 表）。"""
@@ -1422,7 +1438,7 @@ def selftest():
             self._rows = rows
 
         def head(self, n):
-            return self
+            return _RowDF(self._rows[:n])  # 对齐 pandas 截断语义（非原样返回）
 
         def __len__(self):
             return len(self._rows)
@@ -1486,7 +1502,11 @@ def selftest():
         {"财政年度": 2027, "每股盈利": 120.0, "证券商": "高盛", "评级": "买入",
          "目标价": 44.0, "更新日期": "2026-10-20"},  # 高盛取最新一条
         {"财政年度": 2026, "每股盈利": 80.0, "证券商": "麦格理", "评级": "优于大市",
-         "目标价": 27.0, "更新日期": "2026-08-19"}]
+         "目标价": 27.0, "更新日期": "2026-08-19"},
+        {"财政年度": 2026, "每股盈利": 85.0, "证券商": "花旗", "评级": "买入",
+         "目标价": 36.0, "更新日期": "2026-09-01"},
+        {"财政年度": 2026, "每股盈利": None, "证券商": "美银", "评级": "中性",
+         "目标价": float("nan"), "更新日期": "2026-10-10"}]  # NaN 目标价常态缺数
     _et_forecast = [{"财政年度": 2026, "每股盈利/每股亏损": 94.0},
                     {"财政年度": 2027, "每股盈利/每股亏损": 116.0}]
     sys.modules["akshare"] = types.SimpleNamespace(
@@ -1505,6 +1525,7 @@ def selftest():
         def __init__(self, rows, index=None):
             self._rows = rows
             self.index = index or list(range(len(rows)))
+            self.columns = list(rows[0].keys()) if rows else []
 
         def __len__(self):
             return len(self._rows)
@@ -1558,10 +1579,13 @@ def selftest():
         assert rh["state"] == "available" and \
             rh["source"] == "etnet+yf-analyst", rh
         c = rh["consensus"]
-        # 高盛去重取最新 44.0 → 目标集 {41.6, 44.0, 27.0}
+        # 高盛去重取最新 44.0；花旗 36.0 凑偶数、美银 NaN 目标价不进统计
+        # → 目标集 {27.0, 36.0, 41.6, 44.0}，真中位=均值 (36.0+41.6)/2
         assert c["org_num"] == 17 and c["target_min"] == 27.0 and \
             c["target_max"] == 44.0, c
-        assert c["dispersion"] == round((44.0 - 27.0) / 41.6, 2), c
+        assert c["target_median"] == 38.8 and c["target_mean"] == 37.15, c
+        assert c["dispersion"] == round((44.0 - 27.0) / 38.8, 2), c
+        assert c["rating_dist"] == {"买入": 3, "优于大市": 1, "中性": 1}, c
         assert c["eps_by_year"][0] == {"year": 2026, "eps": 0.94, "mark": "E"}
         assert c["eps_revision_90d"]["direction"] == "down" and \
             c["eps_revision_90d"]["currency"] == "CNY", c
@@ -1579,7 +1603,73 @@ def selftest():
             Ticker=lambda sym: (_ for _ in ()).throw(RuntimeError("yf down")))
         rh3 = fx.fetch_research("hk", "01810", {"breakers": {}, "cooldowns": {}},
                                 t0)
-        assert rh3["state"] == "fetch_failed", rh3
+        assert rh3["state"] == "fetch_failed" and \
+            rh3["note"] == "no_consensus" and \
+            "etnet:概览空" in rh3["tried"], rh3
+        # eps_trend 无 currency 列（Yahoo 未回 epsTrendCurrency / 旧版 yfinance
+        # 形态）不得 KeyERROR 连坐 yf 簇——currency=None 透传
+        class _YfTickerNoCur(_YfTicker):
+            @property
+            def eps_trend(self):
+                return _YfDF([{"current": 0.939, "7daysAgo": 0.939,
+                               "30daysAgo": 0.948, "60daysAgo": 0.949,
+                               "90daysAgo": 1.090}], index=["0y"])
+        sys.modules["yfinance"] = types.SimpleNamespace(Ticker=_YfTickerNoCur)
+        rh4 = fx.fetch_research("hk", "01810",
+                                {"breakers": {}, "cooldowns": {}}, t0)
+        assert rh4["state"] == "fallback" and \
+            rh4["consensus"]["eps_revision_90d"]["currency"] is None, rh4
+    finally:
+        del sys.modules["akshare"]
+        del sys.modules["yfinance"]
+
+    # HKF10 未覆盖钉：datacenter result=null 经 akshare 抛 TypeError——转
+    # NotSupportedSymbol（标的级无覆盖），不得记 em_datacenter 共享簇失败
+    # （连坐 A 股 dc 块），fundamentals 换链、valuation A 路静默让位 B 路
+    sys.modules["akshare"] = types.SimpleNamespace(
+        stock_financial_hk_analysis_indicator_em=lambda symbol, indicator:
+            (_ for _ in ()).throw(TypeError(
+                "'NoneType' object is not subscriptable")))
+    try:
+        st_ns = {"breakers": {}, "cooldowns": {}}
+        fh_ns = fx.fetch_fundamentals("hk", "08101", st_ns, t0)
+        assert fh_ns["state"] == "fetch_failed" and \
+            ("em-fin-hk", "not_supported") in fh_ns["tried"], fh_ns
+        # record(True) 会留 fails=0 条目：断言零失败计数（非空字典）
+        assert all(b["fails"] == 0 for b in st_ns["breakers"].values()), \
+            st_ns["breakers"]
+    finally:
+        del sys.modules["akshare"]
+    real_snap = fx._hk_indicator_snapshot
+
+    def _ns_snap(code):
+        raise fx.NotSupportedSymbol("no coverage")
+    fx._hk_indicator_snapshot = _ns_snap
+    real_bp2 = fx._baidu_percentile
+    fx._baidu_percentile = lambda code, ind, market="cn": (40.0, [], None)
+    try:
+        st_ns2 = {"breakers": {}, "cooldowns": {}}
+        va_ns = fx.fetch_valuation("hk", "08101", st_ns2, t0, None)
+        assert va_ns["state"] == "fallback" and \
+            all(b["fails"] == 0 for b in st_ns2["breakers"].values()), \
+            (va_ns, st_ns2["breakers"])
+    finally:
+        fx._hk_indicator_snapshot = real_snap
+        fx._baidu_percentile = real_bp2
+
+    # etnet 无覆盖钉：空壳页 akshare 解包异常（No tables found / list.remove
+    # 两形态）归零覆盖非源故障——yf 兜底接手，不记 etnet 簇失败
+    sys.modules["akshare"] = types.SimpleNamespace(
+        stock_hk_profit_forecast_et=lambda symbol, indicator:
+            (_ for _ in ()).throw(ValueError("No tables found")))
+    sys.modules["yfinance"] = types.SimpleNamespace(Ticker=_YfTicker)
+    try:
+        st_nc = {"breakers": {}, "cooldowns": {}}
+        rn = fx.fetch_research("hk", "08101", st_nc, t0)
+        assert rn["state"] == "fallback" and \
+            "etnet 无该标的覆盖" in rn.get("note", ""), rn
+        assert all(b["fails"] == 0 for b in st_nc["breakers"].values()), \
+            st_nc["breakers"]
     finally:
         del sys.modules["akshare"]
         del sys.modules["yfinance"]
@@ -1589,7 +1679,7 @@ def selftest():
     _sb_real = fx._dc_rows
 
     def _sb_rows(report_name, code, st, now, src_key, page_size=20, sort="",
-                 filter_str=None, base_url=None):
+                 filter_str=None):
         assert report_name == "RPT_MUTUAL_STOCK_HOLDRANKS" and src_key == "dc-hsgt"
         assert 'MUTUAL_TYPE="002"' in (filter_str or ""), filter_str
         assert 'SECUCODE="01810.HK"' in (filter_str or ""), \
@@ -1605,7 +1695,7 @@ def selftest():
         sb = fx.fetch_moneyflow("hk", "01810", {"breakers": {}, "cooldowns": {}},
                                 t0)
         assert sb["state"] == "available" and \
-            sb["note"] == "南向 T-1 披露口径（HOLD_DATE=%s）" % yesterday, sb
+            sb["note"] == "南向 T-1 披露口径（披露日 %s）" % yesterday, sb
         assert sb["summary"]["hold_pct"] == 19.44 and \
             sb["summary"]["currency"] == "HKD", sb["summary"]
         _SB_ROWS[0]["TRADE_DATE"] = (dt.date.today()
@@ -1623,7 +1713,7 @@ def selftest():
     # A 股 eps_by_year 零调用回收钉：RPT_WEB_RESPREDICT 的 EPS/YEAR/MARK 三联
     # 键进 consensus；无 EPS 字段时 eps_by_year=None 不虚构
     def _resp_rows(report_name, code, st, now, src_key, page_size=20, sort="",
-                   filter_str=None, base_url=None):
+                   filter_str=None):
         return [{"RATING_ORG_NUM": 39, "RATING_BUY_NUM": 30,
                  "DEC_AIMPRICEMIN": 1430, "DEC_AIMPRICEMAX": 2030,
                  "YEAR1": 2025, "YEAR_MARK1": "A", "EPS1": 65.85,
@@ -1671,7 +1761,8 @@ def selftest():
                                            "net_buy_shares_1d": 21020000,
                                            "net_buy_amount_1d_hkd": 542679646,
                                            "net_mv_chg_10d_hkd": -5814623552.76,
-                                           "currency": "HKD"}},
+                                           "currency": "HKD"},
+                               "note": "南向 T-1 披露口径（披露日 2026-10-29）"},
                  "research": {"state": "available", "source": "etnet+yf-analyst",
                               "reports": [],
                               "consensus": {"org_num": 17, "target_min": 26.98,
@@ -1679,6 +1770,9 @@ def selftest():
                                             "target_mean": 33.95,
                                             "target_max": 41.6,
                                             "dispersion": 0.44,
+                                            "rating_dist": {"买入": 12,
+                                                            "增持": 3,
+                                                            "中性": 2},
                                             "eps_by_year": [
                                                 {"year": 2026, "mark": "E",
                                                  "eps": 0.94}],
@@ -1700,8 +1794,10 @@ def selftest():
         p = render_context_pack(ev_hk, td)
         text = open(p, encoding="utf-8").read()
         assert "资金流·南向持股" in text and "19.44" in text and \
-            "T-1" not in ev_hk["blocks"]["moneyflow"]["summary"].get(
-                "note", ""), "南向节须渲染持股占比"
+            "T-1" in text, "南向节须渲染持股占比与披露口径 note"
+        # rating_dist 分桶直出（港股形态），A 股四槽键缺位不得硬渲染「减持 0」
+        assert "评级共识(近六月)：17 家 = 买入 12 / 增持 3 / 中性 2" in text
+        assert "减持 0" not in text
         assert "目标价统计：min 26.98 / 中位 33.2 / 均值 33.95 / max 41.6" in text
         assert "一致预期 EPS：2026E=0.94" in text and \
             "EPS 90 日修正：↓下修（1.09→0.939" in text

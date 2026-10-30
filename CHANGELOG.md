@@ -35,8 +35,8 @@
   「删守卫不换源把 _dc_rows 9201 空结果伪造成 available」的坑。
 - **A 股前瞻 EPS 零调用回收**：RPT_WEB_RESPREDICT 既有 EPS1..4+YEAR_MARK
   此前被丢弃，consensus 新增 eps_by_year（2025A=65.85/2026E=67.18 形态）；
-  context-pack 研报节新增「目标价统计（中位/均值/离散度）」与「一致预期 EPS」
-  港 A 两用渲染行。
+  context-pack 研报节新增「目标价统计（中位/均值/离散度）」（港股双源形态）
+  与「一致预期 EPS」（港 A 两用）渲染行。
 - 港股 context-pack 口径行（无业绩预告制度——无预告≠无雷/南向 T-1/报表币种
   分离）；fundamentals CURRENCY 行；南向持股节渲染。
 - CLUSTERS 15→16 簇（etnet）；em 系港股新源键（em-fin-hk/em-hk-ind/dc-hsgt/
@@ -54,6 +54,41 @@
 - references/01-evidence.md 六块表/扩展块表/16 簇/市场能力表/南向 T-1/forecast
   制度差异/分位表规约句+backlog 八项（qt HK 快照/HKEXnews/CCASS/卖空/回购
   金额/HK 行业/Reverse DCF/theses）；PIPELINE 港股速查重写；README 港股覆盖节。
+
+### Fixed
+
+- 独立评审修复（etnet/yf 数值与终态如实化）：etnet 目标价/EPS 改 `_fnum`
+  （01810 实测概览 50 行 33 个 NaN 目标价，此前 NaN 可混入 median/mean/
+  dispersion）；目标价全缺时 `target_mean` 除零；中位数改 `statistics.median`
+  （偶数长度不再取上中位）；无目标价券商 reports 标题不再落 None；yfinance
+  `eps_trend` 无 `currency` 列形态（Yahoo 未回 epsTrendCurrency/旧版库）不再
+  KeyERROR 连坐 yf 簇熔断；yf 评级计数 NaN 防 `int(nan)`。
+- 无覆盖标的不计熔断（能力边界不变量）：HKF10 未覆盖标的（如 GEM 股）
+  datacenter 返回 result=null 经 akshare 抛 TypeError——`_fund_via_hk_em`/
+  `_hk_indicator_snapshot` 转 NotSupportedSymbol（fundamentals 换链、估值 A 路
+  让位 B 路，不记 em_datacenter 共享簇失败连坐 A 股 dc 块）；etnet 无覆盖标的
+  空壳页解包异常（No tables found / list.remove 两实测形态）归零覆盖走 yf
+  兜底，不记 etnet 簇失败。
+- 港股评级分布渲染：research 共识 rating_dist（etnet 券商原语/yf 四档）分桶
+  直出，替代 A 股 buy/add/neutral/reduce 四槽行（缺键硬渲染「减持 0」属虚构
+  市场事实）；南向 `_yi`/一致预期 EPS 年份 NaN 防御；`_hk_indicator_snapshot`
+  全字段 `_fnum` 对齐；`_fund_via_yf` 兜底口径 TTM note 落实（docstring 承诺
+  此前未实现）。
+- 港股研报链终态如实：无共识且含失败痕迹时 note 由 all_failed 改 no_consensus，
+  tried 补齐「etnet:概览空 / yf-analyst:无覆盖」事实；eps_by_year 改按自身
+  非空挂载（etnet 概览空不再连坐丢弃综合盈利预测表）。
+- 南向 note 措辞 HOLD_DATE→披露日（该字段实为 TRADE_DATE，note 勿伪字段名）；
+  删 `_dc_rows` 死参数 base_url 与 `_research_hk_etnet` 死变量 srt。
+- selftest 判据只收严：CAPS↔NOTICES_CHAINS/FUNDAMENTALS_FETCHERS 一致性钉、
+  etnet 偶数中位+NaN 目标价钉、eps_trend 缺 currency 列钉、no_consensus
+  tried 留痕钉、HKF10/etnet 无覆盖不计熔断钉（breakers 零计数）、港股 pack
+  评级分布行钉（含「减持 0」不出现）。
+- 文档同步：01-evidence 六块表 fundamentals 港股列改 em_datacenter(HKF10)→
+  yfinance（此前残留 not_supported(v1) 失同步）、补市场能力表规约句与 baidu
+  港股「近五年」有效坑位（akshare docstring period 域陈旧）；PIPELINE 港股
+  HTTP 计数 +8→+12；04-report/archive 版本锚改语义描述（重编号后 0.2.x 锚
+  失效）。
+
 ## [0.0.8] - 2026-10-30
 
 ### Fixed

@@ -336,7 +336,7 @@ def rebuild_indexes(reports_dir, signals, names=None):
     for s in signals:
         if s.get("snapshot"):
             # 快照登记信号：市场推导后身份是 (cn/hk, 归一码)，但报告在 _snapshot/——
-            # 不进实盘 index/总览（0.2.2 前以 market='?' 天然排除，推导后须显式排除）
+            # 不进实盘 index/总览（市场推导引入前以 market='?' 天然排除，推导后须显式排除）
             continue
         try:
             d = stock_dir(reports_dir, s.get("market"), s.get("code"))
@@ -433,7 +433,7 @@ def plan_migration(reports_dir, signals):
                 plan["warnings"].append("%s 缺可用 created_at，跳过认领（不改写）"
                                         % s.get("id"))
         if owner is None and usable:
-            # mtime 漂移（备份恢复/编辑器重存）：0.2.1 及以前平铺是最后写者胜，回退按
+            # mtime 漂移（备份恢复/编辑器重存）：分级布局前平铺是最后写者胜，回退按
             # 最后一次运行归属内容版，避免把当日全部信号误标丢失
             owner = max(usable, key=_ts)
             item["anomaly"] = "mtime %s 与任何信号不同刻，按最后运行归属内容版" \
