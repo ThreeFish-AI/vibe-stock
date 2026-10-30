@@ -37,9 +37,7 @@ def main():
         price = d["price"]
         lo20, hi20, ma20 = d.get("lo20"), d.get("hi20"), d.get("ma20")
         # 止损 = max(−5% 线, 0.99×lo20) 取紧者；参考买点 = max(lo20, 0.97×现价)
-        stop = round(price * 0.95, 2)
-        if lo20 and lo20 > 0.96 * price:
-            stop = round(lo20 * 0.99, 2)
+        stop = round(max(price * 0.95, (lo20 or 0) * 0.99), 2)
         entry_ref = round(max(lo20 or 0, price * 0.97), 2)
         rows.append({
             "code": r["code"], "name": r["name"], "industry": d["industry"],
@@ -114,7 +112,8 @@ def main():
         checks.append((f"{r['code']} 仓位带", w_min - 0.001 <= r["w_actual"] <= w_max + 0.001,
                        f"w={r['w_actual']:.3f} lots={r['lots']}"))
         checks.append((f"{r['code']} 三价单调",
-                       r["stop"] < r["entry_ref"] <= max(r["target1"] or 9e9, r["entry_ref"]),
+                       r["stop"] < r["entry_ref"] and r["target1"] is not None
+                       and r["entry_ref"] <= r["target1"],
                        f"stop={r['stop']} entry_ref={r['entry_ref']} target1={r['target1']}"))
         checks.append((f"{r['code']} 手数≥1", r["lots"] >= 1, f"lots={r['lots']}"))
     ind_cnt = {}
