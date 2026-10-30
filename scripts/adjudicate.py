@@ -17,7 +17,7 @@ dsa_lab.py 的 M4/M5。本文件回答「意见合不合法、共识是什么、
      rationale 承载，RiskGuard 兜底）；主信号 = 聚合信号；高严重度冲突 → 共识 low。
   ④ 分歧摘要：三桶（bullish/bearish/neutral）显式上桌。
   ⑤ RiskGuard 只降不升：veto 把买入族压 hold；降档沿 buy→hold→sell 单向
-     （高严重度可两档）；任何情况不升级。
+     （高严重度可两档）；任何情况不升级；veto 与降档同真时各自施加、取更保守者。
   ⑥ 置信帽：核心证据块降级（evidence 质量分档 limited 及以下）时，strong_* 一律
      压一档——证据不够，不许嘴硬。
 
@@ -168,15 +168,22 @@ def disagreement_summary(agg):
 # ---------------------------------------------------------------- ⑤ RiskGuard（只降不升）
 
 def risk_guard(decision, veto=False, downgrade=False, severity_high=False):
-    """veto: 买入族→hold；downgrade: 单向降一/两档。永不升级。返回 (final, log)。"""
+    """veto: 买入族→hold；downgrade: 单向降一/两档。永不升级。返回 (final, log)。
+    同真时各自对同一初判施加、取更保守者（档位索引取大）：veto 不吞 downgrade，
+    同一风险理由也不叠罚。"""
     d = LADDER.index(decision)
+    cands, log = [d], []
     if veto and decision in ("buy", "strong_buy"):
-        return "hold", "veto %s->hold" % decision
+        cands.append(LADDER.index("hold"))
+        log.append("veto %s->hold" % decision)
     if downgrade:
         steps = 2 if severity_high else 1
-        return LADDER[min(d + steps, 4)], "downgrade %s->%s" % (
-            decision, LADDER[min(d + steps, 4)])
-    return decision, "no-op"
+        cands.append(min(d + steps, 4))
+        log.append("downgrade %s->%s" % (decision, LADDER[min(d + steps, 4)]))
+    final = LADDER[max(cands)]
+    if len(log) == 2:
+        log.append("stricter=%s" % final)
+    return final, "; ".join(log) or "no-op"
 
 
 # ---------------------------------------------------------------- ⑥ 置信帽
@@ -357,6 +364,21 @@ def selftest():
            "sell")
     _check("veto only hits buy family", risk_guard("hold", veto=True)[0], "hold")
     _check("never upgrades sell", risk_guard("sell", downgrade=True)[0], "strong_sell")
+
+    print("== RiskGuard veto+downgrade 同真（取更保守、单调收紧） ==")
+    # downgrade(high) 单独已到 sell，加 veto 不得反被截停在 hold
+    _check("buy+veto+downgrade(high)", risk_guard("buy", True, True, True),
+           ("sell", "veto buy->hold; downgrade buy->sell; stricter=sell"))
+    _check("strong_buy+veto+downgrade", risk_guard("strong_buy", True, True)[0], "hold")
+    # 穷举五档 × veto/downgrade/severity_high：永不升级；任一风险输入 false→true 不更宽松
+    flags = [(v, g, h) for v in (False, True) for g in (False, True) for h in (False, True)]
+    rank = lambda d, f: LADDER.index(risk_guard(d, *f)[0])
+    up = [(d, f) for d in LADDER for f in flags if rank(d, f) < LADDER.index(d)]
+    flips = [(d, f, f[:k] + (True,) + f[k + 1:]) for d in LADDER for f in flags
+             for k in range(3) if not f[k]]
+    loose = [(d, f, g) for d, f, g in flips if rank(d, g) < rank(d, f)]
+    _check("exhaustive never upgrades", (len(LADDER) * len(flags), up), (40, []))
+    _check("exhaustive monotone", (len(flips), loose), (60, []))
 
     print("== 绩效因子（Beta 收缩 + 钳制 + 样本门） ==")
     _check("pf <30 samples", performance_factor({"s": {"wins": 9, "losses": 1}}, "s"), 1.0)

@@ -33,11 +33,17 @@
 
 ## RiskGuard（只降不升——无条件全局规则：保守裁决不可被反向打开）
 
-- **veto**（风险角色一票否决）：buy/strong_buy → hold。
+- **veto**（风险角色一票否决）：buy/strong_buy → hold。与 downgrade 同真时两者
+  都生效：各自对同一初判施加、取档位更保守者（档位索引取大），log 两步都记。
+  条件：risk.json veto 与 downgrade 同为 true；坑位：veto 先返回会吞掉 downgrade
+  ——buy 经 severity=high 两档降本应 sell，加 veto 反被截停在 hold；改成依次叠加
+  （压 hold 后再降档）则同一条风险理由计罚两次，strong_buy 一步落到 strong_sell。
 - **downgrade**：沿 strong_buy→buy→hold→sell→strong_sell 单向降档；
   severity=high 可一次两档。
 - **永不升级**：任何配置、任何共识等级都不能把裁决往激进方向掰。
   这是防「模型激进 + 意见污染」的最后闸门，放宽即违背本仓红线（AGENTS.md）。
+  单调收紧：veto / downgrade / severity=high 任一由 false 变 true，终裁档位不得
+  更激进（selftest 穷举五档 × 八组合钉住）。
 
 ## 置信帽（证据不够，不许嘴硬）
 
