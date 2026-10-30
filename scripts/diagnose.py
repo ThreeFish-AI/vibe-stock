@@ -281,6 +281,56 @@ def render_ext_blocks(lines, b):
             lines.append(" · ".join(seg))
 
 
+def _render_lens_block(lines, workdir):
+    """pack 基本面锚节（不进裁决）：workdir 有 lens.json 才出（--cost 触发），
+    有界；abstained 如实一行。LLM 只消费不重算——数字 SSOT 在 lens.json。"""
+    lens = load_json(os.path.join(workdir, "lens.json"), None)
+    if not lens:
+        return
+    lines.append("")
+    lines.append("## 基本面锚（中长期参考，不进裁决/不进后验）")
+    if lens.get("state") != "estimated":
+        lines.append("弃权：%s" % lens.get("reason", "锚不足"))
+        return
+    a = lens.get("anchors", {})
+    imp = a.get("implied_pe")
+    if imp:
+        pct = imp.get("percentile")
+        seg = "参考价 %s 隐含 PE(TTM) %s" % (imp.get("ref"), imp.get("value"))
+        if pct is not None:
+            seg += "（5 年分位 %s%%）" % pct
+        elif imp.get("band_flag") == "above_p90":
+            seg += "（高于 5 年 p90 带）"
+        elif imp.get("band_flag") == "below_p10":
+            seg += "（低于 5 年 p10 带）"
+        lines.append("- %s；现价 PE %s（免汇率比值法）" % (seg, imp.get("cur_pe")))
+    con = a.get("consensus")
+    if con:
+        lines.append("- 共识目标价 min %s / 中位 %s / max %s（参考价%s中位 %s%%）"
+                     % (_nd(con.get("target_min")), _nd(con.get("target_median")),
+                        _nd(con.get("target_max")),
+                        "高于" if (con.get("ref_vs_median_pct") or 0) > 0 else "低于",
+                        _nd(abs(con.get("ref_vs_median_pct") or 0))))
+        if con.get("ge_ref_total"):
+            lines.append("- ≥参考价目标价：%s/%s 家" % (
+                con.get("ge_ref_count"), con.get("ge_ref_total")))
+    rv = a.get("eps_revision_90d")
+    if rv:
+        arrow = {"up": "↑上修", "down": "↓下修", "flat": "→持平"}
+        lines.append("- 一致预期 EPS 90 日%s" % arrow.get(rv.get("direction"), "—"))
+    tp = a.get("touch_probability_12m")
+    if tp and tp.get("p") is not None:
+        lines.append("- 12 个月波动触及参考价概率 %s%%（%s；%s）" % (
+            round(tp["p"] * 100, 1),
+            "σ120d %s" % tp.get("sigma_120d"), "波动可达≠基本面支持"))
+    lines.append("- **三档：%s（置信 %s）**——%s" % (
+        lens.get("tier"), lens.get("confidence"),
+        "期限正交：不进聚合/置信帽/T+1/3/5/10 后验；极端高估只作风险角色 "
+        "downgrade 线索（只降不升）"))
+    if lens.get("dispersion_warning"):
+        lines.append("- %s" % lens["dispersion_warning"])
+
+
 def _intraday_warning(ss, bars, tech):
     """盘中警示行（01「盘中口径」）：phase=intraday 才出，按末根是否完成改述。"""
     head = "- **[盘中警示]** 取数于 %s（UTC+8，已开盘 %s/%s 交易分钟）" % (
@@ -409,6 +459,7 @@ def render_context_pack(evidence, workdir):
             else:
                 lines.append(json.dumps(blk["data"], ensure_ascii=False))
     render_ext_blocks(lines, b)
+    _render_lens_block(lines, workdir)
     lines.append("")
     lines.append("## 意见产出要求")
     lines.append("1. 角色：技术 / 情报（新闻+公告+研报+预告+资金流+行业+估值）"
@@ -426,7 +477,8 @@ def render_context_pack(evidence, workdir):
     text = "\n".join(lines)
     if len(text) > PACK_CHAR_CAP:  # 全局护栏：超限整截扩展节（状态行仍可见）
         heads = ("## 资金流", "## 近期公告", "## 研报与评级", "## 业绩预告",
-                 "## 限售解禁", "## 股东户数", "## 大盘指数", "## 行业板块", "## 估值")
+                 "## 限售解禁", "## 股东户数", "## 大盘指数", "## 行业板块", "## 估值",
+                 "## 基本面锚")
         cut = next((i for i, ln in enumerate(lines) if ln.startswith(heads)), None)
         if cut is not None:
             # 只切扩展节：尾部「## 意见产出要求」是意见段产出契约（opinions/
@@ -470,6 +522,21 @@ def cmd_prepare(args):
     if evidence["blocks"].get("daily_bars", {}).get("state") == "fetch_failed":
         print("日 K 全链失败：改用 --snapshot-dir 提供快照，或稍后重试")
         return 2
+    if getattr(args, "cost", None):
+        # 用户参考价（持仓成本）：只落 workdir（.vs 已 gitignore，不进全局
+        # 状态目录——敏感信息保守边界），透镜纯函数确定性计算
+        import lens as lens_mod
+        with open(os.path.join(args.workdir, "user_ref.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump({"ref_price": args.cost, "kind": "cost"},
+                      f, ensure_ascii=False, indent=1)
+        lens_out = lens_mod.derive_lens(evidence, args.cost)
+        with open(os.path.join(args.workdir, "lens.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(lens_out, f, ensure_ascii=False, indent=1)
+        print("lens -> %s/lens.json（%s·置信 %s）" % (
+            args.workdir, lens_out.get("tier", lens_out.get("state")),
+            lens_out.get("confidence", "—")))
     pack = render_context_pack(evidence, args.workdir)
     for name, default in (("opinions.json", []), ("risk.json",
                          {"veto": False, "downgrade": False, "severity": "medium"})):
@@ -608,7 +675,58 @@ def _conclusion_reason(rg, rows, risk):
     return "%s——%s" % (note, why) if note else why
 
 
-def render_report(evidence, verdict, opinions, stock, risk=None):
+def _report_lens_section(lens):
+    """报告「目标可达性」节：四锚表 + 三档结论 + 正交声明（04 规约）。
+    lens=None 或 abstained 不出节（不硬凑）。"""
+    if not lens or lens.get("state") != "estimated":
+        return []
+    L = ["", "## 目标可达性（参考价 %s · 中长期，不进裁决）" % lens.get("ref_price")]
+    a = lens.get("anchors", {})
+    imp = a.get("implied_pe")
+    if imp:
+        pct = imp.get("percentile")
+        desc = ("5 年分位 %s%%" % pct if pct is not None else
+                {"above_p90": "高于 5 年 p90 带", "below_p10": "低于 5 年 p10 带",
+                 "": "分位表缺失"}.get(imp.get("band_flag") or "", "分位表缺失"))
+        L.append("- 隐含估值：参考价隐含 PE(TTM) %s（%s）· 现价 PE %s（免汇率"
+                 "比值法，estimated）" % (imp.get("value"), desc, imp.get("cur_pe")))
+    con = a.get("consensus")
+    if con:
+        ge = ""
+        if con.get("ge_ref_total"):
+            ge = "，%s/%s 家 ≥ 参考价" % (con.get("ge_ref_count"),
+                                           con.get("ge_ref_total"))
+        L.append("- 共识位置：目标价 min %s / 中位 %s / 均值 %s / max %s（参考价"
+                 "%s中位 %s%%%s）" % (
+                     _nd(con.get("target_min")), _nd(con.get("target_median")),
+                     _nd(con.get("target_mean")), _nd(con.get("target_max")),
+                     "高于" if (con.get("ref_vs_median_pct") or 0) > 0 else "低于",
+                     _nd(abs(con.get("ref_vs_median_pct") or 0)), ge))
+    rv = a.get("eps_revision_90d")
+    if rv:
+        arrow = {"up": "↑上修", "down": "↓下修", "flat": "→持平"}
+        L.append("- 预期修正：一致预期 EPS 90 日 %s（%s→%s %s）" % (
+            arrow.get(rv.get("direction"), "—"), _nd(rv.get("ago_90d")),
+            _nd(rv.get("current")), _nd(rv.get("currency"))))
+    tp = a.get("touch_probability_12m")
+    if tp and tp.get("p") is not None:
+        L.append("- 波动触及：12 个月零漂移触及概率 %s%%（σ120d %s 年化；连续监测"
+                 "口径约高估 2–4pp；**波动可达≠基本面支持**）" % (
+                     round(tp["p"] * 100, 1), _nd(tp.get("sigma_120d"))))
+    conf_cn = {"high": "高", "medium": "中", "low": "低"}.get(
+        lens.get("confidence"), lens.get("confidence"))
+    L.append("- **结论：%s（置信%s）**——中长期参考（12 个月量级），不进裁决聚"
+             "合/置信帽/T+1/3/5/10 后验（期限正交）；极端高估形态只作为风险角"
+             "色 downgrade 线索（只降不升）。本节不构成投资建议。" % (
+                 lens.get("tier"), conf_cn))
+    if lens.get("dispersion_warning"):
+        L.append("- %s" % lens["dispersion_warning"])
+    if lens.get("missing_anchors"):
+        L.append("- 缺席锚：%s" % "；".join(lens["missing_anchors"]))
+    return L
+
+
+def render_report(evidence, verdict, opinions, stock, risk=None, lens=None):
     risk = risk if isinstance(risk, dict) else {}
     q = evidence["quality"]
     agg = verdict["aggregate"]
@@ -687,6 +805,8 @@ def render_report(evidence, verdict, opinions, stock, risk=None):
                  "· 目标 %s（20 日高点）" % (
                      _fmt_price(max(lo20 or 0, price * 0.97)),
                      _fmt_price(price * 0.95), hi20))
+    if lens:
+        L.extend(_report_lens_section(lens))
     L.append("")
     L.append("## 风险与利好")
     # 逐条可溯源（04 §4）：意见带 source 与 signal/置信；风险栏另挂风险角色
@@ -752,10 +872,12 @@ def cmd_report(args):
     verdict = load_json(os.path.join(wd, "verdict.json"), None)
     opinions = load_json(os.path.join(wd, "opinions.json"), [])
     risk = load_json(os.path.join(wd, "risk.json"), {})
+    lens = load_json(os.path.join(wd, "lens.json"), None)
     if not evidence or not verdict:
         print("缺 evidence.json 或 verdict.json")
         return 2
-    report = render_report(evidence, verdict, opinions, args.stock, risk=risk)
+    report = render_report(evidence, verdict, opinions, args.stock, risk=risk,
+                           lens=lens)
     os.makedirs(os.path.join(STATE_DIR, "reports"), exist_ok=True)
     today = dt.date.today().isoformat()
     code = evidence["meta"].get("code") or args.stock
@@ -1533,7 +1655,13 @@ def selftest():
                                            "net_mv_chg_10d_hkd": -5814623552.76,
                                            "currency": "HKD"}},
                  "research": {"state": "available", "source": "etnet+yf-analyst",
-                              "reports": [],
+                              "reports": [
+                                  {"date": "2026-05-27", "org": "中银国际",
+                                   "rating": "买入", "title": "目标价 41.6"},
+                                  {"date": "2026-09-24", "org": "高盛",
+                                   "rating": "买入", "title": "目标价 33.2"},
+                                  {"date": "2026-08-19", "org": "麦格理",
+                                   "rating": "优于大市", "title": "目标价 27.0"}],
                               "consensus": {"org_num": 17, "target_min": 26.98,
                                             "target_median": 33.2,
                                             "target_mean": 33.95,
@@ -1569,6 +1697,57 @@ def selftest():
         assert "港股口径：无业绩预告制度" in text
         assert "None" not in text.replace("None匹配", ""), "pack 不落 None 字面量"
     print("  ok 港股数据面：CAPS 守卫钉 · HKF10 形态/空表 · etnet+yf 共识与互验 · 南向 T-1 · eps_by_year 回收 · pack 渲染")
+    # -- 基本面锚：lens 渲染钉（estimated 出节 · abstained 弃权行 · 无 cost 不出节） --
+    import lens as lens_mod
+    # 触及概率锚需要足量波动序列：换 200 根高波动合成 K（selftest 顶部 60 根
+    # 上行 fixture 的已实现波动在 120 日窗不足 → σ None → 该锚缺席，属如实）
+    _px, vol_bars = 25.0, []
+    for _i in range(200):
+        _px *= 1.04 if _i % 2 else 0.965
+        vol_bars.append({"date": "v%d" % _i, "close": round(_px, 4)})
+    ev_hk["blocks"]["quote"]["price"] = 25.68
+    ev_hk["blocks"]["daily_bars"]["bars"] = vol_bars
+    lens_est = lens_mod.derive_lens(ev_hk, 36.3)
+    assert lens_est["state"] == "estimated", lens_est
+    with tempfile.TemporaryDirectory() as td:
+        with open(os.path.join(td, "lens.json"), "w", encoding="utf-8") as f:
+            json.dump(lens_est, f, ensure_ascii=False)
+        p = render_context_pack(ev_hk, td)
+        text = open(p, encoding="utf-8").read()
+        assert "## 基本面锚（中长期参考，不进裁决/不进后验）" in text
+        assert "隐含 PE(TTM) 24.65" in text and "1/3 家" in text, \
+            "小米实测形态：隐含倍数与 ≥ref 家数"
+        assert "三档：" in text and "不进聚合" in text
+        # 无 lens.json（未给 --cost）：不出节不报错
+        td2 = tempfile.mkdtemp()
+        p2 = render_context_pack(ev_hk, td2)
+        text2 = open(p2, encoding="utf-8").read()
+        assert "基本面锚" not in text2, "未给 --cost 不得出基本面锚节"
+        # abstained：双锚缺 → 弃权一行（不硬凑）
+        lens_abst = lens_mod.derive_lens(
+            {"meta": {"market": "hk"}, "quality": {}, "blocks": {
+                "quote": {"price": 25.68},
+                "daily_bars": {"bars": ev_hk["blocks"]["daily_bars"]["bars"]},
+                "valuation": {"state": "missing"},
+                "research": {"state": "missing"}}}, 36.3)
+        assert lens_abst["state"] == "abstained", lens_abst
+        with open(os.path.join(td2, "lens.json"), "w", encoding="utf-8") as f:
+            json.dump(lens_abst, f, ensure_ascii=False)
+        p3 = render_context_pack(ev_hk, td2)
+        assert "弃权" in open(p3, encoding="utf-8").read()
+    # 报告节：estimated 出「目标可达性」；lens=None 不出
+    vr = aj.adjudicate(
+        [{"source": "role:技术", "signal": "hold", "confidence": 0.5,
+          "rationale": "均线缠绕"}],
+        {"veto": False, "downgrade": False, "severity": "medium"}, ev_hk, None)
+    rep = render_report(ev_hk, vr, [{"source": "role:技术", "signal": "hold",
+                                     "confidence": 0.5, "rationale": "均线缠绕"}],
+                        "hk01810", risk=None, lens=lens_est)
+    assert "## 目标可达性（参考价 36.3 · 中长期，不进裁决）" in rep
+    assert "波动可达≠基本面支持" in rep and "不构成投资建议" in rep
+    rep2 = render_report(ev_hk, vr, [], "hk01810", risk=None, lens=None)
+    assert "目标可达性" not in rep2
+    print("  ok 基本面锚：透镜四锚/三档渲染 · abstained 弃权行 · 无 cost 不出节 · 报告正交声明")
     evidence = {"meta": {"symbol": "TEST", "market": "cn", "code": "000001"},
                 "blocks": {"quote": {"state": "available", "price": 12.4},
                            "daily_bars": {"state": "available", "bars": bars},
@@ -2046,6 +2225,9 @@ def main():
     p1.add_argument("--stock", required=True)
     p1.add_argument("--snapshot-dir")
     p1.add_argument("--evidence")
+    p1.add_argument("--cost", type=float,
+                    help="用户参考价（持仓成本）：落 workdir/user_ref.json 并出"
+                         "基本面锚（目标可达性）节，不进裁决")
     p1.add_argument("--workdir", default=".vs")
     p1.set_defaults(fn=cmd_prepare)
     p2 = sub.add_parser("report")

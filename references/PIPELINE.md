@@ -34,8 +34,10 @@ uv run --no-project $T/scripts/adjudicate.py \
   --opinions .vs/opinions.json --risk .vs/risk.json --evidence .vs/evidence.json \
   [--ledger ~/.vibe-stock/ledger.json] --out .vs/verdict.json
 
-# ⑤ 报告 + 信号登记
-uv run --no-project $T/scripts/diagnose.py report --stock 600519 --workdir .vs
+# ⑤ 报告 + 信号登记（--cost 持仓成本：prepare 阶段出基本面锚 lens.json，
+#    pack/报告增「目标可达性」节——不进裁决/不进后验，见 03「透镜不进裁决」）
+uv run --no-project $T/scripts/diagnose.py prepare --stock hk01810 --workdir .vs --cost 36.3
+uv run --no-project $T/scripts/diagnose.py report --stock hk01810 --workdir .vs
 
 # 后验（隔若干交易日）
 uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance \
@@ -45,6 +47,7 @@ uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance \
 uv run --no-project $T/scripts/adjudicate.py --selftest
 uv run --no-project $T/scripts/diagnose.py --selftest
 uv run --no-project $T/scripts/postmortem.py --selftest
+uv run --no-project $T/scripts/lens.py --selftest
 ```
 
 ## akshare 版本纪律
