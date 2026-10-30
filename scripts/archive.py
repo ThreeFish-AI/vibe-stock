@@ -334,6 +334,10 @@ def rebuild_indexes(reports_dir, signals, names=None):
     存量信号（无 stock_name）经缓存显名。同输入字节相同，未变不重写。"""
     live = []
     for s in signals:
+        if s.get("snapshot"):
+            # 快照登记信号：市场推导后身份是 (cn/hk, 归一码)，但报告在 _snapshot/——
+            # 不进实盘 index/总览（0.2.2 前以 market='?' 天然排除，推导后须显式排除）
+            continue
         try:
             d = stock_dir(reports_dir, s.get("market"), s.get("code"))
         except ValueError:

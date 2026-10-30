@@ -461,6 +461,16 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
     now = now or dt.datetime.now()
     market = evidence["meta"].get("market", "?")
     code = stock_code(evidence)
+    if "market" not in evidence["meta"]:  # 快照模式 meta 只有 symbol（fx.fetch 不判市场）
+        # 可推导时经 detect_market 推 (market, 归一 code) 成对落账（market 与 code
+        # 必须同源，只推 market 留原始 symbol 形态的 code 会取不到数）；推不出
+        # （symbol 非 A/港代码形态）维持兜底 '?'，由 postmortem 侧未知市场跳过
+        # 守卫兜底（双层防线）。报告路由不受影响——仍按 meta market='?' 进
+        # _snapshot/，只有信号身份取推导值（后验可取数）。
+        try:
+            market, code = fx.detect_market(str(code))
+        except SystemExit:
+            pass
     final = verdict["risk_guard"]["final"]
     action = ACTION_OF[final]
     conf = verdict["aggregate"]["confidence"]
@@ -486,9 +496,18 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
         c = str(s.get("code") or "")
         if market == "hk" and s.get("market") == "hk":
             return c.zfill(5) == code
-        if s.get("market") != market:
-            return False
-        return _snap_norm(c) == _snap_norm(code) if market == "?" else c == code
+        if s.get("market") == market:
+            return _snap_norm(c) == _snap_norm(code) if market == "?" else c == code
+        if s.get("market") not in fx.CHAINS:
+            # 存量快照兜底 '?' 记录 vs 本登记经市场推导的 (market, 归一 code)——
+            # 两侧身份制式不同，精确等值永漏配（推导前同股对立可失效）；detect_market
+            # 归一后比对恢复该语义，推不出维持不匹配（postmortem 未知市场跳过守卫兜底）。
+            try:
+                nm, nc = fx.detect_market(c)
+            except SystemExit:
+                return False
+            return nm == market and nc == code
+        return False
 
     for s in signals:
         if (_same_stock(s)
@@ -522,6 +541,10 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
     }
     if quote.get("name"):  # 名称列数据源（索引侧消费）；取数失败如实缺省不落 null
         sig["stock_name"] = quote["name"]
+    if evidence["meta"].get("snapshot"):
+        # 快照登记标记（稀疏键，实盘信号不落）：市场推导后身份是 (cn/hk, 归一码)，
+        # 索引侧据此排除——报告仍在 _snapshot/，不得进实盘 index/总览
+        sig["snapshot"] = True
     signals.append(sig)
     ar.write_json_atomic(SIGNALS, signals)
     return action, invalidated
@@ -1713,6 +1736,33 @@ def selftest():
         assert [s["price_kind"] for s in sigs5[-2:]] == ["intraday", "close"], sigs5[-2:]
         import postmortem as pm
         pm.evaluate_signals(sigs5, {"000001": ib})  # 新增键不破坏后验读取
+        # 快照模式登记市场推导：meta 无 market（快照真实路径，经 fx.fetch 钉形状）时
+        # 从 code/symbol 推 (market, 归一 code)；推不出维持 '?'（postmortem 跳过守卫兜底）
+        snap_empty = os.path.join(td, "snap-empty")
+        os.makedirs(snap_empty)
+        for sym in ("sh600519", "TEST"):
+            ev_sn2 = {"meta": fx.fetch(sym, snap_empty)["meta"], "blocks": {}}
+            register_signal(ev_sn2, verdict, opinions, "r-sn", "p-sn")
+        sn_sigs = json.load(open(SIGNALS, encoding="utf-8"))
+        assert (sn_sigs[-2]["market"], sn_sigs[-2]["code"]) == ("cn", "600519"), sn_sigs[-2]
+        assert (sn_sigs[-1]["market"], sn_sigs[-1]["code"]) == ("?", "TEST"), sn_sigs[-1]
+        print("  ok 快照登记：meta 无 market 时 detect_market 推导（推不出维持 ?）")
+        # 存量 ('?', 原始 symbol) 对立失效漏配修复：新归一身份登记对立族时，
+        # 存量经 detect_market 归一比对恢复失效；推不出的存量记录维持不匹配
+        json.dump([{"id": "sig-legacy", "market": "?", "code": "sh600519",
+                    "action": "buy", "family": "bull", "status": "pending",
+                    "horizons": [1], "evaluated": {}, "sources": []},
+                   {"id": "sig-legacy-bad", "market": "?", "code": "TEST",
+                    "action": "buy", "family": "bull", "status": "pending",
+                    "horizons": [1], "evaluated": {}, "sources": []}],
+                  open(SIGNALS, "w", encoding="utf-8"))
+        ev_leg = {"meta": {"symbol": "sh600519"}, "blocks": {}}
+        _, inv_leg = register_signal(ev_leg, verdict_sell, opinions, "r-leg", "p-leg")
+        assert inv_leg == 1, "存量 ('?', 原始 symbol) 同股对立记录须失效（归一比对）"
+        leg = json.load(open(SIGNALS, encoding="utf-8"))
+        assert leg[0]["status"] == "invalidated", leg[0]
+        assert leg[1]["status"] == "pending", "推不出的存量记录维持不匹配不动"
+        print("  ok 对立失效：存量 ('?', 原始 symbol) 归一比对恢复失效语义")
     # 快照模式扩展块三态：声明态 / 缺省 estimated / 文件缺失 missing
     with tempfile.TemporaryDirectory() as td:
         json.dump({"state": "available", "summary": {}},
@@ -1929,14 +1979,18 @@ def _selftest_archive(evidence, verdict, opinions):
             register_signal(evidence, verdict, opinions, "r2", "p", now=d1)
             assert "stock_name" not in ar.load_signals(SIGNALS)[-1], \
                 "quote 无 name 时不得落空名称键"
-            # T9 快照：进 _snapshot/<code>/，不建实盘目录与索引
+            # T9 快照：报告进 _snapshot/<code>/（路由按 meta market='?'，不随信号
+            # 市场推导变实盘），不建实盘目录与索引；信号身份取推导 (cn, 600519)、
+            # 带 snapshot 标记（后验可取数，索引侧排除）
             stage(dict(evidence, meta={"symbol": "600519", "snapshot": True}),
                   ver=dict(verdict, stock_code="600519"))
             assert run(cmd_report, ns(workdir=wd, evidence=None, stock="600519"), d1) == 0
             assert os.path.exists(os.path.join(rd, "_snapshot", "600519", "2026-10-30.md"))
             assert not os.path.exists(os.path.join(rd, "600519.cn"))
             assert not os.path.exists(os.path.join(rd, "_snapshot", "600519", "index.md"))
-            assert ar.load_signals(SIGNALS)[-1]["market"] == "?"
+            sig9 = ar.load_signals(SIGNALS)[-1]
+            assert (sig9["market"], sig9["code"]) == ("cn", "600519"), sig9
+            assert sig9.get("snapshot") is True, sig9
             # T10 rationale/note 夹带版本/节头：压单行 + 正文 # 行转义，版本数不变
             ev_note = json.loads(json.dumps(evidence))
             ev_note["blocks"]["news"]["note"] = "x\n## 伪节\ny"
