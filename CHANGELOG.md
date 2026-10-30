@@ -2,7 +2,12 @@
 
 本文件只登记版本级变化；条目遵循 Keep a Changelog、[SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
-## [0.2.4] - 2026-10-30
+> 版本序列说明（2026-10-30 起）：项目未到稳定发布，版本号统一回归 **0.0.x** patch 序列；
+> 存量 0.1.0–0.2.1 六版已按发布顺序一一重编号为 0.0.1–0.0.6，合并时又把并行合入的
+> 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
+> 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
+
+## [0.0.11] - 2026-10-30
 
 ### Added
 
@@ -18,7 +23,118 @@
   判定与台账归因默认仍按港币，selftest 钉住 fx hk/cn 状态、cny 字段不改变
   outcome、fx 状态扰动不扰质量分/置信帽。
 
-## [0.2.3] - 2026-10-30
+## [0.0.10] - 2026-10-30
+
+### Added
+
+- **基本面锚（目标可达性透镜）**：新 `scripts/lens.py` 纯函数模块 + `prepare
+  --cost <持仓成本>`——与短线信号正交的中长期参考，四个免汇率锚：
+  ① 参考价隐含 PE = cur_PE×ref/price（比值法免 FX），在 valuation 新增的
+  pe_quantiles_5y 分位表（p10/25/50/75/90+n）上插值（带外不外推，标
+  above_p90/below_p10 带）；② 共识目标价位置（min/中位/均值/max、离散度、
+  ≥参考价家数——etnet 逐券商目标价形态可得；目标价只作区间披露，口径依据
+  卖方目标价系统性乐观证据）；③ EPS 90 日修正方向；④ 12 个月零漂移
+  first-passage 触及概率（σ=60/120 日已实现波动率年化 ×√252，连续监测口径
+  约高估 2–4pp 如实注记，注明「波动可达≠基本面支持」、不进三档）。
+  三档结论（支撑不足/中性/有支撑）只由 ①② 决定；离散度>0.8 压置信一档并
+  强制披露「分歧大」；**缺数据 abstain/低置信中性，绝不 bearish**；同
+  evidence 同输出（确定性）。
+- context-pack 新节「## 基本面锚（中长期参考，不进裁决/不进后验）」（入
+  16k 护栏 heads 截断元组）；报告「关键价位」后新节「## 目标可达性」（含
+  期限正交与免责声明）；lens.json/user_ref.json 只落 workdir（.vs 已
+  gitignore，不进全局状态目录）。
+- 规约同步：03 新节「基本面锚（透镜）不进裁决」（不进聚合/置信帽/后验，
+  极端高估只作 risk.json downgrade 线索）；02 透镜风险分流句；04 目标可达
+  性节模板（第 4 条，后续条目重编号）；05 透镜不进后验句；AGENTS 测试口径
+  三件→四件（+lens.py --selftest，加门禁属收严）；PIPELINE/SKILL/README。
+- lens selftest：隐含倍数免 FX 恒等式、分位插值节点回归与带外不外推、
+  first-passage 单调/对称/边界、波动率边界、三档规则边界、缺数据
+  abstain/单锚低置信中性、离散度压置信、确定性；diagnose selftest 增透镜
+  渲染钉（estimated 出节/abstained 弃权行/无 cost 不出节/报告正交声明）。
+
+## [0.0.9] - 2026-10-30
+
+### Added
+
+- **港股数据面五块接入**（全部免 key 公开源，2026-10-30 逐源实测）：
+  - fundamentals（核心 10 分块）：东财 HKF10 主指标 RPT_HKF10_FN_MAININDICATOR
+    （经 akshare 币种校正）→yfinance info 兜底；概念键与 A 股 em-fin 对齐
+    （EPS/ROE/营收增速/负债率/毛利率/净利率/ROIC/归母净利同比+近 4 期 history），
+    另透出 CURRENCY 键（报表币种人民币 vs 行情 HKD，context-pack 单独成行）。
+    港股质量分 78→85（usable→good）——数据可用性的如实反映，置信帽只看核心
+    三块、口径不变。
+  - valuation：A 路 em-hk-ind 具名列快照（RPT_CUSTOM_HKF10，PE-TTM/PB/总市值
+    /股息，无位序风险）+B 路百度 5 年分位（stock_hk_valuation_baidu）；qt 港股
+    快照因实时字段位序未多标的复核不入链（backlog）。A/HK 两路均新增
+    pe_quantiles_5y 分位表（p10/25/50/75/90+n+cur，供估值透镜插值）。
+  - research：etnet（逐券商目标价去重取最新/EPS 分→元/评级分布，新簇 etnet）
+    →yfinance（目标价互验+eps_trend 90 日修正方向）双源；互差>15% 记 note 不弃；
+    etnet 活但零覆盖→yf 兜底标 fallback；东财 reportapi 港股 0 覆盖不入链。
+  - notices：em-notice-h（np-anotice ann_type=H 直连）单源；盈警/正面盈利预告
+    /股份购回标题简繁两体分型；HKEXnews 权威回退在 backlog。
+  - moneyflow：南向持股 RPT_MUTUAL_STOCK_HOLDRANKS 直连（簇 em_datacenter，
+    pageSize=10；akshare 封装翻全史禁用）；T-1=披露制度口径（available+note
+    注明 HOLD_DATE，超 10 自然日才 stale）；非港股通标的空结果=not_supported。
+- **MARKET_CAPS 市场能力表**：块级能力 SSOT 替代 10 处分散 `if market=="hk"`
+  守卫；selftest 破坏性钉（未配源块=not_supported、守卫先于网络调用）根治
+  「删守卫不换源把 _dc_rows 9201 空结果伪造成 available」的坑。
+- **A 股前瞻 EPS 零调用回收**：RPT_WEB_RESPREDICT 既有 EPS1..4+YEAR_MARK
+  此前被丢弃，consensus 新增 eps_by_year（2025A=65.85/2026E=67.18 形态）；
+  context-pack 研报节新增「目标价统计（中位/均值/离散度）」（港股双源形态）
+  与「一致预期 EPS」（港 A 两用）渲染行。
+- 港股 context-pack 口径行（无业绩预告制度——无预告≠无雷/南向 T-1/报表币种
+  分离）；fundamentals CURRENCY 行；南向持股节渲染。
+- CLUSTERS 15→16 簇（etnet）；em 系港股新源键（em-fin-hk/em-hk-ind/dc-hsgt/
+  em-notice-h/yf-fin/yf-analyst）归既有簇；diagnose 簇等式钉同步。
+- selftest 新增破坏性钉：CAPS 守卫（HK 未配源块必 not_supported 且不计熔断）、
+  HKF10 空表不伪 available、etnet+yf 共识合并/高盛去重取最新/互验 note、南向
+  T-1 与 .HK 后缀坑、eps_by_year 回收与缺失不虚构、quantile 单调+n 不含占位、
+  港股 pack 渲染（南向节/目标价统计/报表币种/港股口径行）。
+
+### Changed
+
+- fetch_fundamentals/FUNDAMENTALS_FETCHERS 按市场分派链（cn/hk 各自链表，
+  函数名与签名不变）；notices 链 NOTICES_CHAINS 同构化（港股单源链空结果=
+  available 事实）；valuation 双路架构按市场参数化。
+- references/01-evidence.md 六块表/扩展块表/16 簇/市场能力表/南向 T-1/forecast
+  制度差异/分位表规约句+backlog 八项（qt HK 快照/HKEXnews/CCASS/卖空/回购
+  金额/HK 行业/Reverse DCF/theses）；PIPELINE 港股速查重写；README 港股覆盖节。
+
+### Fixed
+
+- 独立评审修复（etnet/yf 数值与终态如实化）：etnet 目标价/EPS 改 `_fnum`
+  （01810 实测概览 50 行 33 个 NaN 目标价，此前 NaN 可混入 median/mean/
+  dispersion）；目标价全缺时 `target_mean` 除零；中位数改 `statistics.median`
+  （偶数长度不再取上中位）；无目标价券商 reports 标题不再落 None；yfinance
+  `eps_trend` 无 `currency` 列形态（Yahoo 未回 epsTrendCurrency/旧版库）不再
+  KeyERROR 连坐 yf 簇熔断；yf 评级计数 NaN 防 `int(nan)`。
+- 无覆盖标的不计熔断（能力边界不变量）：HKF10 未覆盖标的（如 GEM 股）
+  datacenter 返回 result=null 经 akshare 抛 TypeError——`_fund_via_hk_em`/
+  `_hk_indicator_snapshot` 转 NotSupportedSymbol（fundamentals 换链、估值 A 路
+  让位 B 路，不记 em_datacenter 共享簇失败连坐 A 股 dc 块）；etnet 无覆盖标的
+  空壳页解包异常（No tables found / list.remove 两实测形态）归零覆盖走 yf
+  兜底，不记 etnet 簇失败。
+- 港股评级分布渲染：research 共识 rating_dist（etnet 券商原语/yf 四档）分桶
+  直出，替代 A 股 buy/add/neutral/reduce 四槽行（缺键硬渲染「减持 0」属虚构
+  市场事实）；南向 `_yi`/一致预期 EPS 年份 NaN 防御；`_hk_indicator_snapshot`
+  全字段 `_fnum` 对齐；`_fund_via_yf` 兜底口径 TTM note 落实（docstring 承诺
+  此前未实现）。
+- 港股研报链终态如实：无共识且含失败痕迹时 note 由 all_failed 改 no_consensus，
+  tried 补齐「etnet:概览空 / yf-analyst:无覆盖」事实；eps_by_year 改按自身
+  非空挂载（etnet 概览空不再连坐丢弃综合盈利预测表）。
+- 南向 note 措辞 HOLD_DATE→披露日（该字段实为 TRADE_DATE，note 勿伪字段名）；
+  删 `_dc_rows` 死参数 base_url 与 `_research_hk_etnet` 死变量 srt。
+- selftest 判据只收严：CAPS↔NOTICES_CHAINS/FUNDAMENTALS_FETCHERS 一致性钉、
+  etnet 偶数中位+NaN 目标价钉、eps_trend 缺 currency 列钉、no_consensus
+  tried 留痕钉、HKF10/etnet 无覆盖不计熔断钉（breakers 零计数）、港股 pack
+  评级分布行钉（含「减持 0」不出现）。
+- 文档同步：01-evidence 六块表 fundamentals 港股列改 em_datacenter(HKF10)→
+  yfinance（此前残留 not_supported(v1) 失同步）、补市场能力表规约句与 baidu
+  港股「近五年」有效坑位（akshare docstring period 域陈旧）；PIPELINE 港股
+  HTTP 计数 +8→+12；04-report/archive 版本锚改语义描述（重编号后 0.2.x 锚
+  失效）。
+
+## [0.0.8] - 2026-10-30
 
 ### Fixed
 
@@ -44,8 +160,7 @@
   市场推导后身份虽为 (cn/hk, 归一码)，报告路由不随推导变（仍 `_snapshot/`），
   实盘时间线索引与总览显式排除快照信号（0.2.2 前以 market='?' 天然排除，
   推导后须显式排除，防合成信号混入实盘索引）。
-
-## [0.2.2] - 2026-10-30
+## [0.0.7] - 2026-10-30
 
 ### Added
 
@@ -94,9 +209,7 @@
 - 升级后先跑 `migrate-reports` 预览再 `--apply`；旧平铺路径的外部链接以迁移打印的
   映射为准。601888 2026-10-28 前两次运行的报告在 0.2.2 之前已被覆盖，迁移后如实
   标为丢失版。
-
-## [0.2.1] - 2026-10-30
-
+## [0.0.6] - 2026-10-30
 ### Fixed
 
 - 报告风险/利好/附录逐条接回意见与 risk.json 的 rationale
@@ -172,7 +285,7 @@
     再合并；selftest 判据改动逐条为重算/收严/新增钉，无删除断言（置信帽
     与两档降级换 strong_buy 初判 Fixture 保持触达）。
 
-## [0.2.0] - 2026-10-28
+## [0.0.5] - 2026-10-28
 
 ### Added
 
@@ -212,7 +325,7 @@
 - datacenter 侧 RPT_HOLDERNUM_DET 数据集停在 2022（服务端排序亦不生效），
   股东户数事实源切 emweb F10 gdrs。
 
-## [0.1.3] - 2026-10-28
+## [0.0.4] - 2026-10-28
 
 ### Fixed
 
@@ -226,7 +339,7 @@
   口径同步北交所坑位。回归断言并入 `diagnose.py --selftest`（87/5 号段、
   .SS/.SZ 后缀、不覆盖不计熔断）。
 
-## [0.1.2] - 2026-10-28
+## [0.0.3] - 2026-10-28
 
 ### Changed
 
@@ -255,7 +368,7 @@
 - fundamentals 空值守卫修 NaN 击穿（`--` 占位经 `_num` 成 NaN 而非 None）；
   news/chip 空响应不再标 available 并重置簇失败计数（空数据不算成功）。
 
-## [0.1.1] - 2026-10-28
+## [0.0.2] - 2026-10-28
 
 ### Fixed
 
@@ -265,7 +378,7 @@
   ≥8 位仍拒绝），回归断言并入 `diagnose.py --selftest`。
 - 报告渲染：检查清单 ±10%% 双百分号展示修正（先于本版合入 main，补登）。
 
-## [0.1.0] - 2026-10-28
+## [0.0.1] - 2026-10-28
 
 ### Added
 

@@ -110,7 +110,7 @@ def evaluate_signals(signals, bars_by_code, cny_by_date=None):
             if fx_keys and s.get("market") == "hk":
                 fx0 = _fx_on(cny_by_date, fx_keys, s["date"])
                 fx1 = _fx_on(cny_by_date, fx_keys, dates[j])
-                if fx0 and fx1:
+                if fx0 and fx1 and s["close_at_signal"]:
                     base_cny = s["close_at_signal"] * fx0
                     if base_cny:
                         entry["cny_close"] = round(closes[j] * fx1, 4)
@@ -397,6 +397,15 @@ def selftest():
     assert s5["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral"), \
         "汇率缺根不得影响 outcome 本身"
     assert "cny_close" not in s5["evaluated"]["1"], "汇率缺根须如实缺省"
+    # 基准价 null 的 hk 信号（快照兜底登记的合法遗留形态）：--cny 只缺 cny
+    # 字段、不得 TypeError 阻断整个评估（默认口径对 base=None 本就容忍）
+    s6 = {**sig_buy, "id": "h4", "market": "hk", "code": "01810",
+          "close_at_signal": None, "status": "pending", "date": "2026-10-01",
+          "horizons": [1], "evaluated": {}}
+    evaluate_signals([s6], {"01810": bars}, cny_map)
+    assert "cny_close" not in s6["evaluated"]["1"] and \
+        s6["evaluated"]["1"]["outcome"] == "observed", \
+        "null 基准价在 --cny 口径下须照常评估、只缺 cny 展示字段"
     print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动 · 非交易日回退 · 索引后验格")
     print("  ok 人民币口径展示：hk 附 cny 字段 · outcome/归因仍港币 · 缺根如实缺省")
     print("SELFTEST PASSED ✔")
