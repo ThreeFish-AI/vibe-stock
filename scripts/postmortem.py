@@ -8,6 +8,7 @@
   - 每个判定结果按信号记录时的 sources 归因，累计进 ledger.json（wins/losses）。
   - 绩效因子与画像升降档由 adjudicate.performance_factor / profile 消费：
     命中率 ≥60% 且样本 ≥10 → promote；≤40% 且样本 ≥10 → demote；否则 observe。
+  - 评估后重建 reports/ 时间线索引（archive.rebuild_indexes），T+n 结果进 index.md。
 
 用法：
   uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance \
@@ -23,6 +24,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import archive as ar  # noqa: E402
 import fetch as fx  # noqa: E402
 
 STATE_DIR = os.path.expanduser("~/.vibe-stock")
@@ -152,12 +154,32 @@ def profile_report(ledger):
 
 
 def run(args):
+    # --stock 先归一：识别失败 detect_market 以 SystemExit 如实报错退出（不碰状态文件）
+    want = fx.detect_market(args.stock) if args.stock else None
     signals = _load(SIGNALS, [])
     if not signals:
         print("signals.json 为空：先跑 diagnose.py report 登记信号")
         return 0
-    symbols = sorted({(s["market"], s["code"]) for s in signals
-                      if s.get("status") == "pending"})
+    pending = [s for s in signals if s.get("status") == "pending"]
+    if want:  # 只评该股；同码未知市场记录留给下方守卫如实报跳过，不静默吞
+        pending = [s for s in pending if s.get("code") == want[1] and
+                   (s.get("market") == want[0] or s.get("market") not in fx.CHAINS)]
+        if not pending:
+            print("无 %s:%s 的 pending 信号，无可评估项" % want)
+            return 0
+    evaluable = []
+    for s in pending:  # 不可取数的坏记录（如快照兜底 market='?'）跳过并保持 pending，不阻塞其余后验
+        why = []
+        if s.get("market") not in fx.CHAINS:
+            why.append("market=%r 不在取数链（%s）" % (s.get("market"), "/".join(sorted(fx.CHAINS))))
+        if not s.get("code"):
+            why.append("缺 code")
+        if why:
+            print("跳过 %s（code=%s）：%s；保持 pending，人工修正后重跑"
+                  % (s.get("id"), s.get("code"), "、".join(why)))
+        else:
+            evaluable.append(s)
+    symbols = sorted({(s["market"], s["code"]) for s in evaluable})
     bars_by_code = {}
     for market, code in symbols:
         st = fx.load_fetch_state()
@@ -178,13 +200,24 @@ def run(args):
                 print("人民币口径不可用（%s）：outcome 仍按港币评估" % err)
         else:
             print("--cny：待评估信号无港股标的，人民币口径不适用")
-    delta = evaluate_signals(signals, bars_by_code, cny_by_date)
+    delta = evaluate_signals(evaluable, bars_by_code, cny_by_date)
     _save(SIGNALS, signals)
-    ledger = merge_ledger(_load(LEDGER, {}), delta)
-    _save(LEDGER, ledger)
-    print("评估完成；台账与绩效已更新（%s）" % LEDGER)
-    for src, d in delta.items():
-        print("  归因 %s：+%d 胜 / +%d 负" % (src, d["wins"], d["losses"]))
+    if delta:
+        ledger = merge_ledger(_load(LEDGER, {}), delta)
+        _save(LEDGER, ledger)
+        try:  # 派生视图放最后：挂了不吞台账（事实源已落盘）；坏索引的
+            # UnicodeDecodeError ⊂ ValueError 一并只告警
+            ar.rebuild_indexes(os.path.join(STATE_DIR, "reports"), signals,
+                               ar.load_names(STATE_DIR))
+        except (OSError, ValueError) as e:
+            print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s" % e)
+        print("评估完成；台账与绩效已更新（%s）" % LEDGER)
+        for src, d in delta.items():
+            print("  归因 %s：+%d 胜 / +%d 负" % (src, d["wins"], d["losses"]))
+    else:  # 全部跳过/未到期时不落「已更新」失实陈述，亦不空写台账文件；
+        # 无新评估则索引内容不变，跳过重建
+        ledger = _load(LEDGER, {})
+        print("评估完成；本次无台账变动（无可评估项或未到期）")
     rows = profile_report(ledger)
     if rows:
         print("画像升降档：")
@@ -212,6 +245,11 @@ def selftest():
     assert sig_buy["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral")
     assert sig_watch["evaluated"]["1"]["outcome"] == "observed", "watch 只观察"
     assert sig_buy["status"] in ("evaluated", "observed"), "全部 horizon 到期应收口"
+    # 时间线索引吃到后验结果：T+1 格带涨跌幅与判定
+    row = [ln for ln in ar.render_stock_index([sig_buy], "cn", "000001").splitlines()
+           if ln.startswith("| 2026-10-01")][0]
+    assert "%+.1f%% %s" % ((sig_buy["evaluated"]["1"]["close"] / 100.0 - 1) * 100,
+                           sig_buy["evaluated"]["1"]["outcome"]) in row, row
     assert delta["strategy:bull_trend"]["wins"] + \
         delta["strategy:bull_trend"]["losses"] <= 4
     ledger = merge_ledger({}, delta)
@@ -227,6 +265,96 @@ def selftest():
           "horizons": [1, 3, 5, 10], "evaluated": {}}
     evaluate_signals([s2], {"000001": bars})
     assert s2["evaluated"] == {} and s2["status"] == "pending"
+    # run() 市场守卫 + --stock 过滤（零网络：fetch_state 与日 K 全走桩替；
+    # 守卫回退时坏记录流入 symbols——market=None 在 sorted() 即 TypeError、
+    # market='?' 在真实 fetch_daily_bars 的 CHAINS 查表 KeyError，任一必被本段捕获）
+    import argparse
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        global SIGNALS, LEDGER
+        _old_paths = (SIGNALS, LEDGER, fx.STATE_DIR, fx.FETCH_STATE)
+        _old_fns = (fx.load_fetch_state, fx.save_fetch_state, dict(fx.DAILY_FETCHERS))
+        SIGNALS, LEDGER = os.path.join(td, "signals.json"), os.path.join(td, "ledger.json")
+        fx.STATE_DIR, fx.FETCH_STATE = td, os.path.join(td, "fetch_state.json")
+        fx.load_fetch_state = lambda: {"breakers": {}, "cooldowns": {}}
+        fx.save_fetch_state = lambda st: None
+        rbars = [{"date": "2026-10-%02d" % d, "open": 1, "high": 1, "low": 1,
+                  "close": 100.0 + d, "volume": 1} for d in range(1, 31)]
+        calls = []
+        for k in list(fx.DAILY_FETCHERS):
+            fx.DAILY_FETCHERS[k] = lambda m, c, _k=k: (calls.append((m, c)), rbars)[1]
+        def _mk(i, market, code, action):
+            return {"id": i, "market": market, "code": code, "action": action,
+                    "horizons": [1], "date": "2026-10-01", "close_at_signal": 102.0,
+                    "status": "pending", "evaluated": {}, "sources": ["strategy:demo"]}
+        def _state():
+            return [_mk("x1", "?", "000001", "buy"), _mk("n1", None, "000002", "buy"),
+                    _mk("c1", "cn", "000001", "buy"), _mk("c2", "cn", "600519", "reduce"),
+                    _mk("k1", "cn", None, "buy"), _mk("k2", None, None, "buy")]
+        try:
+            _save(SIGNALS, _state())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert run(argparse.Namespace(stock=None)) == 0
+            txt = out.getvalue()
+            assert "跳过 x1" in txt and "跳过 n1" in txt, txt
+            assert "market='?'" in txt and "market=None" in txt
+            assert "跳过 k1（code=None）：缺 code；" in txt, txt
+            assert "跳过 k2（code=None）：market=None 不在取数链（cn/hk）、缺 code；" in txt, txt
+            assert sorted(calls) == [("cn", "000001"), ("cn", "600519")], calls
+            sigs = {s["id"]: s for s in _load(SIGNALS, [])}
+            assert sigs["x1"]["status"] == "pending" and sigs["x1"]["evaluated"] == {}, \
+                "坏市场记录须保持 pending 不动（即便与可评估记录同 code）"
+            assert sigs["n1"]["status"] == "pending" and sigs["n1"]["evaluated"] == {}
+            assert sigs["k1"]["status"] == "pending" and sigs["k2"]["status"] == "pending", \
+                "缺 code 记录须保持 pending 不动"
+            assert "1" in sigs["c1"]["evaluated"] and "1" in sigs["c2"]["evaluated"]
+            assert sigs["c1"]["status"] == "observed" and sigs["c2"]["status"] == "observed"
+            # --stock 过滤：归一（sh600519→cn:600519）后只评该股；未入过滤集的坏记录不报
+            calls.clear()
+            _save(SIGNALS, _state())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert run(argparse.Namespace(stock="sh600519")) == 0
+            txt2 = out.getvalue()
+            assert calls == [("cn", "600519")], calls
+            sigs = {s["id"]: s for s in _load(SIGNALS, [])}
+            assert "1" in sigs["c2"]["evaluated"] and sigs["c2"]["status"] == "observed", \
+                "--stock 过滤只评目标股"
+            assert sigs["c1"]["status"] == "pending" and sigs["c1"]["evaluated"] == {}, \
+                "--stock 过滤下未指定股票的 pending 信号不得被评估"
+            assert "跳过" not in txt2, "过滤集外的坏记录不报跳过"
+            # --stock 命中 + 同码坏记录：坏记录走守卫报跳过、好记录照常评估
+            calls.clear()
+            _save(SIGNALS, _state())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert run(argparse.Namespace(stock="000001")) == 0
+            sigs = {s["id"]: s for s in _load(SIGNALS, [])}
+            assert "1" in sigs["c1"]["evaluated"] and sigs["c1"]["status"] == "observed"
+            assert sigs["x1"]["status"] == "pending" and sigs["x1"]["evaluated"] == {}
+            assert "跳过 x1" in out.getvalue()
+            # 无匹配 / 识别失败：如实报、不取数
+            calls.clear()
+            _save(SIGNALS, _state())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert run(argparse.Namespace(stock="hk01888")) == 0
+            assert "无 hk:01888 的 pending" in out.getvalue() and calls == []
+            try:
+                run(argparse.Namespace(stock="abc"))
+                raise AssertionError("--stock 不可识别应 SystemExit 报错退出")
+            except SystemExit:
+                pass
+            assert calls == []
+        finally:
+            SIGNALS, LEDGER = _old_paths[:2]
+            fx.STATE_DIR, fx.FETCH_STATE = _old_paths[2:]
+            (fx.load_fetch_state, fx.save_fetch_state) = _old_fns[:2]
+            fx.DAILY_FETCHERS.clear()
+            fx.DAILY_FETCHERS.update(_old_fns[2])
+    print("  ok run() 守卫：未知市场跳过不阻塞 · --stock 过滤/归一/无匹配/识别失败")
     # 非交易日登记信号（周末 qt 静态快照使 date 落在非交易日）：回退 ≤ 信号日
     # 最近 bar 评估，不静默永久失配；信号日新于最新 bar 仍属未到期跳过
     bars_g = [{"date": "2026-10-%02d" % d, "open": 1.0, "high": 1.0, "low": 1.0,
@@ -269,7 +397,7 @@ def selftest():
     assert s5["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral"), \
         "汇率缺根不得影响 outcome 本身"
     assert "cny_close" not in s5["evaluated"]["1"], "汇率缺根须如实缺省"
-    print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动 · 非交易日回退")
+    print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动 · 非交易日回退 · 索引后验格")
     print("  ok 人民币口径展示：hk 附 cny 字段 · outcome/归因仍港币 · 缺根如实缺省")
     print("SELFTEST PASSED ✔")
 
@@ -277,7 +405,7 @@ def selftest():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--selftest", action="store_true")
-    ap.add_argument("--stock", help="提示性参数：实际按 signals.json 待评估项取数")
+    ap.add_argument("--stock", help="只评该股的 pending 信号（经 detect_market 归一）；不给则全量")
     ap.add_argument("--cny", action="store_true",
                     help="港股信号附人民币口径展示（cny_close/cny_chg_pct，含汇兑项）；"
                          "outcome 判定与台账归因仍按港币（默认口径不变）")

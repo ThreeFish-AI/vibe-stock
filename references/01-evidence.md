@@ -99,7 +99,7 @@
 | market | qt 指数快照（与个股快照共用调用） | qt | qt 港股指数 |
 | industry | 申万归属(新浪 F10)+同花顺板块表 | sina_flow/ths | not_supported |
 | valuation | qt 快照→baidu 历史分位 | qt/baidu_gushitong | not_supported |
-| fx（0.2.2） | yfinance HKDCNY=X 日线（近 1 年，`hkd_cny_daily` 为 SSOT） | yf | 港股专属（cn=not_supported） |
+| fx（0.2.4） | yfinance HKDCNY=X 日线（近 1 年，`hkd_cny_daily` 为 SSOT） | yf | 港股专属（cn=not_supported） |
 
 规约句（三属性）：
 - **qt 位序双路校验**（无条件全局规则：qt.gtimg 无官方文档、~ 分隔字段序随版本

@@ -4,7 +4,7 @@ description: 给一只 A 股或港股做全面诊股并产出专业决策报告�
 license: MIT
 compatibility: 联网模式需 uv 与 PyPI 可达（akshare/efinance/yfinance 经 uv run --with 临时依赖，绝不装全局）；快照模式零依赖零网络；宿主须能执行 Bash。
 metadata:
-  version: "0.2.1"
+  version: "0.2.4"
   author: "ThreeFish-AI"
   source: "机制蓝本 ZhuLinsen/daily_stock_analysis（MIT）+ negentropy 178 精读"
 allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
@@ -26,6 +26,8 @@ allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
 | 无网/取数全失败 | ① 改 `--snapshot-dir` 快照模式（状态 estimated 如实） |
 | 只想要某策略视角 | 仍走全流程（裁决器需要全意见），报告按 [04] 结构出 |
 | 复盘建议对不对 | `postmortem.py --stock <code>`（[05]） |
+| 升级后存量平铺报告 | `diagnose.py migrate-reports` 先 dry-run 再 `--apply`（[04] 存量迁移） |
+| 查某票历史/时间线 | `~/.vibe-stock/reports/<code>.<market>/index.md`（[04] 落盘与跟踪） |
 | 改策略/加策略 | 只动 `strategies/*.yaml`（策略即数据），不碰代码 |
 | 本 Skill 自身缺陷 | 走 RSI 回路（[RSI.md](RSI.md)），不顺手改 |
 
@@ -58,7 +60,8 @@ uv run --no-project $T/scripts/adjudicate.py \
   --opinions .vs/opinions.json --risk .vs/risk.json \
   --evidence .vs/evidence.json --ledger ~/.vibe-stock/ledger.json --out .vs/verdict.json
 
-# ⑤ 报告 + 信号登记（~/.vibe-stock/reports/<code>-<date>.md）
+# ⑤ 报告 + 信号登记（~/.vibe-stock/reports/<code>.<market>/<date>.md 单日多版本，
+#    布局与时间线索引见 references/04；读报告以命令打印的 report -> <path> 为准）
 uv run --no-project $T/scripts/diagnose.py report --stock 600519 --workdir .vs
 ```
 
