@@ -24,6 +24,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch as fx  # noqa: E402
+import adjudicate as aj  # noqa: E402
 
 STATE_DIR = os.path.expanduser("~/.vibe-stock")
 SIGNALS = os.path.join(STATE_DIR, "signals.json")
@@ -512,7 +513,6 @@ def _opinions_with_rationale(verdict, opinions):
     """verdict.valid_opinions 只存四键（裁决 SSOT，不扩结构）；rationale 的
     SSOT 是 opinions.json：经 adjudicate.partition 同一验票判据筛出过门意见，
     按 source 依序接回——未过验票的意见（含同 source 的表外写法）不挂。"""
-    import adjudicate as aj
     pool = {}
     for o in aj.partition(opinions or [])[0]:
         pool.setdefault(o["source"], []).append(o.get("rationale") or "")
@@ -521,10 +521,6 @@ def _opinions_with_rationale(verdict, opinions):
         q = pool.get(o["source"])
         rows.append(dict(o, rationale=_one_line(q.pop(0)) if q else ""))
     return rows
-
-
-SIGNAL_FAMILY = {"strong_buy": "bull", "buy": "bull", "hold": "neutral",
-                 "sell": "bear", "strong_sell": "bear"}
 
 
 def _clip(s, n=120):
@@ -547,7 +543,7 @@ def _conclusion_reason(rg, rows, risk):
     pool = [o for o in rows if o["rationale"]]
     cands = [o for o in pool if o["signal"] == final] if final == guarded else []
     cands = cands or [o for o in pool
-                      if SIGNAL_FAMILY[o["signal"]] == SIGNAL_FAMILY[final]]
+                      if aj.FAMILY[o["signal"]] == aj.FAMILY[final]]
     if not cands:
         return note
     o = max(cands, key=lambda o: o["confidence"])
