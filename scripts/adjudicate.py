@@ -33,6 +33,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fetch as fx  # noqa: E402  （仅 meta_stock_code：verdict 绑定股票身份）
+
 # ---------------------------------------------------------------- 常量（SSOT：references/03）
 
 CANONICAL = ["strong_buy", "buy", "hold", "sell", "strong_sell"]
@@ -224,7 +227,13 @@ def adjudicate(opinions, risk, evidence=None, ledger=None):
     score, tier, cap = evidence_cap(evidence)
     final, caplog = apply_confidence_cap(guarded, cap)
     executable = final in ("buy", "strong_buy") and agg["confidence"] >= CONFIDENCE_GATE
+    meta = ((evidence or {}).get("meta") or {})
+    # 身份闸门比对键：推导唯一实现处 fx.meta_stock_code（与 diagnose 同源），
+    # 不可识别回 None（闸门对 None 放行，兼容旧版/手写 verdict）
+    code, recognized = fx.meta_stock_code(meta)
+    stock_code = code if recognized else None
     return {
+        "stock_code": stock_code,
         "valid_opinions": [{k: o[k] for k in ("source", "signal", "confidence", "weight")}
                            for o in agg["_valid"]],
         "diagnostics": diagnostics,
@@ -262,6 +271,10 @@ def selftest():
     _check("no-op guard", v["risk_guard"]["final"], "buy")
     _check("agg conf = bull-family mean", v["aggregate"]["confidence"], 0.8)
     _check("executable gate", v["executable"], True)
+    _check("stock_code 无 meta 回退 None", v["stock_code"], None)
+    ev_hk = {"meta": {"market": "hk", "code": "0700"},
+             "blocks": {n: {"state": "available"} for n, _ in BLOCKS}}
+    _check("stock_code 港股归一 5 位", adjudicate(ops, {}, ev_hk)["stock_code"], "00700")
     # strong_* 初判 Fixture：置信帽、两档降级须以 strong_buy 为输入才触达
     # （收缩后进 strong_buy 须高置信一致：3+2×mean(c)≥4.5 → mean(c)≥0.75）
     ops_s = [
