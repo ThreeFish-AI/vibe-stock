@@ -449,6 +449,15 @@ def _price_kind(evidence):
 def register_signal(evidence, verdict, opinions, report_id, report_path):
     market = evidence["meta"].get("market", "?")
     code = evidence["meta"].get("code") or evidence["meta"]["symbol"]
+    if "market" not in evidence["meta"]:  # 快照模式 meta 只有 symbol（fx.fetch 不判市场）
+        # 可推导时经 detect_market 从 meta.code/symbol 推 (market, 归一 code)——market
+        # 与 code 必须同源成对落账（只推 market 留原始 symbol 形态的 code 会取不到数）；
+        # 推不出（symbol 非 A/港代码形态）维持兜底 '?'，由 postmortem 侧未知市场
+        # 跳过守卫兜底（双层防线）。
+        try:
+            market, code = fx.detect_market(str(code))
+        except SystemExit:
+            pass
     final = verdict["risk_guard"]["final"]
     action = ACTION_OF[final]
     conf = verdict["aggregate"]["confidence"]
@@ -1596,6 +1605,17 @@ def selftest():
         assert [s["price_kind"] for s in sigs5[-2:]] == ["intraday", "close"], sigs5[-2:]
         import postmortem as pm
         pm.evaluate_signals(sigs5, {"000001": ib})  # 新增键不破坏后验读取
+        # 快照模式登记市场推导：meta 无 market（快照真实路径，经 fx.fetch 钉形状）时
+        # 从 code/symbol 推 (market, 归一 code)；推不出维持 '?'（postmortem 跳过守卫兜底）
+        snap_empty = os.path.join(td, "snap-empty")
+        os.makedirs(snap_empty)
+        for sym in ("sh600519", "TEST"):
+            ev_sn2 = {"meta": fx.fetch(sym, snap_empty)["meta"], "blocks": {}}
+            register_signal(ev_sn2, verdict, opinions, "r-sn", "p-sn")
+        sn_sigs = json.load(open(SIGNALS, encoding="utf-8"))
+        assert (sn_sigs[-2]["market"], sn_sigs[-2]["code"]) == ("cn", "600519"), sn_sigs[-2]
+        assert (sn_sigs[-1]["market"], sn_sigs[-1]["code"]) == ("?", "TEST"), sn_sigs[-1]
+        print("  ok 快照登记：meta 无 market 时 detect_market 推导（推不出维持 ?）")
     # 快照模式扩展块三态：声明态 / 缺省 estimated / 文件缺失 missing
     with tempfile.TemporaryDirectory() as td:
         json.dump({"state": "available", "summary": {}},
