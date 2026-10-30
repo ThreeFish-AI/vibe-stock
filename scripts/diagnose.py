@@ -818,7 +818,7 @@ def selftest():
         def _boom_dc(c):
             raise RuntimeError("dc down")
         fx.FUNDAMENTALS_FETCHERS.update({
-            "em-fin": _boom_dc,  # 0.2.0 链首：dc 簇故障路径
+            "em-fin": _boom_dc,  # 链首：dc 簇故障路径
             "sina-fin": lambda c: dict.fromkeys(
                 ["净资产收益率(%)", "每股收益(元)", "主营业务收入增长率(%)",
                  "资产负债率(%)"], float("nan")),
@@ -875,7 +875,7 @@ def selftest():
         del sys.modules["akshare"]
     print("  ok 熔断按簇计账：行情簇熔断不连坐 em_search/sina/ths；日K链跳过同簇源走腾讯")
     print("  ok 财务回退链 fallback/all_failed · _num 百分号与 NaN · 情报块成功重置簇计数")
-    # -- 0.2.0：qt/sina 解析器罐体（零网络）· derive_chip · 15 簇绑定 --
+    # -- qt/sina 解析器罐体（零网络）· derive_chip · 簇绑定 --
     qf = [""] * 80
     qf[1], qf[2], qf[3], qf[4] = "中国中免", "601888", "50.00", "50.18"
     qf[6], qf[37], qf[38], qf[39] = "109420", "54702", "0.56", "25.38"
@@ -941,7 +941,7 @@ def selftest():
     assert (fx.derive_chip(hand, 1_000_000, "ak-em")["获利比例"]
             == fx.derive_chip(share, 1_000_000, "yf")["获利比例"]
             == fx.derive_chip(share, 1_000_000, "qq-tx")["获利比例"] == 1.0)  # qq-tx 亦为股
-    # 15 簇绑定：datacenter 家族合簇且独立于行情簇；腾讯三主机互异；新浪流量三源合簇
+    # 簇绑定：datacenter 家族合簇且独立于行情簇；腾讯三主机互异；新浪流量三源合簇
     assert len(set(fx.CLUSTERS.values())) == 15, set(fx.CLUSTERS.values())
     for k in ("em-fin", "dc-respredict", "dc-forecast", "dc-unlock"):
         assert fx.CLUSTERS[k] == "em_datacenter", k
@@ -952,8 +952,8 @@ def selftest():
     assert (fx.CLUSTERS["sina-flow"] == fx.CLUSTERS["sina-news"]
             == fx.CLUSTERS["sina-industry"] == "sina_flow")
     assert fx.CLUSTERS["sina-flow"] != fx.CLUSTERS["sina-fin"]  # 子域分簇
-    print("  ok qt/sina 解析罐体（双路校验两路径）· derive_chip 三态 · 15 簇绑定")
-    # -- 0.2.0 修复钉：dc 空结果=事实非失败 · forecast 取最新预告+最近披露 · unlock 升序 --
+    print("  ok qt/sina 解析罐体（双路校验两路径）· derive_chip 三态 · 簇绑定")
+    # -- 修复钉：dc 空结果=事实非失败 · forecast 取最新预告+最近披露 · unlock 升序 --
     st3 = {"breakers": {}, "cooldowns": {}}
     _today = dt.date.today()
     near = (_today + dt.timedelta(days=5)).isoformat()
@@ -1252,7 +1252,7 @@ def selftest():
         # qq_news 源 src 字段（自媒体/官方甄别维度）须透出到 LLM 可见面
         assert "[2026-10-20][腾讯网]" in text, "news 行须渲染来源段"
         assert "置信帽" in text
-        # 0.2.0：quote 键位修复 + 技术派生扩容 + 近 10 根 K OHLCV 渲染
+        # quote 键位修复 + 技术派生扩容 + 近 10 根 K OHLCV 渲染
         t = evidence["blocks"]["technical"]
         assert t["new_high_20d"] is True, "递增序列末根须判 20 日新高"
         assert t["box_60d"] and t["box_60d"]["pos_pct"] >= 90, t["box_60d"]
@@ -1267,7 +1267,7 @@ def selftest():
             "近 10 根 K 行须为 日期/开/高/低/收/量/涨跌幅 七列"
         assert all(len(l.split()) == 7 for l in bar_lines), \
             "首行涨跌幅亦须七列（bars>10 时由第 11 根收盘可算）"
-        # 0.2.0 扩展块渲染：满额截断 / 哨兵 / 缺失如实 / 有界护栏
+        # 扩展块渲染：满额截断 / 哨兵 / 缺失如实 / 有界护栏
         assert "## 资金流" in text and "连续流入 3 日" in text
         mf_lines = [ln for ln in text.splitlines()
                     if ln.startswith("  2026-10-") and "主力" in ln]
@@ -1384,7 +1384,7 @@ def selftest():
         hv = _head(dict(v_n, risk_guard={"initial": "buy", "final_before_cap": "sell",
                                           "final": "sell", "log": []}), ops_n, {})
         assert hv.endswith("。初判 buy 经 RiskGuard 改判为 sell"), hv
-        # 0.2.0：报告全块状态表（核心/扩展标注）+ 近期事件 bullet
+        # 报告全块状态表（核心/扩展标注）+ 近期事件 bullet
         assert "| moneyflow |" in report and "扩展·0分" in report
         assert "| valuation | 扩展·0分 | missing |" in report
         assert "## 近期事件" in report and "2026-10-31 披露" in report
@@ -1397,7 +1397,7 @@ def selftest():
         assert "现价 12.4" in report, "report 现价须从 quote 块取（qt 叠加价）"
         assert "| 块 | 权重 | 状态 | 来源 | 备注 |" in report, \
             "证据状态表头须与 5 单元格数据行同列数"
-        # 0.2.0 修复钉：预告数值全缺不打印 None 字面量；估值仅分位形态可见；
+        # 修复钉：预告数值全缺不打印 None 字面量；估值仅分位形态可见；
         # 超 16k 截断保留「## 意见产出要求」（意见段产出契约不可丢）
         ev_pf = json.loads(json.dumps(evidence))
         ev_pf["blocks"]["forecast"]["performance_forecast"] = {

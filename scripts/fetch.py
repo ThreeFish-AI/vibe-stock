@@ -52,13 +52,13 @@ STALE_DAYS = {"quote": 1, "daily_bars": 5, "news": 3, "fundamentals": 120,
 CLUSTERS = {
     "ak-em": "em_quote",     # 东财行情簇 · akshare 日K
     "ef-em": "em_quote",     # 东财行情簇 · efinance 日K（簇内次选，同端点冗余）
-    "em-chip": "em_quote",   # 东财行情簇 · 筹码（0.2.0 起仅作 derive 无股本时的回退位）
+    "em-chip": "em_quote",   # 东财行情簇 · 筹码（仅作 derive 无股本时的回退位）
     "em-search": "em_search",  # 东财搜索簇 · 逐股新闻（独立于行情簇）
     "sina-fin": "sina",      # 新浪簇 · 财务指标（money.finance F10，链末）
     "ths-fin": "ths",        # 同花顺簇 · 财务摘要（回退）
     "qq-tx": "qq",           # 腾讯行情簇 · qfq 日K（web.ifzq.gtimg.cn 主机）
     "yf": "yf",              # Yahoo Finance
-    # —— 0.2.0 扩容（六簇 → 十五簇）——
+    # —— 扩容：datacenter/公告/研报/快照等簇 ——
     "em-fin": "em_datacenter",  # 东财数据中心簇 · 财务主指标（datacenter*/securities/api）
     "em-notice": "em_notice",   # 东财公告簇 · np-anotice-stock 子域
     "cninfo-disc": "cninfo",    # 巨潮簇 · 公告权威回退（www.cninfo.com.cn）
@@ -232,7 +232,7 @@ def _parse_qt_s(text):
 
 def _qt_batch(market, code, st, now):
     """qt 簇取齐快照数据：个股全量（quote 叠加/估值/股本消费，仅 A 股——港股
-    全量快照位序未验证，0.2.0 不取）+ 指数紧凑（market 消费）。
+    全量快照位序未验证，不取）+ 指数紧凑（market 消费）。
     qt 簇熔断/失败返回 (None, None)，各消费方自行降级。"""
     ok, why = source_allowed(st, CLUSTERS["qt-snap"], now)
     if not ok:
@@ -295,7 +295,7 @@ def _daily_via_tencent(market, code):
     """腾讯行情簇（proxy.finance.qq.com）：qfq 日K，与东财行情簇独立故障域。
 
     新浪 stock_zh_a_daily 实测不复权，禁入链（不复权数据不得混入 qfq 链）。
-    volume 列要求 akshare ≥2025-10 版；单位为股（em 系源为手）——0.2.0 起
+    volume 列要求 akshare ≥2025-10 版；单位为股（em 系源为手）——
     被 derive_chip（绝对量换手）与 pack OHLCV 原值渲染消费，单位口径以
     01-evidence chip 规约句为 SSOT（判错方向会把换手率放大百倍）。
     """
@@ -547,7 +547,7 @@ NEWS_CHAINS = {"cn": ["em-search", "qq-news", "sina-news"], "hk": ["qq-news"]}
 
 def fetch_news(market, code, st, now):
     """新闻块：A 股三簇链 em_search→qq_news→sina_flow（异厂商互备）；
-    港股 qq-news 单源（0.2.0 解除 not_supported）。"""
+    港股 qq-news 单源。"""
     tried = []
     for name in NEWS_CHAINS[market]:
         cluster = CLUSTERS[name]
@@ -564,7 +564,7 @@ def fetch_news(market, code, st, now):
         except NotSupportedSymbol:
             # 标的级无覆盖：能力边界拒绝非源故障，不计熔断不连坐他股
             # （同 qt none_match；终态仍如实 fetch_failed——news 为有权重核心
-            # 块，「空=available」属质量分语义变更，0.3.0 级决策不在此改）
+            # 块，「空=available」属质量分语义变更，minor 级决策不在此改）
             tried.append((name, "not_supported"))
         except ImportError:
             tried.append((name, "import_missing"))  # 缺库不记熔断（环境问题非源问题）
@@ -575,7 +575,7 @@ def fetch_news(market, code, st, now):
 
 
 def _fund_via_em(code):
-    """东财数据中心簇（0.2.0 链首，经 akshare）：一表全含——四概念键对齐既有
+    """东财数据中心簇（链首，经 akshare）：一表全含——四概念键对齐既有
     口径，另带扩展键（毛利率/净利率/ROIC/归母净利同比，近 4 报告期）。
     列名为接口 raw 英文列（REPORT_DATE/EPSJB/ROEJQ/…），最新期在前。
     SECUCODE 后缀按 cn_exchange 唯一判定处映射（bj→.BJ/sh→.SH/sz→.SZ）。"""
@@ -761,7 +761,7 @@ def derive_chip(bars, float_shares, bars_source=""):
 
 def fetch_chip(market, code, st, now, bars=None, float_shares=None,
                bars_source=""):
-    """筹码分布（0.2.0 derive 优先）：本地自算（日K+qt 流通股本）→ estimated；
+    """筹码分布（derive 优先）：本地自算（日K+qt 流通股本）→ estimated；
     无输入或自算失败时探 em-chip 官方接口（em_quote 簇复活位）→ available；
     港股 not_supported（能力差异摆到明面上）。"""
     if market == "hk":
@@ -796,7 +796,7 @@ def fetch_chip(market, code, st, now, bars=None, float_shares=None,
                 "note": type(e).__name__}
 
 
-# ---------------------------------------------------------------- 扩展证据块（0.2.0 · 九块零权重）
+# ---------------------------------------------------------------- 扩展证据块（九块零权重）
 
 _DC = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
@@ -1356,7 +1356,7 @@ BLOCK_WEIGHTS = [("quote", 25), ("daily_bars", 25), ("technical", 25),
                  ("news", 10), ("fundamentals", 10), ("chip", 5)]
 # 扩展块：不进 BLOCK_WEIGHTS 质量分（信息面不是裁决面——置信帽只反映核心行情
 # 链可用性，与情报丰富度正交），可见性由八态状态行与策略 required_evidence 承担。
-# 快照模式文件可选、缺省 missing。某块要进权重属 0.3.0 级语义变更（golden 重建）。
+# 快照模式文件可选、缺省 missing。某块要进权重属 minor 级语义变更（golden 重建）。
 EXT_BLOCKS = ["moneyflow", "notices", "research", "forecast", "unlock",
               "holder", "market", "industry", "valuation"]
 ALL_BLOCKS = [n for n, _ in BLOCK_WEIGHTS] + EXT_BLOCKS

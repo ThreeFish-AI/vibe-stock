@@ -57,5 +57,5 @@ CHANGELOG 记录并同步本文件锁版本。
 ## 港股速查
 
 代码形态 `hk00700` / `0700.HK`；Yahoo 侧自动归一 4 位（0700.HK）。news 走
-qq_news 单源（0.2.0 解除 not_supported）；fundamentals/chip 与扩展块（除
+qq_news 单源；fundamentals（港股经东财 HKF10 接入）/chip 与扩展块（除
 market 港股指数）对港股为 not_supported，报告与质量分如实反映。
