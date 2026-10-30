@@ -149,7 +149,7 @@ def main():
         "选 %d（%d 个行业）。明细见 [stageA/screen_report.md](stageA/screen_report.md)。"
         % (fl.get("pool_size", a.top_n), a.top_n, fl["spot_source"], fl["periods"][0],
            fl["primary_coverage"], fl.get("pool_size", 300), fl["secondary_backfill"],
-           3, a.top_n, n_ind),
+           fl.get("industry_cap", 3), a.top_n, n_ind),
         "- **Stage B 全管线诊断（%d/%d）**：每股 15 证据块（取数状态见 "
         "[vs/_fetch_matrix.md](vs/_fetch_matrix.md)，证据档位 %s）→ 每股一 agent "
         "出意见板（每策略一条+三角色各一条）→ 确定性裁决（≥0.2.1 聚合口径，"

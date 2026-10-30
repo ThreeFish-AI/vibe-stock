@@ -333,9 +333,11 @@ def main():
                 break
         return sel, skipped
 
-    sel, skipped = greedy(a.industry_cap)
+    cap_used = a.industry_cap
+    sel, skipped = greedy(cap_used)
     if len({r["industry"] for r in sel}) < 8:
-        sel, skipped = greedy(a.industry_cap + 1)
+        cap_used = a.industry_cap + 1
+        sel, skipped = greedy(cap_used)
     sel_df = pd.DataFrame(sel).sort_values("composite", ascending=False).reset_index(drop=True)
 
     # 第 N/N+1/N+2 名分差（断崖弹性 28-32：只记录，不硬切）
@@ -350,7 +352,8 @@ def main():
                    "pool_size": n_expect,
                    "cons_source": cons_src, "spot_source": spot_src, "periods": periods,
                    "primary_coverage": pri_cov, "secondary_backfill": sec_backfill,
-                   "no_financial": no_fin, "max_price_cap": round(max_price, 1),
+                   "no_financial": no_fin, "industry_cap": cap_used,
+                   "max_price_cap": round(max_price, 1),
                    "momentum_neutralized": int(df["momentum_missing"].sum()),
                    "calls": FETCH_LOG}, f, ensure_ascii=False, indent=2)
 
@@ -367,7 +370,8 @@ def main():
         f"{hard_counts or '无'}",
         f"- 动量因子缺失中性化（0.3）并如实标注：{int(df['momentum_missing'].sum())} 只",
         f"- 入选行业分布（{len(ind_dist)} 个行业）：{ind_dist}",
-        f"- 行业帽({a.industry_cap})挤出高分票：{skipped[:10] if skipped else '无'}",
+        f"- 行业帽({cap_used}{'（入选行业数 <8 放宽 +1）' if cap_used != a.industry_cap else ''})"
+        f"挤出高分票：{skipped[:10] if skipped else '无'}",
         f"- 第 {a.top_n}/{a.top_n + 1}/{a.top_n + 2} 名 composite："
         f"{[round(x, 4) for x in rest['composite'].tolist()]}（断崖弹性：分差 <0.01 可 ±2）",
         "",
