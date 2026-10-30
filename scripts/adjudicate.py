@@ -312,6 +312,11 @@ def selftest():
                                    a["final_signal"]), ("buy", "hold"))
     bear2 = board(("sell", 0.9), ("sell", 0.9))
     _check("bear 2s", aggregate([dict(o) for o in bear2])["final_signal"], "sell")
+    # <1.5 兜底 strong_sell 可达（旧实现兜底分支错写 hold、该档从未可达）：
+    # 2×strong_sell 1.0 → 3−2×1.0=1.0 <1.5
+    _check("agg strong_sell reachable",
+           aggregate(board(("strong_sell", 1.0), ("strong_sell", 1.0)))["final_signal"],
+           "strong_sell")
     # 纯中性板：hold；共识如实分级（同档 3/3 零冲突 high，置信离散 ≥0.3 → medium）
     a = aggregate(board(("hold", 0.4), ("hold", 0.5), ("hold", 0.6)))
     _check("neutral tight", (a["final_signal"], a["consensus_level"], a["confidence"]),
