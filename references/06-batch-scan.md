@@ -50,9 +50,10 @@ index.md           主报告（render_index.py 渲染——勿手改，重跑即
 坑位：不写运行日志类 json（取数状态看 `_fetch_matrix.md`，信号登记看
 `~/.vibe-stock/signals.json`）；深评输入摘要按需派生到 stdout、不落盘
 （`batch/digest.py <code>`）；各文件是唯一事实源，可读视图一律由渲染器
-派生。条件：报告落点结构（`~/.vibe-stock/reports/` 下个股报告路径）以
-`diagnose.py report` 现行为准；坑位：主报告不硬编码个股报告相对链接，
-报告归档结构变化时渲染器不用跟改。
+派生。条件：主报告需要链到个股报告时间线；做法：个股目录一律经
+`scripts/archive.py` 的 `stock_dir()` 计算（布局唯一定义处，见
+[04-report](04-report.md) 落盘与跟踪），再取相对 `_scans/<date>-<pool>/` 的路径；
+坑位：主报告不手写 `<code>.cn/` 之类路径字面量，归档布局变化时渲染器不用跟改。
 
 ## Stage A · 机械粗筛（池 → N，零 LLM）
 

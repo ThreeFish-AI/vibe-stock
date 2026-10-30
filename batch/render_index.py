@@ -10,6 +10,7 @@ import argparse
 import csv
 import json
 import os
+import sys
 from decimal import ROUND_HALF_UP, Decimal
 
 BUY = ("strong_buy", "buy")
@@ -37,6 +38,15 @@ def main():
         "~/.claude/skills/vibe-stock"), help="skill 根目录（复盘命令渲染用）")
     a = ap.parse_args()
     pool_name = POOL_NAME.get(a.pool, a.pool)
+    sys.path.insert(0, os.path.join(a.skill_dir, "scripts"))
+    import archive as ar  # noqa: PLC0415  个股目录布局唯一定义处
+
+    reports = os.path.dirname(os.path.dirname(os.path.abspath(a.scan_root)))
+
+    def link(code):
+        """个股时间线相对链接：布局取 archive.stock_dir（SSOT），不硬编码。"""
+        d = ar.stock_dir(reports, "cn", code)
+        return "[%s](%s)" % (code, os.path.relpath(os.path.join(d, "index.md"), a.scan_root))
 
     rk = load(a.scan_root, "stageC/ranking.json")
     alloc = load(a.scan_root, "portfolio/allocation.json")
@@ -86,7 +96,7 @@ def main():
         m = mid[r["code"]]
         sig = m["initial"]
         L.append("| %d | %s | %s | %s | %s | %s | %s | %s | %s |" % (
-            r["rank"], r["code"], r["name"], m["industry"], sig, m["final"],
+            r["rank"], link(r["code"]), r["name"], m["industry"], sig, m["final"],
             r.get("score") if r.get("score") is not None else "-",
             r["refuted"] if r["refuted"] is not None else "-",
             "%.3f" % r["final_score"]))
@@ -111,7 +121,7 @@ def main():
         t = r["tranches"]
         tr = "%d/%d/%d" % (t["T1_open"], t["T2_limit_entryref"], t["T3_trigger"])
         L.append("| %d | %s | %s | %.2f | %d | ¥%s | %s%% | %.2f | %.2f | %.2f | %s%s |" % (
-            r["rank"], r["code"], r["name"], r["price"], r["lots"],
+            r["rank"], link(r["code"]), r["name"], r["price"], r["lots"],
             format(r["cost"], ",.0f"), pct1(r["cost"], budget), r["stop"],
             r["entry_ref"], r["target1"] if r["target1"] else 0, tr,
             "⁵" if r["lots"] == 1 else ""))
@@ -154,7 +164,7 @@ def main():
         "[portfolio/checks.txt](portfolio/checks.txt)。"
         % (len(checks), checks.count("PASS"), checks.count("FAIL"), sum(ws) * 100,
            alloc["cash_left"] / budget * 100, min(ws) * 100, max(ws) * 100),
-        "- 个股报告与信号时间线：`~/.vibe-stock/reports/`（登记结果以 "
+        "- 个股报告与信号时间线：上表代码列直达各股 `index.md`（登记结果以 "
         "`~/.vibe-stock/signals.json` 为准）；意见 rationale 以 "
         "`vs/<code>/opinions.json` 为准。", "",
         "## 四、已知降级", "",
