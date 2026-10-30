@@ -33,12 +33,16 @@
  ],
  "diagnostics": [],
  "aggregate": {
-  "final_signal": "buy",
-  "confidence": 0.78,
+  "final_signal": "hold",
+  "confidence": 0.63,
   "consensus_level": "medium",
   "conflicts": [
    {
     "type": "spread",
+    "severity": "medium"
+   },
+   {
+    "type": "high_conf_dissent",
     "severity": "medium"
    }
   ]
@@ -60,15 +64,19 @@
    {
     "type": "spread",
     "severity": "medium"
+   },
+   {
+    "type": "high_conf_dissent",
+    "severity": "medium"
    }
   ]
  },
  "risk_guard": {
-  "initial": "buy",
+  "initial": "hold",
   "final_before_cap": "hold",
   "final": "hold",
   "log": [
-   "veto buy->hold",
+   "no-op",
    "no-op"
   ]
  },
