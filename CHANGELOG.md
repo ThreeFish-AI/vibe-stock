@@ -53,9 +53,12 @@
     多头板与低置信板，含跨入买入族的形态——selftest 已钉 `relax: 2x sb`
     两例：2×strong_buy 0.6 旧 hold→新 buy、2×0.8 旧 buy→新 strong_buy
     （一致方向攒够幅度即进档）；最小反例 8×strong_buy 0.60 + 2×hold 0.50
-    → 旧 hold / 新 buy——多数多头板一步跨进买入族；数学边界（可验证）：
-    一致板进 buy 须平均置信 ≥0.5、进 strong_buy 须 ≥0.75（与
-    CONFIDENCE_GATE 同量纲）。低置信一致空头板按 [03] 字面旧判
+    → 旧 hold / 新 buy——多数多头板一步跨进买入族；数学边界（可验证，
+    同信号一致板）：buy 板进 buy 须平均置信 ≥0.5、strong_buy 板进
+    strong_buy 须 ≥0.75（与 CONFIDENCE_GATE 同量纲）；strong_* 板进
+    相邻档门槛减半——strong_buy 板 ≥0.25 即聚合 buy、strong_sell 板
+    >0.25 即聚合 sell，评估放宽面勿按 0.5 门槛估。低置信一致空头板按
+    [03] 字面旧判
     （<1.5→strong_sell）的 strong_sell→新 hold——低置信不再独裁最重卖出档。
   - <1.5 兜底由 hold 改 strong_sell，对齐 [03] 阈值表字面（旧代码兜底
     分支错写 hold，strong_sell 档从未可达）。
