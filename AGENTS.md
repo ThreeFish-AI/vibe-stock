@@ -37,8 +37,10 @@
 | references/03-synthesis.md | 聚合、分歧、RiskGuard |
 | references/04-report.md | 决策报告模板、落盘布局与时间线索引 |
 | references/05-postmortem.md | 信号后验自校准 |
+| references/06-batch-scan.md | 批量子技能：指数成分精选与资金配置（编排层） |
 | references/PIPELINE.md | 五段流水线与命令速查 |
 | strategies/ | 策略 YAML 库 |
 | scripts/ | fetch / adjudicate / diagnose / postmortem / lens / archive（裁决 · 诊断 · 基本面锚透镜 · 报告归档与索引） |
+| batch/ | 批量子技能参考实现（口径以 references/06 为准，不设 selftest 门禁——以 scripts/ 四件全绿 + 06 口径复核为准） |
 | evals/ | 合成 Fixture 与黄金样本 |
 | docs/.agents/ | [Issue 记录](docs/.agents/issue.md) 与 [知识索引](docs/.agents/knowledge-map.md) |

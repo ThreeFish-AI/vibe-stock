@@ -51,8 +51,9 @@ uv run --no-project scripts/adjudicate.py --opinions .vs/opinions.json \
 uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 ```
 
-文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（五篇规约 +
-PIPELINE）→ [strategies/](strategies/)（策略库）。回归：
+文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（六篇规约 +
+PIPELINE）→ [batch/](batch/)（批量子技能参考实现）→ [strategies/](strategies/)
+（策略库）。回归：
 `scripts/*.py --selftest` 四件全绿。
 
 ## 免责

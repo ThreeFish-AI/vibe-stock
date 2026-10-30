@@ -4,6 +4,9 @@
 `${CLAUDE_SKILL_DIR}`）；`$W` = 本次诊股工作区（默认 `.vs/`）；状态目录
 `~/.vibe-stock/`（signals.json / ledger.json / fetch_state.json /
 reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](04-report.md)，不入仓）。
+本文件只覆盖单股五段流水线；多股批量（指数成分精选/筛 N/资金配置）走
+[06-batch-scan](06-batch-scan.md) 子技能（`batch/` 参考实现，命令序见
+[batch/README](../batch/README.md)）。
 
 ```text
 ① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；16 块=核心六块
