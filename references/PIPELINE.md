@@ -60,6 +60,10 @@ CHANGELOG 记录并同步本文件锁版本。
 ## 港股速查
 
 代码形态 `hk00700` / `0700.HK` / `00700` 统一归一 5 位（`00700`，报告目录
-`00700.hk`）；Yahoo 侧再转 4 位（0700.HK）。news 走
-qq_news 单源（0.2.0 解除 not_supported）；fundamentals/chip 与扩展块（除
-market 港股指数）对港股为 not_supported，报告与质量分如实反映。
+`00700.hk`）；Yahoo 侧再转 4 位（0700.HK）。已接入：
+fundamentals（东财 HKF10→yf，质量分 85 good）、valuation（em-hk-ind 具名列
+快照+baidu 5 年分位）、research（etnet→yf 双源：逐券商目标价/EPS/评级 +
+90 日 EPS 修正方向）、notices（em-notice ann_type=H 单源，盈警/回购分型）、
+moneyflow（南向持股 T-1 披露）、news（qq_news 单源）、market（港股指数）。
+仍 not_supported：chip/forecast/unlock/holder/industry（港股无对应披露形态，
+见 01 backlog）。港股全链约 +8 次 HTTP（16 簇之 etnet 为港股唯一新簇）。

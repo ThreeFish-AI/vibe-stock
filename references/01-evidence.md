@@ -49,9 +49,10 @@
   akshare/efinance 既有 secid 规则；链外仍单源的块（如扩展块 emweb-holder、
   baidu-val）失败如实 fetch_failed，不虚构回退。
 - **熔断**：持续失败——单簇连续 3 败停 300s（半开放行单次探测）；状态持久化
-  `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（15 簇：
+  `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（16 簇：
   em_quote/em_search/em_datacenter/em_notice/em_report/emweb/cninfo/sina/
-  sina_flow/ths/qq/qt/qq_news/baidu_gushitong/yf）；簇判定规则（无条件全局规则：
+  sina_flow/ths/qq/qt/qq_news/baidu_gushitong/yf/etnet——etnet 为港股盈利
+  预测独立主机簇；em 系港股新源键 em-fin-hk/em-hk-ind/dc-hsgt 均归既有 em 簇）；簇判定规则（无条件全局规则：
   簇=主机/服务族粒度的故障域）——同厂商不同服务族分簇（东财先例：push2* 行情
   簇死而 datacenter/np-anotice/reportapi 同期活，2026-10-28 实证），同子域多
   端点合簇（sina_flow 三源共担）；坑位：
@@ -80,25 +81,25 @@
 做法：包裹 + 声明 + 报告不复述；
 坑位：哨兵声明写在外层、不进外文正文，报告引用新闻事实时不得携带哨兵标记。
 
-## 扩展证据块（0.2.0 · 九块零权重）
+## 扩展证据块（九块零权重）
 
 扩展块是**信息面不是裁决面**：不进六块质量分与置信帽（置信帽只反映核心行情链
 可用性，与情报丰富度正交——资金流缺失不该压低 strong_sell 的可信度表达）。可见
 性由 context-pack 状态行与策略 required_evidence 承担；裁决器 EXT_BLOCKS 镜像
-声明零权重口径（selftest E4/E5 钉住）。某块要进权重属 0.3.0 级语义变更：须人工
+声明零权重口径（selftest E4/E5 钉住）。某块要进权重属 minor 级语义变更：须人工
 评审 + golden 重建。
 
 | 块 | 源链（主→回退） | 簇 | 港股 |
 | --- | --- | --- | --- |
-| moneyflow | 新浪直连 60 日四档净额（主力=r0_net+r1_net 自算） | sina_flow | not_supported |
-| notices | em_notice(8 类枚举)→cninfo(26 类，监管权威) | em_notice/cninfo | not_supported |
-| research | em_report(逐篇)+datacenter 直连(评级共识+目标价) | em_report/em_datacenter | not_supported |
-| forecast | datacenter 直连×2（预告+披露日历） | em_datacenter | not_supported |
+| moneyflow | A：新浪直连 60 日四档净额（主力=r0_net+r1_net 自算）；HK：南向持股 RPT_MUTUAL_STOCK_HOLDRANKS 直连（T-1 披露） | sina_flow；HK=em_datacenter | 南向持股（港股通标的；非标的=not_supported） |
+| notices | em_notice(8 类枚举)→cninfo(26 类，监管权威)；HK=em_notice(ann_type=H 单源，盈警/回购标题分型) | em_notice/cninfo | em-notice-h 单源（HKEXnews 回退在 backlog） |
+| research | em_report(逐篇)+datacenter 直连(评级共识+目标价+EPS1..4 前瞻回收)；HK=etnet(逐券商目标价/EPS/评级)→yf(analyst 互验+eps_trend 90 日修正) | em_report/em_datacenter；HK=etnet/yf | etnet+yf 双源（东财 reportapi 港股 0 覆盖不入链） |
+| forecast | datacenter 直连×2（预告+披露日历） | em_datacenter | not_supported（港股无预告制度，见制度差异句） |
 | unlock | datacenter 直连（解禁批次） | em_datacenter | not_supported |
 | holder | emweb F10 gdrs（近 8 期） | emweb | not_supported |
 | market | qt 指数快照（与个股快照共用调用） | qt | qt 港股指数 |
-| industry | 申万归属(新浪 F10)+同花顺板块表 | sina_flow/ths | not_supported |
-| valuation | qt 快照→baidu 历史分位 | qt/baidu_gushitong | not_supported |
+| industry | 申万归属(新浪 F10)+同花顺板块表 | sina_flow/ths | not_supported（backlog：HKCVALUE 同业锚） |
+| valuation | A：qt 快照→baidu 历史分位；HK：em-hk-ind 具名列快照(RPT_CUSTOM_HKF10)→baidu 分位（qt 港股位序未验证不入链） | qt/baidu_gushitong；HK=em_datacenter/baidu_gushitong | em-hk-ind+baidu 双路 |
 
 规约句（三属性）：
 - **qt 位序双路校验**（无条件全局规则：qt.gtimg 无官方文档、~ 分隔字段序随版本
@@ -115,6 +116,20 @@
 - **单厂商依赖如实标注**：forecast/unlock（em_datacenter）、research 共识
   （em_datacenter）无同级回退——失败如实 fetch_failed，零权重保证其失败不动摇
   裁决核心，状态行可见。
+- **南向 T-1 披露口径**（条件：港股 moneyflow 块取南向持股）：南向为收盘后
+  傍晚更新的 T-1 披露制度——最新日=available 且 note 注明 HOLD_DATE，仅
+  HOLD_DATE 距今超 STALE_DAYS["moneyflow"]（10 自然日，停牌/断更形态）才标
+  stale；坑位：勿把制度性 T-1 当数据陈旧降级；非港股通标的空结果=标的级事实
+  （not_supported），且南向过滤必须带 `.HK` 规范后缀（缺后缀恒空结果、会被
+  误判成非港股通，实测坑已入 selftest）。
+- **港股 forecast 制度差异**（条件：market=hk 的 forecast 块）：港股无业绩
+  预告制度——not_supported 的 note 与 context-pack 港股口径行固定声明「无预告
+  ≠无雷」，盈警/盈喜走 notices 块「盈利警告/正面盈利预告」标题分型；坑位：
+  勿把 A 股「预告窗口=信息真空」习惯外推港股。
+- **估值分位表（pe_quantiles_5y）**：baidu 历史序列在 percentile 之外另落
+  p10/25/50/75/90+n+cur 分位表（A/HK 同构）——消费方（估值透镜等）对任意
+  参考价插值无需整序列落盘；坑位：分位公式钉 `(<=cur)/n`，分母不含「--」
+  占位（NaN 不进分母，selftest 钉）。
 - **北向个股永不接入**（无条件全局规则：监管性终局）：2024-08-19 起港交所永久
   停止披露沪深股通个股级成交与持股，冻结数据（止于 2024-08-16）只能标 stale 作
   历史背景、**永不重试**——重试逻辑会把它误报为可恢复故障。
@@ -125,7 +140,15 @@
   volume 手/股单位按源判定（ak-em/ef-em=手，qq-tx/yf=股），判错方向会把换手率
   放大百倍。
 
-backlog 插件位（未实现，reportName/簇已验证）：龙虎榜 RPT_DAILYBILLBOARD_
+backlog 插件位（未实现，reportName/簇已验证）：**qt 港股全量快照**（r_hk 前缀
+独立位序表已单标的实测，但位 3/4/38 等实时字段未多标的复核——判错会把错价叠进
+quote 与 close_at_signal，不可降级故整体缓接）；**HKEXnews 披露易**（prefix.do→
+titleSearchServlet 两段式，权威回退位）；**CCASS 南向互验位**（www3 全市场单页
+631KB 重量级）；**港股卖空**（HKEX MSHTMAIN 午市版/ASHTMAIN 全日版，新簇
+hkex_stat）；**港股回购金额**（SRRPT xls 唯一结构化免费源）；**HK 行业归属**
+（RPT_PCF10_INDUSTRY_HKCVALUE 同业估值锚一次调用搭车）；**Reverse DCF/前瞻
+PE 锚**（待 FX 公开源验证 + FCF 基数规则：TTM 为负 vs 3 年均值为正会翻转结论）；
+**长周期 theses 台账**（BARS_WINDOW=250 与 252 日窗物理冲突待解）；龙虎榜 RPT_DAILYBILLBOARD_
 DETAILSNEW、两融（sse/szse 官网直连）、十大股东/机构持仓（emweb F10）、大宗
 RPT_DATA_BLOCKTRADE、质押 RPT_CSDC_LIST、增减持 RPT_SHARE_HOLDER_INCREASE、
 增发回购、机构调研 RPT_ORG_SURVEYNEW、同行估值（cninfo_webapi 行业 PE+qt 批量）、

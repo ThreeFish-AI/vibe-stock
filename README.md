@@ -18,7 +18,15 @@
 | RiskGuard 只降不升 | `adjudicate.py risk_guard`（veto/单向降档/永不升级） |
 | 决策信号八态 + 对立失效 + 后验 | `diagnose.py register_signal` + `postmortem.py` |
 | 策略 YAML 说明书（策略即数据） | `strategies/` 十策略 + 自定义扩展位 |
-| 扩展证据块（0.2.0） | 九块零权重情报面（资金流/公告/研报/预告/解禁/股东户数/大盘/行业/估值）不进质量分；簇级熔断 15 簇 |
+| 扩展证据块 | 九块零权重情报面（资金流/公告/研报/预告/解禁/股东户数/大盘/行业/估值）不进质量分；簇级熔断 |
+
+## 港股覆盖
+
+财务（东财 HKF10→yfinance）、估值（具名列快照+百度 5 年分位+分位表）、研报
+共识（ETNet→yfinance 双源：逐券商目标价/EPS/评级、90 日 EPS 修正方向）、公告
+（东财 ann_type=H，盈警/回购分型）、南向持股（T-1 披露口径）均已接入免 key
+公开源；chip/forecast/unlock/holder/industry 为港股能力边界（无对应披露形态），
+如实标 not_supported。
 
 ## 快速开始
 
