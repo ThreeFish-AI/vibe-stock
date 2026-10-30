@@ -2,6 +2,26 @@
 
 本文件只登记版本级变化；条目遵循 Keep a Changelog、[SemVer 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2] - 2026-10-30
+
+### Fixed
+
+- postmortem 未知市场跳过守卫 + `--stock` 过滤生效（RSI-20261030-04）：原
+  `run()` 把全部 pending 信号的 (market, code) 去重后无条件取日 K，market 不在
+  取数链（如快照兜底登记的 `?`）一条即 `CHAINS` KeyError 崩溃、全量后验被
+  阻塞；且 `--stock` 实参从未被消费（全量扫描，参数装饰性）。现无有效
+  market/code 的记录逐条打印跳过诊断（id/code/market 实际值）、保持 pending
+  不动、不借同 code 已知市场的日 K 代评，其余信号照常评估；`--stock` 经
+  detect_market 归一后只评该 code 的 pending（识别失败如实报错退出、无匹配
+  如实打印且不写文件），缺省保持全量。
+- 快照模式登记市场推导（RSI-20261030-04）：原 `register_signal` 对 meta 无
+  market 的 evidence（快照模式真实路径——fetch 快照分支不判市场）一律兜底
+  `?`，正是后验坏记录的源头；现可推导时经 detect_market 从 meta 的 code/symbol
+  推 (market, 归一 code) 成对登记（同源成对防「market 已知而 code 仍是原始
+  symbol 形态、取不到日 K」），推不出维持 `?`（与 postmortem 跳过守卫构成双层
+  防线）；坑位——合成快照（evals 演示 fixture）勿跑 report 登记信号，推得市场
+  后后验将以真实日 K 评虚构基准价、台账遭污染。
+
 ## [0.2.1] - 2026-10-30
 
 ### Fixed
