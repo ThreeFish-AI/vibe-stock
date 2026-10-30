@@ -89,8 +89,8 @@ def detect_market(symbol):
     if re.fullmatch(r"(sh|sz|bj)?\d{6}", s):
         return "cn", re.sub(r"^(sh|sz|bj)", "", s)
     m = re.fullmatch(r"(?:hk)?(\d{4,5})(?:\.hk)?", s)
-    if m:
-        return "hk", m.group(1)
+    if m:  # 港股统一 5 位（0700.HK→00700）：报告目录与信号身份只认一个形态
+        return "hk", m.group(1).zfill(5)
     raise SystemExit("无法识别市场，示例：600519 / 0601888 / sz000001 / bj830799 / hk00700 / 0700.HK")
 
 

@@ -30,6 +30,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fetch as fx  # noqa: E402  （仅 detect_market：verdict 绑定股票身份）
+
 # ---------------------------------------------------------------- 常量（SSOT：references/03）
 
 CANONICAL = ["strong_buy", "buy", "hold", "sell", "strong_sell"]
@@ -204,7 +207,13 @@ def adjudicate(opinions, risk, evidence=None, ledger=None):
     score, tier, cap = evidence_cap(evidence)
     final, caplog = apply_confidence_cap(guarded, cap)
     executable = final in ("buy", "strong_buy") and agg["confidence"] >= CONFIDENCE_GATE
+    meta = ((evidence or {}).get("meta") or {})
+    try:  # 港股统一 5 位；与 diagnose.stock_code 同口径（身份闸门比对键）
+        stock_code = fx.detect_market(str(meta.get("code") or meta.get("symbol") or ""))[1]
+    except SystemExit:
+        stock_code = None
     return {
+        "stock_code": stock_code,
         "valid_opinions": [{k: o[k] for k in ("source", "signal", "confidence", "weight")}
                            for o in agg["_valid"]],
         "diagnostics": diagnostics,
