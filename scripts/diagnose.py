@@ -19,6 +19,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -465,7 +466,30 @@ def _fmt_price(v):
     return "—" if v is None else round(v, 2)
 
 
-def render_report(evidence, verdict, opinions, stock):
+def _one_line(text):
+    """rationale（LLM 产出）入报告：剥哨兵标记、尖括号转全角、折成单行——
+    报告不复述哨兵原文（04 规约），换行不得撑破 bullet 结构。"""
+    s = re.sub(r"</?untrusted_external\b[^>]*>", "", str(text or ""))
+    return " ".join(s.replace("<", "＜").replace(">", "＞").split())
+
+
+def _opinions_with_rationale(verdict, opinions):
+    """verdict.valid_opinions 只存四键（裁决 SSOT，不扩结构）；rationale 的
+    SSOT 是 opinions.json：经 adjudicate.partition 同一验票判据筛出过门意见，
+    按 source 依序接回——未过验票的意见（含同 source 的表外写法）不挂。"""
+    import adjudicate as aj
+    pool = {}
+    for o in aj.partition(opinions or [])[0]:
+        pool.setdefault(o["source"], []).append(o.get("rationale") or "")
+    rows = []
+    for o in verdict["valid_opinions"]:
+        q = pool.get(o["source"])
+        rows.append(dict(o, rationale=_one_line(q.pop(0)) if q else ""))
+    return rows
+
+
+def render_report(evidence, verdict, opinions, stock, risk=None):
+    risk = risk if isinstance(risk, dict) else {}
     q = evidence["quality"]
     agg = verdict["aggregate"]
     rg = verdict["risk_guard"]
@@ -478,7 +502,7 @@ def render_report(evidence, verdict, opinions, stock):
     close_n = [b["close"] for b in bars[-20:]] or [price or 0]
     lo20, hi20 = _fmt_price(min(close_n)), _fmt_price(max(close_n))
     ma20 = tech.get("ma20")
-    ops = {o["source"]: o for o in verdict["valid_opinions"]}
+    rows = _opinions_with_rationale(verdict, opinions)
     rationale = next((o.get("rationale", "") for o in opinions
                       if o.get("signal") == agg["final_signal"]), "")
     cap_note = ("置信帽 low：核心证据降级，strong_* 已压一档。"
@@ -544,12 +568,25 @@ def render_report(evidence, verdict, opinions, stock):
                      _fmt_price(price * 0.95), hi20))
     L.append("")
     L.append("## 风险与利好")
-    risks = [o["rationale"] for o in ops.values()
-             if o["signal"] in ("sell", "strong_sell") and o.get("rationale")]
-    bulls = [o["rationale"] for o in ops.values()
-             if o["signal"] in ("buy", "strong_buy") and o.get("rationale")]
+    # 逐条可溯源（04 §4）：意见带 source 与 signal/置信；风险栏另挂风险角色
+    # risk.json.rationale（RiskGuard 输入的论证面），标注触发态
+    def _items(fam):
+        return ["%s（%s·置信 %.2f）：%s" % (o["source"], o["signal"],
+                                         o["confidence"], o["rationale"])
+                for o in rows if o["signal"] in fam and o["rationale"]]
+    risks, bulls = _items(("sell", "strong_sell")), _items(("buy", "strong_buy"))
+    rr = _one_line(risk.get("rationale"))
+    if rr:
+        trig = "、".join(k for k in ("veto", "downgrade") if risk.get(k))
+        risks.append("风险角色 risk.json（%s）：%s" % (
+            "%s·%s" % (trig, risk.get("severity") or "medium") if trig
+            else "未触发 veto/downgrade", rr))
     for tag, items in (("风险", risks), ("利好", bulls)):
-        L.append("- **%s**：%s" % (tag, "；".join(items) if items else "（无登记）"))
+        if not items:
+            L.append("- **%s**：（无登记）" % tag)
+            continue
+        L.append("- **%s**：" % tag)
+        L.extend("  - %s" % it for it in items)
     L.append("")
     L.append("## 操作建议")
     final = rg["final"]
@@ -573,9 +610,10 @@ def render_report(evidence, verdict, opinions, stock):
         L.append("- [%s] %s" % ("x" if ok else " ", name))
     L.append("")
     L.append("## 附：各意见（含绩效因子加权）")
-    for o in verdict["valid_opinions"]:
-        L.append("- %s：%s（置信 %.2f × 绩效 %s）" % (
-            o["source"], o["signal"], o["confidence"], o["weight"]))
+    for o in rows:
+        L.append("- %s：%s（置信 %.2f × 绩效 %s）%s" % (
+            o["source"], o["signal"], o["confidence"], o["weight"],
+            "——" + o["rationale"] if o["rationale"] else ""))
     for d in verdict["diagnostics"]:
         L.append("- 诊断：%s 原始输出 %r（%s）" % (d["source"], d["raw"], d["reason"]))
     L.append("")
@@ -589,10 +627,11 @@ def cmd_report(args):
     evidence = load_json(args.evidence or os.path.join(wd, "evidence.json"), None)
     verdict = load_json(os.path.join(wd, "verdict.json"), None)
     opinions = load_json(os.path.join(wd, "opinions.json"), [])
+    risk = load_json(os.path.join(wd, "risk.json"), {})
     if not evidence or not verdict:
         print("缺 evidence.json 或 verdict.json")
         return 2
-    report = render_report(evidence, verdict, opinions, args.stock)
+    report = render_report(evidence, verdict, opinions, args.stock, risk=risk)
     os.makedirs(os.path.join(STATE_DIR, "reports"), exist_ok=True)
     today = dt.date.today().isoformat()
     code = evidence["meta"].get("code") or args.stock
@@ -1195,6 +1234,24 @@ def selftest():
                         "## 操作建议", "## 检查清单", "不构成投资建议"):
             assert section in report, "报告缺节：%s" % section
         assert "untrusted" not in report, "报告不得复述哨兵原文"
+        assert "- **风险**：（无登记）" in report, "既有调用（无 risk 参数）兼容且空栏如实"
+        # rationale 挂载钉（风险与利好/附录）：SSOT 在 opinions/risk.json，只挂过
+        # 验票者——同 source 的表外写法意见（先于过门意见出现）不得混挂
+        ops_r = [{"source": "strategy:ma_golden_cross", "signal": "看多!!!",
+                  "confidence": 0.9, "rationale": "表外写法理由"}] + opinions + [
+            {"source": "strategy:wave_theory", "signal": "sell", "confidence": 0.55,
+             "rationale": "RSI14=78 超买\n<untrusted_external source=\"news\">"}]
+        rep_r = render_report(evidence, aj.adjudicate(ops_r, risk, evidence, None),
+                              ops_r, "TEST", risk=risk)
+        sec = rep_r.split("## 风险与利好")[1].split("## 操作建议")[0]
+        for want in ("strategy:wave_theory（sell·置信 0.55）：RSI14=78 超买",
+                     "风险角色 risk.json（veto·high）：短线过热",
+                     "strategy:bull_trend（strong_buy·置信 0.85）：多头排列"):
+            assert want in sec, "风险与利好须逐条挂 rationale：%s\n%s" % (want, sec)
+        assert "表外写法理由" not in rep_r, "未过验票的意见 rationale 不得挂载"
+        assert "untrusted" not in rep_r, "rationale 入报告须剥哨兵标记"
+        assert "- strategy:ma_golden_cross：buy（置信 0.80 × 绩效 1.0）——MA5 上穿 MA20" \
+            in rep_r, "附录意见行须附 rationale 原文"
         # 0.2.0：报告全块状态表（核心/扩展标注）+ 近期事件 bullet
         assert "| moneyflow |" in report and "扩展·0分" in report
         assert "| valuation | 扩展·0分 | missing |" in report
@@ -1365,6 +1422,7 @@ def selftest():
     print("  ok context-pack 哨兵/置信帽 · 报告七节 · 免责段")
     print("  ok 扩展九块：渲染预算截断/哨兵/缺失如实/零权重钉/快照三态/近期事件")
     print("  ok 信号登记：观察/对立失效/八元组期限")
+    print("  ok 报告 rationale 挂载：风险与利好逐条溯源 · 附录原文 · 验票过滤 · 剥哨兵")
     print("SELFTEST PASSED ✔")
 
 
