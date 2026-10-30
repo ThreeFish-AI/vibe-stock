@@ -488,6 +488,39 @@ def _opinions_with_rationale(verdict, opinions):
     return rows
 
 
+SIGNAL_FAMILY = {"strong_buy": "bull", "buy": "bull", "hold": "neutral",
+                 "sell": "bear", "strong_sell": "bear"}
+
+
+def _clip(s, n=120):
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
+def _conclusion_reason(rg, rows, risk):
+    """结论理由须支撑终裁 rg.final（04 §1）：RiskGuard 改判致终裁≠初判 → 优先
+    risk.json.rationale 摘要并注明改判；否则取同信号（其次同方向族；置信帽压档
+    时径取同方向族）最高置信意见；都没有不挂（不硬凑）。"""
+    final, initial = rg["final"], rg["initial"]
+    guarded = rg.get("final_before_cap", final)
+    note = ""
+    if final != initial and guarded != initial:
+        note = "初判 %s 经 RiskGuard 改判为 %s%s" % (
+            initial, guarded, "、置信帽压为 %s" % final if final != guarded else "")
+        rr = _one_line(risk.get("rationale"))
+        if rr:
+            return "%s——风险角色 risk.json：%s" % (note, _clip(rr))
+    pool = [o for o in rows if o["rationale"]]
+    cands = [o for o in pool if o["signal"] == final] if final == guarded else []
+    cands = cands or [o for o in pool
+                      if SIGNAL_FAMILY[o["signal"]] == SIGNAL_FAMILY[final]]
+    if not cands:
+        return note
+    o = max(cands, key=lambda o: o["confidence"])
+    why = "%s（%s·%s %.2f）" % (_clip(o["rationale"]), o["source"], o["signal"],
+                               o["confidence"])
+    return "%s——%s" % (note, why) if note else why
+
+
 def render_report(evidence, verdict, opinions, stock, risk=None):
     risk = risk if isinstance(risk, dict) else {}
     q = evidence["quality"]
@@ -503,8 +536,7 @@ def render_report(evidence, verdict, opinions, stock, risk=None):
     lo20, hi20 = _fmt_price(min(close_n)), _fmt_price(max(close_n))
     ma20 = tech.get("ma20")
     rows = _opinions_with_rationale(verdict, opinions)
-    rationale = next((o.get("rationale", "") for o in opinions
-                      if o.get("signal") == agg["final_signal"]), "")
+    rationale = _conclusion_reason(rg, rows, risk)
     cap_note = ("置信帽 low：核心证据降级，strong_* 已压一档。"
                 if q["confidence_cap"] == "low" else "")
     conflicts = agg["conflicts"]
@@ -1252,6 +1284,51 @@ def selftest():
         assert "untrusted" not in rep_r, "rationale 入报告须剥哨兵标记"
         assert "- strategy:ma_golden_cross：buy（置信 0.80 × 绩效 1.0）——MA5 上穿 MA20" \
             in rep_r, "附录意见行须附 rationale 原文"
+        # 结论理由方向钉：初判 hold + downgrade(medium) → sell，结论不得挂 hold 理由
+        def _head(v, ops, rk):
+            return render_report(evidence, v, ops, "TEST", risk=rk).split(
+                "## 结论\n")[1].splitlines()[0]
+        ops_c = [{"source": "strategy:h%d" % i, "signal": "hold", "confidence": 0.6,
+                  "rationale": "观望理由%d" % i} for i in range(10)] + [
+            {"source": "strategy:s%d" % i, "signal": "sell", "confidence": 0.5,
+             "rationale": "卖出理由%d" % i} for i in range(3)]
+        risk_c = {"veto": False, "downgrade": True, "severity": "medium",
+                  "rationale": "跌破 MA20 且放量"}
+        v_c = aj.adjudicate(ops_c, risk_c, evidence, None)
+        assert (v_c["risk_guard"]["initial"], v_c["risk_guard"]["final"]) == (
+            "hold", "sell"), "合成板前提：初判 hold 经 downgrade 终裁 sell %r" % (
+                v_c["risk_guard"],)
+        hc = _head(v_c, ops_c, risk_c)
+        assert hc.startswith("**sell**") and "观望理由" not in hc, hc
+        assert "初判 hold 经 RiskGuard 改判为 sell——风险角色 risk.json：跌破 MA20 且放量" \
+            in hc, hc
+        hc2 = _head(v_c, ops_c, dict(risk_c, rationale=""))  # 无风险理由回落卖出族
+        assert "观望理由" not in hc2 and "卖出理由0（strategy:s0·sell 0.50）" in hc2, hc2
+        # 无改判：结论理由与终裁同信号（最高置信），不注改判
+        ops_n = [{"source": "strategy:a", "signal": "buy", "confidence": 0.8,
+                  "rationale": "金叉放量"},
+                 {"source": "strategy:b", "signal": "buy", "confidence": 0.7,
+                  "rationale": "站上均线"},
+                 {"source": "role:风险", "signal": "hold", "confidence": 0.6,
+                  "rationale": "等待确认"}]
+        v_n = aj.adjudicate(ops_n, {}, evidence, None)
+        assert v_n["risk_guard"]["initial"] == v_n["risk_guard"]["final"] == "buy", \
+            v_n["risk_guard"]
+        hn = _head(v_n, ops_n, {})
+        assert "。金叉放量（strategy:a·buy 0.80）" in hn and "等待确认" not in hn \
+            and "RiskGuard" not in hn, hn
+        # 置信帽压档（strong_buy→buy）：径取同方向族最高置信，不挑低置信同信号意见
+        ops_k = [{"source": "strategy:bull_trend", "signal": "strong_buy",
+                  "confidence": 0.9, "rationale": "多头排列"}] + ops_n[1:]
+        v_k = dict(aj.adjudicate(ops_k, {}, evidence, None), risk_guard={
+            "initial": "strong_buy", "final_before_cap": "strong_buy", "final": "buy",
+            "log": ["no-op", "confidence_cap strong_buy->buy (core evidence degraded)"]})
+        hk = _head(v_k, ops_k, {})
+        assert "。多头排列（strategy:bull_trend·strong_buy 0.90）" in hk, hk
+        # 改判且无任何同向理由：只注改判、不硬凑
+        hv = _head(dict(v_n, risk_guard={"initial": "buy", "final_before_cap": "sell",
+                                          "final": "sell", "log": []}), ops_n, {})
+        assert hv.endswith("。初判 buy 经 RiskGuard 改判为 sell"), hv
         # 0.2.0：报告全块状态表（核心/扩展标注）+ 近期事件 bullet
         assert "| moneyflow |" in report and "扩展·0分" in report
         assert "| valuation | 扩展·0分 | missing |" in report
@@ -1423,6 +1500,7 @@ def selftest():
     print("  ok 扩展九块：渲染预算截断/哨兵/缺失如实/零权重钉/快照三态/近期事件")
     print("  ok 信号登记：观察/对立失效/八元组期限")
     print("  ok 报告 rationale 挂载：风险与利好逐条溯源 · 附录原文 · 验票过滤 · 剥哨兵")
+    print("  ok 结论理由支撑终裁：RiskGuard 改判挂风险理由 · 同信号/同族回落 · 置信帽径取同族 · 不硬凑")
     print("SELFTEST PASSED ✔")
 
 
