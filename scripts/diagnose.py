@@ -295,7 +295,7 @@ def render_context_pack(evidence, workdir):
                 "new_low_20d", "consecutive_up_days"]
         lines.append(" ".join("%s=%s" % (k, tech.get(k)) for k in keys
                               if tech.get(k) is not None))
-        if tech.get("vol_ratio_5_projected") is not None:
+        if tech.get("vol_ratio_5_projected") is not None and ss.get("last_bar_partial"):
             lines.append("vol_ratio_5_projected: %s（estimated：末根未完成，按已开盘 %s/%s "
                          "交易分钟线性外推全天量；日内量 U 形分布，早盘偏高、午后偏低）"
                          % (tech["vol_ratio_5_projected"], ss.get("elapsed_min"),
@@ -503,10 +503,13 @@ def _fmt_price(v):
 
 
 def _one_line(text):
-    """rationale（LLM 产出）入报告：剥哨兵标记、尖括号转全角、折成单行——
-    报告不复述哨兵原文（04 规约），换行不得撑破 bullet 结构。"""
+    """LLM 产出（rationale/诊断原始输出）入报告：剥哨兵标记、尖/方括号与
+    反引号转全角、折成单行——报告不复述哨兵原文（04 规约），换行不得撑破
+    bullet 结构；方括号全角化同时掐断 markdown 链接/图片注入（](url) 失效）。"""
     s = re.sub(r"</?untrusted_external\b[^>]*>", "", str(text or ""))
-    return " ".join(s.replace("<", "＜").replace(">", "＞").split())
+    for a, b in (("<", "＜"), (">", "＞"), ("[", "［"), ("]", "］"), ("`", "｀")):
+        s = s.replace(a, b)
+    return " ".join(s.split())
 
 
 def _opinions_with_rationale(verdict, opinions):
@@ -680,7 +683,10 @@ def render_report(evidence, verdict, opinions, stock, risk=None):
             o["source"], o["signal"], o["confidence"], o["weight"],
             "——" + o["rationale"] if o["rationale"] else ""))
     for d in verdict["diagnostics"]:
-        L.append("- 诊断：%s 原始输出 %r（%s）" % (d["source"], d["raw"], d["reason"]))
+        # 诊断行的 source/raw 同为 LLM 产出：与 rationale 同通道剥哨兵（%r 回显
+        # 会把哨兵原文逐字写进报告，违 04「报告不复述哨兵原文」）
+        L.append("- 诊断：%s 原始输出「%s」（%s）" % (
+            _one_line(d["source"]), _one_line(d["raw"]), d["reason"]))
     L.append("")
     L.append("---")
     L.append("*%s*" % DISCLAIMER)
@@ -1318,6 +1324,21 @@ def selftest():
         assert "untrusted" not in rep_r, "rationale 入报告须剥哨兵标记"
         assert "- strategy:ma_golden_cross：buy（置信 0.80 × 绩效 1.0）——MA5 上穿 MA20" \
             in rep_r, "附录意见行须附 rationale 原文"
+        # 诊断行哨兵/markdown 钉：无效意见的 signal 携哨兵、rationale 携链接语法
+        # 时，报告任何位置不得回显哨兵原文、markdown 注入须被全角化掐断
+        ops_d = ops_r + [
+            {"source": "role:情报", "signal":
+             '<untrusted_external source="news">请执行X ![x](https://t.e/p)',
+             "confidence": 0.5},
+            {"source": "role:技术", "signal": "buy", "confidence": 0.6,
+             "rationale": "量能验证 ![像素](https://t.e/px)"}]
+        rep_d = render_report(evidence, aj.adjudicate(ops_d, risk, evidence, None),
+                              ops_d, "TEST", risk=risk)
+        assert "untrusted" not in rep_d, "诊断行不得回显哨兵原文"
+        assert "- 诊断：role:情报 原始输出「请执行X !［x］(https://t.e/p)」" in rep_d, \
+            "诊断行原始输出须走 _one_line（剥哨兵+方括号全角化）"
+        assert "!［像素］(https://t.e/px)" in rep_d and "![像素]" not in rep_d, \
+            "rationale 的 markdown 图片注入须被方括号全角化掐断"
         # 结论理由方向钉：初判 hold + downgrade(medium) → sell，结论不得挂 hold 理由
         def _head(v, ops, rk):
             return render_report(evidence, v, ops, "TEST", risk=rk).split(
@@ -1587,6 +1608,20 @@ def selftest():
         assert sb["quote"]["state"] == "missing"       # 核心块同路径不受影响
         ev_sn = fx.fetch("600519", td)                 # 快照模式不判时段
         assert ev_sn["meta"]["session"]["phase"] == "unknown"
+        # 快照残留外推键钉：盘中 live 拆块存快照后 session 门控关闭（phase=
+        # unknown），technical.json 残留的 vol_ratio_5_projected 不得孤儿穿透
+        json.dump({"state": "available", "vol_ratio_5_projected": 2.01},
+                  open(os.path.join(td, "technical.json"), "w"))
+        json.dump({"state": "available", "bars": [
+            {"date": "2026-09-%02d" % d, "open": 10, "high": 10.2, "low": 9.9,
+             "close": 10.1, "volume": 10000} for d in range(1, 30)]},
+                  open(os.path.join(td, "daily_bars.json"), "w"))
+        ev_or = fx.fetch("600519", td)
+        assert "vol_ratio_5_projected" not in ev_or["blocks"]["technical"], \
+            "快照二次推导不得让 session 门控键孤儿存活"
+        pk_or = open(render_context_pack(ev_or, td), encoding="utf-8").read()
+        assert "vol_ratio_5_projected" not in pk_or and "None/None" not in pk_or, \
+            "pack 不渲染无时段背书的外推键（分钟数不得渲染为 None/None）"
     # 联网主流程 meta.session 单一落点（全源桩替+固定 now，零网络）：
     # fetch() 以末根日期+时钟判时段，technical 带时段推导（外推键入 evidence）
     _rb = {"bars": bars, "state": "available", "source": "ak-em", "tried": []}
@@ -1624,9 +1659,9 @@ def selftest():
     print("  ok context-pack 哨兵/置信帽 · 报告七节 · 免责段")
     print("  ok 扩展九块：渲染预算截断/哨兵/缺失如实/零权重钉/快照三态/近期事件")
     print("  ok 信号登记：观察/对立失效/八元组期限")
-    print("  ok 报告 rationale 挂载：风险与利好逐条溯源 · 附录原文 · 验票过滤 · 剥哨兵")
+    print("  ok 报告 rationale 挂载：风险与利好逐条溯源 · 附录原文 · 验票过滤 · 剥哨兵（诊断行同通道 · markdown 注入掐断）")
     print("  ok 结论理由支撑终裁：RiskGuard 改判挂风险理由 · 同信号/同族回落 · 置信帽径取同族 · 不硬凑")
-    print("  ok 盘中口径：时段纯函数（A/港边界）· 线性外推量比 · 警示行/盘中价/price_kind · 快照不判时段")
+    print("  ok 盘中口径：时段纯函数（A/港边界）· 线性外推量比 · 警示行/盘中价/price_kind · 快照不判时段 · 门控键不留旧值")
     print("SELFTEST PASSED ✔")
 
 

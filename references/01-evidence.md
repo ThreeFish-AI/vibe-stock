@@ -157,7 +157,9 @@ RPT_DATA_BLOCKTRADE、质押 RPT_CSDC_LIST、增减持 RPT_SHARE_HOLDER_INCREASE
   5 日均量（标 estimated；`elapsed_min` 为 0 不出）；context-pack 头部在 phase=
   intraday 时加醒目警示行（末根未收盘、vol_ratio_5 / vol_series_10 末位 /
   last_bar_pattern / 末根 OHLCV 为未完成 K 线口径、缩量放量判据参考外推值或收盘后
-  复核、报价为盘中价），收盘/快照不出此行；坑位：A 股日内成交量 U 形分布，线性
+  复核、报价为盘中价），收盘/快照不出此行（快照二次推导合并时门控键不留旧值——
+  technical.json 残留的外推键在 session 门控关闭时清除，pack 渲染另要求
+  last_bar_partial 背书）；坑位：A 股日内成交量 U 形分布，线性
   外推早盘偏高、午后偏低——外推值只救量级不供精确阈值判定，终判以收盘复核为准。
 - **价格的时段口径**：条件：信号登记（register_signal）与报告现价；做法：信号
   记录新增 `price_kind: intraday|close|unknown`（由 meta.session.phase 派生），报告

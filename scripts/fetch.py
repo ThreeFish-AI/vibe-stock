@@ -1482,8 +1482,12 @@ def fetch(symbol, snapshot_dir=None):
                 blocks[name] = {"state": bars_state, "source": "derived",
                                 **derive_technical(bars, meta.get("session"))}
             else:
-                blocks[name] = {**blocks.get(name, {}),
-                                **derive_technical(bars, meta.get("session"))}
+                derived = derive_technical(bars, meta.get("session"))
+                merged = {**blocks.get(name, {}), **derived}
+                # session 门控键门关即不留旧值：快照残留的外推量比不得孤儿穿透
+                if "vol_ratio_5_projected" not in derived:
+                    merged.pop("vol_ratio_5_projected", None)
+                blocks[name] = merged
         if blocks.get("quote", {}).get("state") in (None, "missing"):
             blocks["quote"] = {"state": bars_state, "source": "derived:" +
                                blocks["daily_bars"].get("source", ""),
