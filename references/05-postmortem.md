@@ -23,6 +23,9 @@
   `name`（A 股 qt 全量快照 / 港股 qt 紧凑快照 `s_hk<code>`）写入信号
   `stock_name`，索引组内取最新非空；坑位——名称是行情面数据，取数失败如实
   缺省 `—`，不做本地映射回退。
+- **价格口径**：盘中取数登记时 close_at_signal 是盘中价而非收盘价——
+  price_kind（intraday/close/unknown）如实标注，后验基准沿用登记价原样、
+  不回改（时段判定见 [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)）。
 
 ## 后验（postmortem 时）
 

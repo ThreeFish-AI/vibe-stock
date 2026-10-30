@@ -32,6 +32,10 @@ sell；strong sell / 清仓卖出 → strong_sell。
 - 策略说明书 = 数据：`name/display_name/category/required_evidence/aliases/
   default_priority/market_regimes` + `instructions`（自然语言交易逻辑）。
   required_evidence 的块缺失时策略须降置信并注明，不得假装看得到。
+- 量能类判据（vol_ratio_5 / vol_series_10）在 context-pack 头部出现盘中警示行
+  时，以外推值 `vol_ratio_5_projected`（estimated）或收盘后复核为准——盘中末根
+  为未完成 K 线，YAML 阈值直接消费会假缩量/假放量（规约见
+  [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)）。
 - 扩展事件块按事件方向分流：**风险向事件**（业绩预亏/首亏、大比例解禁临近、
   减持类公告）走**风险角色 risk.json 通道**（veto/downgrade 线索，非对称闸门
   只降不升），不在投票策略出方向票；**正向催化**（业绩预增、回购、重大合同、
