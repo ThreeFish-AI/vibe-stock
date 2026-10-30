@@ -24,7 +24,8 @@
 - `uv run --no-project scripts/adjudicate.py --selftest`：裁决器全绿（含破坏性实验）。
 - `uv run --no-project scripts/diagnose.py --selftest`：端到端合成流水线全绿。
 - `uv run --no-project scripts/postmortem.py --selftest`：后验自校准回归全绿。
-- 任何 `scripts/` 改动，上述三条全绿后才算完成（与 evals/README.md 口径一致，只收严）。
+- `uv run --no-project scripts/lens.py --selftest`：基本面锚纯函数回归全绿。
+- 任何 `scripts/` 改动，上述四条全绿后才算完成（与 evals/README.md 口径一致，只收严）。
 
 ## 目录速查
 
@@ -38,6 +39,6 @@
 | references/05-postmortem.md | 信号后验自校准 |
 | references/PIPELINE.md | 五段流水线与命令速查 |
 | strategies/ | 策略 YAML 库 |
-| scripts/ | fetch / adjudicate / diagnose / postmortem / archive（报告归档与索引） |
+| scripts/ | fetch / adjudicate / diagnose / postmortem / lens / archive（裁决 · 诊断 · 基本面锚透镜 · 报告归档与索引） |
 | evals/ | 合成 Fixture 与黄金样本 |
 | docs/.agents/ | [Issue 记录](docs/.agents/issue.md) 与 [知识索引](docs/.agents/knowledge-map.md) |

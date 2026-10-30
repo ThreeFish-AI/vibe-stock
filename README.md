@@ -28,6 +28,14 @@
 公开源；chip/forecast/unlock/holder/industry 为港股能力边界（无对应披露形态），
 如实标 not_supported。
 
+## 基本面锚（--cost）
+
+`prepare --cost <持仓成本>` 触发与短线信号正交的目标可达性透镜（scripts/lens.py
+纯函数）：参考价隐含 PE 与 5 年分位（免汇率比值法）、券商共识目标价位置/离散度/
+≥参考价家数、EPS 90 日修正方向、12 个月波动触及概率——三档结论（支撑不足/中性/
+有支撑）只作中长期参考：不进裁决聚合、不进置信帽、不进 T+1/3/5/10 后验；
+极端高估只作为风险角色 downgrade 线索（只降不升）。
+
 ## 快速开始
 
 ```bash
@@ -45,7 +53,7 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 
 文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（五篇规约 +
 PIPELINE）→ [strategies/](strategies/)（策略库）。回归：
-`scripts/*.py --selftest` 三件全绿。
+`scripts/*.py --selftest` 四件全绿。
 
 ## 免责
 

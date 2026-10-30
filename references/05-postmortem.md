@@ -1,5 +1,9 @@
 # 05 · 决策信号后验自校准（SSOT）
 
+后验只评估短线信号（策略/角色意见）：基本面锚（lens.py 三档结论，12 个月
+量级）不进后验——T+1/3/5/10 短窗证伪不了基本面论点（期限正交），把透镜塞进
+短窗归因只会错杀长周期视角。
+
 实现：[scripts/diagnose.py](../scripts/diagnose.py) `register_signal` +
 [scripts/postmortem.py](../scripts/postmortem.py)；状态在 `~/.vibe-stock/`。
 

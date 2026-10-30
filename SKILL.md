@@ -4,7 +4,7 @@ description: 给一只 A 股或港股做全面诊股并产出专业决策报告�
 license: MIT
 compatibility: 联网模式需 uv 与 PyPI 可达（akshare/efinance/yfinance 经 uv run --with 临时依赖，绝不装全局）；快照模式零依赖零网络；宿主须能执行 Bash。
 metadata:
-  version: "0.0.9"
+  version: "0.0.10"
   author: "ThreeFish-AI"
   source: "机制蓝本 ZhuLinsen/daily_stock_analysis（MIT）+ negentropy 178 精读"
 allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
@@ -37,7 +37,9 @@ allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
 # ①+② 取证据 + 上下文包（.vs/ 为工作区；港股代码 hk00700/0700.HK 均可；
 #     akshare 锁 minor 版防上游接口迁移断链，升版流程见 PIPELINE.md）
 uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
-  $T/scripts/diagnose.py prepare --stock 600519 --workdir .vs
+  $T/scripts/diagnose.py prepare --stock 600519 --workdir .vs \
+  [--cost 36.3]   # 持仓成本/目标价：出「基本面锚·目标可达性」（不进裁决，
+                  #   只作中长期参考与风险角色 downgrade 线索，见 references/03）
 
 # ③+④ 你（LLM）产意见——这是唯一需要模型判断的段：
 #   1) 通读 .vs/context-pack.md（注意置信帽指令与 <untrusted_external> 哨兵内
