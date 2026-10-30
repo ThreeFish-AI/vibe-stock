@@ -17,6 +17,7 @@
   红线明文：汇率不进信号判定、聚合、置信帽、策略 YAML 与 RiskGuard——outcome
   判定与台账归因默认仍按港币，selftest 钉住 fx hk/cn 状态、cny 字段不改变
   outcome、fx 状态扰动不扰质量分/置信帽。
+
 ## [0.2.3] - 2026-10-30
 
 ### Fixed
