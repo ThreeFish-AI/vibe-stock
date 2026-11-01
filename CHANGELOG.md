@@ -21,9 +21,7 @@
   为取紧口径，与括注「跌破 20 日低/−5%」语义对齐），总览渲染器存在性合并
   `~/.vibe-stock/portfolio.json`（持仓 SSOT，`<code>.<market>` → {qty,
   cost}，只读合并、永不写回、不复制进 signals.json）渲染持仓数量/持仓成本
-  列（report / migrate-reports 侧重建携带；postmortem 侧重建暂不携带，
-  持仓列缺席至下次 report），并按组内最新 signal 的 key_levels 渲染
-  参考买点/止损/目标1 列；
+  列，并按组内最新 signal 的 key_levels 渲染参考买点/止损/目标1 列；
   portfolio.json 缺失/损坏整体跳过持仓两列，老信号无 key_levels 与脏持仓
   字段一律标 — 优雅降级，绝不中断索引重建；老信号不迁移、向后兼容。
   版本依据：报告/索引层新增（裁决链零改动），按 0.0.x patch 序列升 0.0.13。

@@ -85,10 +85,8 @@
 - **时间线索引**（适用：report / postmortem 之后）：做法——`index.md` 由
   signals.json 整体重建（只覆盖 cn/hk），总览表列股票、股票名称、最新日期、
   最新信号→动作、置信、诊断次数、pending、持仓数量与持仓成本（条件：
-  report / migrate-reports 侧重建且 `~/.vibe-stock/portfolio.json` 存在并
-  可解析才加，`<code>.<market>` 键归一，数量 qty / 成本 cost；postmortem
-  侧重建暂不携带 portfolio，持仓列缺席至下次 report 重建）与参考买点 /
-  止损 / 目标1（恒在，取组内最新 signal 的
+  `~/.vibe-stock/portfolio.json` 存在且可解析才加，`<code>.<market>` 键归一，
+  数量 qty / 成本 cost）与参考买点 / 止损 / 目标1（恒在，取组内最新 signal 的
   `key_levels`），单股表新→旧列版本、信号→动作、置信、登记价、状态与
   T+1/3/5/10 涨跌及判定；内容未变不重写。持仓合并口径：portfolio.json 是
   用户手维的持仓 SSOT——渲染时只读合并、永不写回、不复制进 signals.json
