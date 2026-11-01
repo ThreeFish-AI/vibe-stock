@@ -19,8 +19,13 @@
    解禁批次）；港股 fx 块 available 时另附「## 汇率（人民币敞口）」情报节
    （HKD/CNY 当前/近 20 日/年内变动——汇率仅情报面，不进信号判定，见
    [01 · 汇率仅情报面](01-evidence.md)）。
-3. **关键价位**：现价 / 20 日高低 / MA20 / 参考买点 / 止损 / 目标。盘中取数时
-   现价注明「（盘中价）」，取数时段口径见 [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)。
+3. **关键价位**：现价 / 20 日高低 / MA20 / 参考买点 / 止损 / 目标。三价与
+   [06 · 三价纪律](06-batch-scan.md) 同源：止损 = max(−5% 线, 0.99×20 日低)
+   **取紧**、参考买点 = max(lo20, 0.97×现价)、目标 = hi20，报告渲染与
+   register_signal 落账的 `key_levels={entry_ref, stop, target1}` 同一函数
+   取数（单一事实源）；现价缺失不落 `key_levels`（总览价位列标 —，向后
+   兼容不迁移）。盘中取数时现价注明「（盘中价）」，取数时段口径见
+   [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)。
 4. **目标可达性**（条件：`--cost` 触发 lens；lens abstained 或未给 --cost
    时不出节、不硬凑）：参考价隐含 PE(TTM) 与 5 年分位（免汇率比值法，
    estimated）、共识目标价位置/离散度/≥参考价家数、EPS 90 日修正方向、
@@ -79,13 +84,23 @@
   不符 exit 2 且零写入。坑位：`.vs/` 残留上一只票的证据是最常见触发。
 - **时间线索引**（适用：report / postmortem 之后）：做法——`index.md` 由
   signals.json 整体重建（只覆盖 cn/hk），总览表列股票、股票名称、最新日期、
-  最新信号→动作、置信、诊断次数与 pending，单股表新→旧列版本、信号→动作、
-  置信、登记价、状态与 T+1/3/5/10 涨跌及判定；内容未变不重写。坑位：索引是
-  派生视图，手改会在下次重建时丢失；信号与后验的事实源始终是 signals.json；
-  股票名称解析顺序：信号组内最新非空 `stock_name`（登记时刻历史名）→
-  `~/.vibe-stock/names.json` 显示名缓存（report 取到名称时写穿，存量信号经此
-  显名）→ `—`（名称是行情面数据，A 股 qt 全量快照 / 港股 qt 紧凑快照，取数
-  失败如实缺省）。
+  最新信号→动作、置信、诊断次数、pending、持仓数量与持仓成本（条件：
+  report / migrate-reports 侧重建且 `~/.vibe-stock/portfolio.json` 存在并
+  可解析才加，`<code>.<market>` 键归一，数量 qty / 成本 cost；postmortem
+  侧重建暂不携带 portfolio，持仓列缺席至下次 report 重建）与参考买点 /
+  止损 / 目标1（恒在，取组内最新 signal 的
+  `key_levels`），单股表新→旧列版本、信号→动作、置信、登记价、状态与
+  T+1/3/5/10 涨跌及判定；内容未变不重写。持仓合并口径：portfolio.json 是
+  用户手维的持仓 SSOT——渲染时只读合并、永不写回、不复制进 signals.json
+  （索引是 signals.json 与 portfolio.json 两个 SSOT 的合并派生视图，清仓/
+  加仓后 signals 不留过期持仓）。坑位：索引是派生视图，手改会在下次重建时
+  丢失（要持仓/价位列就写 portfolio.json / 依赖注册落账，不手补列）；信号
+  与后验的事实源始终是 signals.json；portfolio.json 缺失/损坏整体跳过持仓
+  两列，老信号无 `key_levels` 与脏持仓字段（非数值 qty/cost）一律标 —
+  降级，索引重建不得中断；股票名称解析顺序：信号组内最新非空 `stock_name`
+  （登记时刻历史名）→ `~/.vibe-stock/names.json` 显示名缓存（report 取到
+  名称时写穿，存量信号经此显名）→ `—`（名称是行情面数据，A 股 qt 全量
+  快照 / 港股 qt 紧凑快照，取数失败如实缺省）。
 - **存量迁移**（适用：分级布局引入前（0.0.6 及以前）的平铺 `<code>-<date>.md`；须在升级后首次
   report 之前执行，否则当日新报告会让旧平铺文件被判 conflict 需人工处理）：做法——
   `diagnose.py migrate-reports` 默认 dry-run；`--apply` 依次写单日文件 → CAS 校验后

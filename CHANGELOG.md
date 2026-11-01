@@ -7,6 +7,27 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.13] - 2026-11-01
+
+### Added
+
+- index 总览原生持仓列与三价位列（RSI-20261101-01）：实盘持仓登记后
+  reports/index.md 手工补的持仓/价位列在每次 report / postmortem 整表重建时
+  被冲掉——索引渲染器数据源单一只读 signals.json，持仓与关键价位均无持久化
+  事实源。现 report 注册信号时把关键价位三价落进 signal 记录
+  （`key_levels={entry_ref, stop, target1}`，与报告「关键价位」节同一函数
+  取数，公式即 06 三价纪律：止损 = max(−5% 线, 0.99×20 日低) 取紧、参考
+  买点 = max(lo20, 0.97×现价)、目标1 = hi20；报告侧止损显示由 −5% 线收敛
+  为取紧口径，与括注「跌破 20 日低/−5%」语义对齐），总览渲染器存在性合并
+  `~/.vibe-stock/portfolio.json`（持仓 SSOT，`<code>.<market>` → {qty,
+  cost}，只读合并、永不写回、不复制进 signals.json）渲染持仓数量/持仓成本
+  列（report / migrate-reports 侧重建携带；postmortem 侧重建暂不携带，
+  持仓列缺席至下次 report），并按组内最新 signal 的 key_levels 渲染
+  参考买点/止损/目标1 列；
+  portfolio.json 缺失/损坏整体跳过持仓两列，老信号无 key_levels 与脏持仓
+  字段一律标 — 优雅降级，绝不中断索引重建；老信号不迁移、向后兼容。
+  版本依据：报告/索引层新增（裁决链零改动），按 0.0.x patch 序列升 0.0.13。
+
 ## [0.0.12] - 2026-10-30
 
 ### Added
