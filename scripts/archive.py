@@ -329,8 +329,10 @@ def load_portfolio(state_dir, problems=None):
         if not isinstance(code, str) or not isinstance(market, str):
             skipped += 1
             continue
-        if market not in MARKETS or not CODE_RE[market].fullmatch(code):
-            unmatched += 1  # 如港股写 4 位 0700：总览行永远匹配不到，只诊断
+        if market not in MARKETS or not (code.isascii()
+                                         and CODE_RE[market].fullmatch(code)):
+            unmatched += 1  # 如港股写 4 位 0700、全角数字（\d 兼配 Unicode
+            # Nd 而目录形态恒 ASCII，isascii 拦下）：总览行匹配不到，只诊断
         h = {"qty": e.get("quantity"), "cost": e.get("cost_price")}
         if "—" in (_hold_cell(h["qty"]), _hold_cell(h["cost"])):
             dashed += 1  # 键改名（quantity→qty）或值非数值：照常归一（格标 —），只诊断

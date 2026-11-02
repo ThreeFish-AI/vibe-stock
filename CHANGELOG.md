@@ -25,6 +25,12 @@
   契约段（postmortem）钉漂移出 warn、缺失/合法/空表静默。持仓格对超 float
   上限的整数字面量（json 可解析、float() 抛 OverflowError）同样降级 —，
   不再让索引重建崩栈。
+  Review 补收严（对抗审查 5 项确认）：全角数字 code（\d 兼配 Unicode Nd）
+  原漏过形态校验——持仓列 — 且零告警，正是「渲染不出持仓值一律出声」的
+  漏网分支，现 isascii 复核后计入不合目录形态诊断；04 降级/漂移枚举补
+  「超 float 上限整数」与 code ASCII 形态；T11d 补全角、多种类合一行、
+  chmod 不可读（OSError 臂）三 Fixture，负断言扩钉 code/currency 标识类
+  值不回显。
   版本依据：报告/索引层可观测性增补（裁决链零改动），按 0.0.x patch 序列
   升 0.0.14。
 

@@ -3002,6 +3002,8 @@ def _selftest_archive(evidence, verdict, opinions):
                  "holdings 2 条中 1 条缺字符串 code/market 被跳过", True),
                 ({"version": 2, "holdings": [dict(good, code="0700", market="hk")]},
                  "1 条 code/market 不合报告目录形态", True),
+                ({"version": 2, "holdings": [dict(good, code="０００００１")]},
+                 "1 条 code/market 不合报告目录形态", True),
                 ({"version": 2, "holdings": [dict(good, quantity="300")]},
                  "1 条 quantity/cost_price 缺失或非有限数值", True),
                 ({"version": 2, "holdings": [
@@ -3012,10 +3014,21 @@ def _selftest_archive(evidence, verdict, opinions):
                 warns, root = report_pf(payload, 10 + i)
                 assert len(warns) == 1 and "portfolio.json 与契约不符" in warns[0] \
                     and frag in warns[0], "契约漂移须出 warn：%r → %s" % (frag, warns)
-                assert "300" not in warns[0] and "12.5" not in warns[0], \
-                    "warn 不回显持仓值：%s" % warns[0]
+                assert all(v not in warns[0] for v in ("300", "12.5", "000001",
+                                                       "0700", "CNY")), \
+                    "warn 不回显持仓值（金额与标识类都不回显）：%s" % warns[0]
                 assert ("持仓数量" in root) is cols, "降级渲染不随 warn 改变：%r" % frag
             assert "| — | 12.50 |" in root, "键改名（quantity→qty）照常降级标 —"
+            # 多种类漂移合一行 warn（04「打一行 warn:」：skipped/unmatched/
+            # dashed 以 、 合并，不得拆成多行）；可用持仓照常归一、列保留
+            warns, root = report_pf({"version": 2, "holdings": [
+                dict(good, code="0700", market="hk"), {"symbol": "00700"},
+                dict(good, quantity="300")]}, 20)
+            assert len(warns) == 1 and all(f in warns[0] for f in (
+                "holdings 3 条中", "1 条缺字符串 code/market 被跳过",
+                "1 条 code/market 不合报告目录形态",
+                "1 条 quantity/cost_price 缺失或非有限数值")), warns
+            assert "持仓数量" in root, "混合漂移：可用持仓仍归一，持仓列保留"
             # 超 float 上限整数字面量（json 可解析）：float() 抛 OverflowError（不属
             # OSError/ValueError，三处 except 接不住），须降级 — 不崩；code 在总览
             # （本行持仓格标 —）与不在总览（只诊断）两种
@@ -3032,6 +3045,15 @@ def _selftest_archive(evidence, verdict, opinions):
             p = []
             assert ar.load_portfolio(os.path.join(td, "无此目录"), p) == {} and p == [], \
                 "文件不存在：problems 不追加"
+            with tempfile.TemporaryDirectory() as td3:
+                p3 = os.path.join(td3, "portfolio.json")
+                write(p3, "{}")
+                os.chmod(p3, 0)
+                p = []
+                assert ar.load_portfolio(td3, p) == {} and len(p) == 1 and \
+                    "无法读取或解析：PermissionError" in p[0], \
+                    "OSError 臂（存在但不可读）同样只诊断不崩：%r" % p
+                os.chmod(p3, 0o644)  # 恢复权限，保证临时目录可清理
         # T12 存量迁移：照现网形态（3 信号共用一被覆盖文件）
         legacy_md = render_report(evidence, verdict, opinions, "601888")
 
