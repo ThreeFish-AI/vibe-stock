@@ -1038,11 +1038,14 @@ def cmd_report(args, now=None):
                  if quote_name else ar.load_names(STATE_DIR))
     except (OSError, ValueError):
         names = ar.load_names(STATE_DIR)
+    pf_warn = []
     try:
         ar.rebuild_indexes(reports_dir, ar.load_signals(SIGNALS), names,
-                           ar.load_portfolio(STATE_DIR))
+                           ar.load_portfolio(STATE_DIR, pf_warn))
     except (OSError, ValueError) as e:  # 索引是派生视图：挂了不回滚已写的报告与信号
         print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s" % e)
+    for w in pf_warn:  # 持仓契约漂移可观测：只告警，不中断、不改降级渲染
+        print("warn: %s" % w)
     print("report -> %s（v%d）" % (path, version))
     print("signal: action=%s（对立信号失效 %d 条）" % (action, invalidated))
     print("后验：uv run --no-project scripts/postmortem.py --stock %s" % args.stock)
@@ -2912,10 +2915,9 @@ def _selftest_archive(evidence, verdict, opinions):
             root = read(os.path.join(rd, "index.md"))
             assert "持仓数量" not in root and "| 参考买点 | 止损 | 目标1 |" in root
             assert "1650.00 | 1550.00 | 1850.00 |" in root, "三价位列不随持仓缺席"
-        # T11c-port 持仓 SSOT 加载（v2 结构：持仓在 holdings 列表，元素
-        # {code, market, quantity, cost_price}，归一 <code>.<market> →
-        # {qty, cost}）：缺失/损坏/非对象/无 holdings 回 {}（只读合并，
-        # 永不抛错写回）
+        # T11c-port 持仓 SSOT 加载（文件契约见 04「portfolio.json 契约」，归一
+        # <code>.<market> → {qty, cost}）：缺失/损坏/非对象/无 holdings 回 {}
+        # （只读合并，永不抛错写回）
         with tempfile.TemporaryDirectory() as td2:
             assert ar.load_portfolio(td2) == {}
             write(os.path.join(td2, "portfolio.json"), "[bad")
@@ -2953,6 +2955,70 @@ def _selftest_archive(evidence, verdict, opinions):
                 assert "| 贵州茅台 | 2026-11-01 | buy→buy | 0.60 | 2 | 2 | 100 | " \
                        "1700.50 | 1650.00 | 1550.00 | 1850.00 |" in root, \
                     "v2 真实结构经归一后持仓列如实渲染（loader 不得返回 v2 顶层）"
+        # T11d 持仓契约漂移可观测（04「portfolio.json 契约」，I-006 防范机制化）：
+        # 文件存在但与契约不符 → report 打 warn: 行（只含键名/类型/条数，不回显
+        # 持仓值），不中断、降级渲染不变；文件缺失 / 合法 v2 / 合法空表静默。
+        # Fixture 按 04 契约构造，不按 loader 实现自设形状
+        good = {"code": "000001", "market": "cn", "quantity": 300,
+                "cost_price": 12.5, "currency": "CNY"}
+        with tempfile.TemporaryDirectory() as td:
+            STATE_DIR, SIGNALS = td, os.path.join(td, "signals.json")
+            wd, pf = os.path.join(td, "w"), os.path.join(td, "portfolio.json")
+            for name, obj in (("evidence", evidence), ("verdict", verdict),
+                              ("opinions", opinions)):
+                write(os.path.join(wd, name + ".json"),
+                      json.dumps(obj, ensure_ascii=False))
+
+            def report_pf(payload, minute):
+                if payload is not None:
+                    write(pf, payload if isinstance(payload, str)
+                          else json.dumps(payload, ensure_ascii=False))
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = cmd_report(ns(workdir=wd, evidence=None, stock="000001"),
+                                    now=d1.replace(minute=minute))
+                warns = [ln for ln in buf.getvalue().splitlines()
+                         if ln.startswith("warn:")]
+                assert rc == 0 and "report -> " in buf.getvalue(), \
+                    "持仓契约漂移不得中断 report：%s" % buf.getvalue()
+                return warns, read(os.path.join(td, "reports", "index.md"))
+
+            warns, root = report_pf(None, 0)
+            assert warns == [] and "持仓数量" not in root, "文件缺失：静默收起持仓列"
+            warns, root = report_pf({"version": 2, "holdings": [good]}, 1)
+            assert warns == [] and "| 300 | 12.50 |" in root, \
+                "合法 v2：无 warn 且持仓列正常 %s" % warns
+            warns, root = report_pf({"version": 2, "holdings": []}, 2)
+            assert warns == [] and "持仓数量" not in root, "合法空表=清仓：静默收起"
+            drifts = [  # (漂移形态, warn 须含的诊断片段, 总览是否仍有持仓列)
+                ({"version": 2, "positions": [good]}, "顶层缺 holdings 键", False),
+                ({"version": 2, "holdings": {"000001": good}},
+                 "holdings 须为列表，实为 dict", False),
+                ([good], "顶层须为对象，实为 list", False),
+                ("[bad", "无法读取或解析：JSONDecodeError", False),
+                ({"version": 2, "holdings": [dict(good, code=1), "脏"]},
+                 "holdings 2 条中 2 条缺字符串 code/market 被跳过", False),
+                ({"version": 2, "holdings": [good, {"symbol": "00700"}]},
+                 "holdings 2 条中 1 条缺字符串 code/market 被跳过", True),
+                ({"version": 2, "holdings": [dict(good, code="0700", market="hk")]},
+                 "1 条 code/market 不合报告目录形态", True),
+                ({"version": 2, "holdings": [dict(good, quantity="300")]},
+                 "1 条 quantity/cost_price 缺失或非有限数值", True),
+                ({"version": 2, "holdings": [
+                    {"code": "000001", "market": "cn", "qty": 300,
+                     "cost_price": 12.5}]},
+                 "1 条 quantity/cost_price 缺失或非有限数值", True)]
+            for i, (payload, frag, cols) in enumerate(drifts):
+                warns, root = report_pf(payload, 10 + i)
+                assert len(warns) == 1 and "portfolio.json 与契约不符" in warns[0] \
+                    and frag in warns[0], "契约漂移须出 warn：%r → %s" % (frag, warns)
+                assert "300" not in warns[0] and "12.5" not in warns[0], \
+                    "warn 不回显持仓值：%s" % warns[0]
+                assert ("持仓数量" in root) is cols, "降级渲染不随 warn 改变：%r" % frag
+            assert "| — | 12.50 |" in root, "键改名（quantity→qty）照常降级标 —"
+            p = []
+            assert ar.load_portfolio(os.path.join(td, "无此目录"), p) == {} and p == [], \
+                "文件不存在：problems 不追加"
         # T12 存量迁移：照现网形态（3 信号共用一被覆盖文件）
         legacy_md = render_report(evidence, verdict, opinions, "601888")
 

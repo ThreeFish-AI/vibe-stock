@@ -205,13 +205,16 @@ def run(args):
     if delta:
         ledger = merge_ledger(_load(LEDGER, {}), delta)
         _save(LEDGER, ledger)
+        pf_warn = []
         try:  # 派生视图放最后：挂了不吞台账（事实源已落盘）；坏索引的
             # UnicodeDecodeError ⊂ ValueError 一并只告警
             ar.rebuild_indexes(os.path.join(STATE_DIR, "reports"), signals,
                                ar.load_names(STATE_DIR),
-                               ar.load_portfolio(STATE_DIR))
+                               ar.load_portfolio(STATE_DIR, pf_warn))
         except (OSError, ValueError) as e:
             print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s" % e)
+        for w in pf_warn:  # 持仓契约漂移可观测（与 diagnose report 同口径）
+            print("warn: %s" % w)
         print("评估完成；台账与绩效已更新（%s）" % LEDGER)
         for src, d in delta.items():
             print("  归因 %s：+%d 胜 / +%d 负" % (src, d["wins"], d["losses"]))
@@ -356,6 +359,49 @@ def selftest():
             fx.DAILY_FETCHERS.clear()
             fx.DAILY_FETCHERS.update(_old_fns[2])
     print("  ok run() 守卫：未知市场跳过不阻塞 · --stock 过滤/归一/无匹配/识别失败")
+    # 持仓契约漂移可观测（04「portfolio.json 契约」，与 diagnose report 同口径）：
+    # 有新评估触发索引重建时，文件存在但与契约不符 → warn: 行、台账照常落盘；
+    # 缺失 / 合法 v2 / 合法空表静默。STATE_DIR 一并隔离（不读真实状态目录）
+    global STATE_DIR
+    _old_pf = (STATE_DIR, SIGNALS, LEDGER, fx.STATE_DIR, fx.FETCH_STATE,
+               fx.load_fetch_state, fx.save_fetch_state, dict(fx.DAILY_FETCHERS))
+    good = {"code": "000001", "market": "cn", "quantity": 300, "cost_price": 12.5}
+    pbars = [{"date": "2026-10-%02d" % d, "open": 1, "high": 1, "low": 1,
+              "close": 100.0 + 5 * d, "volume": 1} for d in range(1, 31)]  # T+1 hit→重建
+    try:
+        for payload, n_warn, cols in (
+                (None, 0, False), ({"version": 2, "holdings": [good]}, 0, True),
+                ({"version": 2, "holdings": []}, 0, False),
+                ({"version": 2, "positions": [good]}, 1, False)):
+            with tempfile.TemporaryDirectory() as td:
+                STATE_DIR, SIGNALS = td, os.path.join(td, "signals.json")
+                LEDGER = os.path.join(td, "ledger.json")
+                fx.STATE_DIR, fx.FETCH_STATE = td, os.path.join(td, "fetch_state.json")
+                fx.load_fetch_state = lambda: {"breakers": {}, "cooldowns": {}}
+                fx.save_fetch_state = lambda st: None
+                for k in list(fx.DAILY_FETCHERS):
+                    fx.DAILY_FETCHERS[k] = lambda m, c: pbars
+                _save(SIGNALS, [{**sig_buy, "status": "pending", "evaluated": {},
+                                 "horizons": [1]}])
+                if payload is not None:
+                    _save(os.path.join(td, "portfolio.json"), payload)
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    assert run(argparse.Namespace(stock=None)) == 0
+                warns = [ln for ln in out.getvalue().splitlines()
+                         if ln.startswith("warn:")]
+                assert len(warns) == n_warn and "评估完成" in out.getvalue(), \
+                    "契约漂移只告警不中断：%r → %s" % (payload, out.getvalue())
+                assert all("portfolio.json 与契约不符" in w and "顶层缺 holdings 键" in w
+                           for w in warns), warns
+                with open(os.path.join(td, "reports", "index.md"), encoding="utf-8") as f:
+                    assert ("持仓数量" in f.read()) is cols, payload
+    finally:
+        (STATE_DIR, SIGNALS, LEDGER, fx.STATE_DIR, fx.FETCH_STATE,
+         fx.load_fetch_state, fx.save_fetch_state) = _old_pf[:7]
+        fx.DAILY_FETCHERS.clear()
+        fx.DAILY_FETCHERS.update(_old_pf[7])
+    print("  ok 持仓契约漂移可观测：存在但不符 warn · 缺失/合法/空表静默 · 不中断台账")
     # 非交易日登记信号（周末 qt 静态快照使 date 落在非交易日）：回退 ≤ 信号日
     # 最近 bar 评估，不静默永久失配；信号日新于最新 bar 仍属未到期跳过
     bars_g = [{"date": "2026-10-%02d" % d, "open": 1.0, "high": 1.0, "low": 1.0,

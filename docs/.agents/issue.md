@@ -69,6 +69,6 @@
 - **问题描述**：PR #15 初版 `load_portfolio` 按自设扁平契约（`<code>.<market>` → {qty, cost}）整 dict 返回，而真实 `~/.vibe-stock/portfolio.json` 为 v2 结构（持仓在 `holdings` 列表，元素 `{code, market, quantity, cost_price, …}`）——顶层取键恒 None，总览持仓两列对 7 只实盘持仓全部渲染 —，特性静默失效。
 - **表因根因**：契约按假设自设，未对照真实 SSOT 文件验证；`isinstance(data, dict)` 校验放过 v2 顶层对象。
 - **处理方式**：Review 阶段实测复现后修复（fbddf3a）——loader 归一 v2 `holdings` → `<code>.<market>` → {qty, cost}，缺失/损坏/非对象/无 holdings/空表一律回 {}，元素脏值跳过；04/CHANGELOG 契约句同步；selftest 增 v2 形状/空表/脏元素/集成直通钉与 NaN/Infinity 降级钉。
-- **后续防范**：消费用户手维状态文件的改动，合入前必须对真实文件实测（schema 探查 + 端到端渲染），不能只按自设 fixture 验证。
+- **后续防范**：消费用户手维状态文件的改动，合入前必须对真实文件实测（schema 探查 + 端到端渲染），不能只按自设 fixture 验证。已机制化（0.0.14）：契约定义、漂移 `warn:` 可观测与合入前实测规约见 [04 · portfolio.json 契约](../../references/04-report.md#portfoliojson-契约)，selftest 钉在 `diagnose.py` T11d 与 `postmortem.py` 持仓契约段。
 - **同类问题影响**：其余读 `~/.vibe-stock/` 的入口（names.json）由 report 写穿维护、形状自控，不受影响。
 - **注意事项**：`portfolio.json` 属用户手维 SSOT，只读合并、永不写回；空表视同缺失（清仓收起持仓两列）。

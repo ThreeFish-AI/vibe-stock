@@ -289,31 +289,57 @@ def portfolio_path(state_dir):
     return os.path.join(state_dir, "portfolio.json")
 
 
-def load_portfolio(state_dir):
-    """~/.vibe-stock/portfolio.json 持仓 SSOT（v2：持仓在 holdings 列表，
-    元素 {code, market, quantity, cost_price, ...}）存在性加载并归一为
+def load_portfolio(state_dir, problems=None):
+    """~/.vibe-stock/portfolio.json 持仓 SSOT（文件契约唯一定义处见
+    references/04-report.md「portfolio.json 契约」）存在性加载并归一为
     <code>.<market> → {qty, cost}（与总览 dirname 同键）：缺失/损坏/非对象/
     无 holdings 一律回 {}（总览整体跳过持仓列）；元素脏值不在此拦截——
     归一后经 _hold_cell 在渲染层统一降级。用户手维文件只读合并、永不写
     回——持仓事实不复制进 signals.json（索引是两个 SSOT 的合并派生视图，
-    清仓/加仓后 signals 不留过期持仓）。"""
+    清仓/加仓后 signals 不留过期持仓）。
+    problems（可选 list）收集契约漂移诊断供调用方打 warn：文件存在但与契约
+    不符时追加一句（只含键名/类型/条数，不回显持仓值）；文件不存在与合法
+    空表静默。返回值与降级行为不受 problems 影响。"""
+    def drift(why):
+        if problems is not None:
+            problems.append("portfolio.json 与契约不符（%s），总览持仓列已按降级"
+                            "口径渲染（契约见 references/04-report.md「portfolio.json"
+                            " 契约」）" % why)
+        return {}
+
     try:
         with open(portfolio_path(state_dir), encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    holdings = data.get("holdings") if isinstance(data, dict) else None
+    except FileNotFoundError:
+        return {}  # 未登记持仓：静默
+    except (OSError, ValueError) as e:  # 存在但不可读/损坏：只回显异常类型（不带路径）
+        return drift("无法读取或解析：%s" % type(e).__name__)
+    if not isinstance(data, dict):
+        return drift("顶层须为对象，实为 %s" % type(data).__name__)
+    holdings = data.get("holdings")
     if not isinstance(holdings, list):
-        return {}
-    out = {}
+        return drift("顶层缺 holdings 键" if "holdings" not in data else
+                     "holdings 须为列表，实为 %s" % type(holdings).__name__)
+    out, skipped, unmatched, dashed = {}, 0, 0, 0
     for e in holdings:
         if not isinstance(e, dict):
+            skipped += 1
             continue
         code, market = e.get("code"), e.get("market")
         if not isinstance(code, str) or not isinstance(market, str):
+            skipped += 1
             continue
-        out["%s.%s" % (code, market)] = {"qty": e.get("quantity"),
-                                         "cost": e.get("cost_price")}
+        if market not in MARKETS or not CODE_RE[market].fullmatch(code):
+            unmatched += 1  # 如港股写 4 位 0700：总览行永远匹配不到，只诊断
+        h = {"qty": e.get("quantity"), "cost": e.get("cost_price")}
+        if "—" in (_hold_cell(h["qty"]), _hold_cell(h["cost"])):
+            dashed += 1  # 键改名（quantity→qty）或值非数值：照常归一（格标 —），只诊断
+        out["%s.%s" % (code, market)] = h
+    if skipped or unmatched or dashed:
+        drift("holdings %d 条中 %s" % (len(holdings), "、".join(x for x in (
+            skipped and "%d 条缺字符串 code/market 被跳过" % skipped,
+            unmatched and "%d 条 code/market 不合报告目录形态" % unmatched,
+            dashed and "%d 条 quantity/cost_price 缺失或非有限数值" % dashed) if x)))
     return out
 
 
