@@ -85,9 +85,9 @@
 - **时间线索引**（适用：report / postmortem 之后）：做法——`index.md` 由
   signals.json 整体重建（只覆盖 cn/hk），总览表列股票、股票名称、最新日期、
   最新信号→动作、置信、诊断次数、pending、持仓数量与持仓成本（条件：
-  `~/.vibe-stock/portfolio.json` 存在且解析出非空持仓表才加——文件为 v2
-  结构，持仓在 `holdings` 列表（元素 `code`/`market`/`quantity`/
-  `cost_price`），加载时归一 `<code>.<market>` → {qty, cost}，合法空表
+  `~/.vibe-stock/portfolio.json` 存在且解析出非空持仓表才加——文件结构以下文
+  [portfolio.json 契约](#portfoliojson-契约)为准，加载时归一
+  `<code>.<market>` → {qty, cost}，合法空表
   视同缺失（清仓收起两列）；成本按登记币种原样显示（HKD 不折算，人民币
   敞口见报告汇率节））与参考买点 / 止损 / 目标1（恒在，取组内最新 signal 的
   `key_levels`），单股表新→旧列版本、信号→动作、置信、登记价、状态与
@@ -98,7 +98,9 @@
   丢失（要持仓/价位列就写 portfolio.json / 依赖注册落账，不手补列）；信号
   与后验的事实源始终是 signals.json；portfolio.json 缺失/损坏/无可用持仓
   整体跳过持仓两列，老信号无 `key_levels` 与脏持仓字段（非数值/非有限
-  quantity/cost_price，含 NaN/Infinity）一律标 — 降级，索引重建不得中断；
+  quantity/cost_price，含 NaN/Infinity 与超 float 上限整数）一律标 — 降级，
+  索引重建不得中断
+  （文件存在但与契约不符时另打 `warn:` 行，见下文契约节）；
   股票名称解析顺序：信号组内最新非空 `stock_name`
   （登记时刻历史名）→ `~/.vibe-stock/names.json` 显示名缓存（report 取到
   名称时写穿，存量信号经此显名）→ `—`（名称是行情面数据，A 股 qt 全量
@@ -114,3 +116,36 @@
   需人工处理；mtime 漂移（备份恢复/编辑器重存）时回退按最后
   运行归属内容版并列 anomaly，缺可用 created_at 的信号跳过认领不改写；回退按
   .bak 逐 signal_id 恢复，勿整文件覆盖。
+
+### portfolio.json 契约
+
+`~/.vibe-stock/portfolio.json` 由仓外登记流程手维，仓内没有写入方。本节是它的
+文件契约唯一定义处：[archive.py](../scripts/archive.py) `load_portfolio`、selftest
+Fixture 与 [I-006](../docs/.agents/issue.md#I-006) 以本节为准，不另立字段表。
+
+| 位置 | 键 | 类型 | 语义 |
+| :--- | :--- | :--- | :--- |
+| 顶层 | — | 对象 | v2 结构；`version` 等其余顶层键仓内不消费 |
+| 顶层 | `holdings` | 列表 | 当前持仓；`[]` 合法，表示清仓 |
+| 元素 | `code` | 字符串 | A 股 6 位 / 港股 5 位 ASCII 数字（全角不匹配），与报告目录同形态 |
+| 元素 | `market` | 字符串 | `cn` / `hk` |
+| 元素 | `quantity` | 数值 | 持仓数量 |
+| 元素 | `cost_price` | 数值 | 成本价，按登记币种原样（`currency` 等其余元素键仓内不消费） |
+
+- **契约漂移可观测**（适用：report / postmortem 重建索引时加载 portfolio.json）：
+  做法——文件不存在、合法空表静默；文件存在但损坏、顶层非对象、缺 `holdings`
+  或非列表、元素缺字符串 `code`/`market` 被跳过、`code`/`market` 不合报告目录
+  形态（总览行匹配不到）、元素 `quantity`/`cost_price` 缺失或非有限数值
+  （含超 float 上限整数字面量——float() 抛 OverflowError，单元格将标 —）
+  时，打一行 `warn:`（只含键名、类型与条数，
+  不回显持仓值），降级渲染不变，索引重建不中断。坑位：降级会把契约漂移伪装成
+  「无持仓」或整列 —（I-006 即总览持仓列对全部持仓渲染 —、零告警），所以
+  「文件存在却渲染不出持仓值」一律出声；告警只为可观测，不得据此改值或中断。
+- **改动合入前对真实文件实测**（适用：改动消费 portfolio.json 这类仓外维护、
+  仓内无写入方的状态文件——loader、渲染或本契约）：做法——合入前须对真实文件做
+  schema 探查（只回显键名、类型与条数，不回显金额、数量等值），再经 loader
+  端到端重建一次索引核对持仓列；selftest Fixture 按本节契约构造，不按实现自设
+  形状。坑位：Fixture 与 loader 出自同一假设会互证全绿，而真实文件全 —（I-006）；
+  执行方够不到真实文件（隔离 clone、子代理）时由持有该文件的本机会话探查后附结果，
+  不以合成 Fixture 代替；探查输出贴进 PR、Issue 或日志前确认不带值（红线：敏感
+  信息零落盘）。

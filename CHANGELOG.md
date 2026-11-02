@@ -7,6 +7,33 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.14] - 2026-11-02
+
+### Added
+
+- portfolio.json 契约锚与漂移可观测（RSI-20261102-01，I-006 防范条机制化）：
+  `~/.vibe-stock/portfolio.json` 由仓外手维、仓内无写入方，原降级设计把
+  「文件存在但读不出可用持仓」与「文件不存在」同样静默处理，契约漂移（键
+  改名、holdings 缺失、元素全不合格、值非数值）会伪装成「无持仓」或整列 —，
+  总览持仓列静默失效。现 references/04-report.md 新增「portfolio.json 契约」节作文件契约
+  唯一定义处（字段表），loader docstring、selftest 注释与 I-006 只放指针；
+  `load_portfolio` 增可选 `problems` 旁路诊断（返回值与降级渲染不变），
+  report / postmortem 在文件存在但与契约不符时打一行 `warn:`（只含键名、
+  类型与条数，不回显持仓值），文件缺失与合法空表保持静默；04 同节立规约句：
+  改动消费此类仓外状态文件时，合入前须对真实文件做 schema 探查 + loader
+  端到端重建，Fixture 以 04 契约为准。selftest 增 T11d（diagnose）与持仓
+  契约段（postmortem）钉漂移出 warn、缺失/合法/空表静默。持仓格对超 float
+  上限的整数字面量（json 可解析、float() 抛 OverflowError）同样降级 —，
+  不再让索引重建崩栈。
+  Review 补收严（对抗审查 5 项确认）：全角数字 code（\d 兼配 Unicode Nd）
+  原漏过形态校验——持仓列 — 且零告警，正是「渲染不出持仓值一律出声」的
+  漏网分支，现 isascii 复核后计入不合目录形态诊断；04 降级/漂移枚举补
+  「超 float 上限整数」与 code ASCII 形态；T11d 补全角、多种类合一行、
+  chmod 不可读（OSError 臂）三 Fixture，负断言扩钉 code/currency 标识类
+  值不回显。
+  版本依据：报告/索引层可观测性增补（裁决链零改动），按 0.0.x patch 序列
+  升 0.0.14。
+
 ## [0.0.13] - 2026-11-01
 
 ### Added
