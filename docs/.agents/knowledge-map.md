@@ -15,6 +15,8 @@
 | [references/PIPELINE.md](../../references/PIPELINE.md) | 五段流水线与命令速查 | Agent / 用户 |
 | [references/06-batch-scan.md](../../references/06-batch-scan.md) | 批量子技能：指数成分精选与资金配置 | Agent |
 | [batch/README.md](../../batch/README.md) | 批量参考实现命令序与文件清单 | Agent |
+| [references/07-monitor.md](../../references/07-monitor.md) | 盯盘子技能：在册股票盘中监控与收盘复核 | Agent |
+| [batch/monitor/README.md](../../batch/monitor/README.md) | 盯盘参考实现命令序、launchd 安装与文件清单 | Agent / 用户 |
 | [strategies/README.md](../../strategies/README.md) | 策略 YAML 库说明 | 贡献者 |
 | [evals/README.md](../../evals/README.md) | 合成 Fixture 与黄金样本 | 贡献者 |
 | [RSI.md](../../RSI.md) | 自改进回路指针 | 贡献者 / Agent |

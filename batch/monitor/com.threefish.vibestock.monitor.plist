@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- vibe-stock 盯盘 LaunchAgent 模板（P1）。安装步骤见 batch/monitor/README.md：
+     1) 替换三类占位：__UV_PATH__ = `command -v uv` 的绝对路径（launchd 不继承
+        shell PATH，默认只有 /usr/bin:/bin:/usr/sbin:/sbin）；__SK_PATH__ = 本仓
+        clone 绝对路径；__HOME__ = 家目录（日志两处）；
+     2) mkdir -p __HOME__/.vibe-stock/monitor/logs（launchd 不建日志父目录）；
+     3) 复制到 ~/Library/LaunchAgents/ 后 launchctl bootstrap gui/$(id -u) <路径>。
+     语义（references/07-monitor.md「宿主形态」）：周一至周五 09:15 拉起 --loop
+     （节假日由快照日期守卫停轮兜底）；KeepAlive.Crashed 只认信号级崩溃——
+     watch.py 把 --loop 的 Python 未捕获异常转为 SIGABRT 才能自愈；正常收口
+     exit 0 与重复实例 exit 3 不重拉。AfterInitialDemand 防 bootstrap 时投机拉起。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+        "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.threefish.vibestock.monitor</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__UV_PATH__</string>
+        <string>run</string>
+        <string>--no-project</string>
+        <string>--with</string>
+        <string>akshare==1.20.*</string>
+        <string>--with</string>
+        <string>efinance</string>
+        <string>--with</string>
+        <string>yfinance</string>
+        <string>__SK_PATH__/batch/monitor/watch.py</string>
+        <string>--loop</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>15</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>15</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>15</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>15</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>15</integer></dict>
+    </array>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>Crashed</key><true/>
+        <key>AfterInitialDemand</key><true/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.vibe-stock/monitor/logs/watch.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.vibe-stock/monitor/logs/watch.err.log</string>
+</dict>
+</plist>

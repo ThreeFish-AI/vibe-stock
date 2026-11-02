@@ -11,6 +11,8 @@
 | I-004 | 05 规约「八元组去重」未实现，同日重跑重复登记信号与归因 | ⏸ 暂不处理 | — | [详情](#I-004) |
 | I-005 | 状态文件健壮性缺口：signals 无锁、ledger 损坏被清空、market="?" 信号使 postmortem 崩溃 | ⏸ 暂不处理 | — | [详情](#I-005) |
 | I-006 | 总览持仓合并契约与真实 portfolio.json v2 结构脱节：loader 归一 holdings 列表 | ✅ 已完成 | 2026-11-02 | [详情](#I-006) |
+| I-007 | 盯盘 P1 selftest fixture 写入真实持仓（公开仓）：换合成标的 + 零重合负断言 | ✅ 已完成 | 2026-11-02 | [详情](#I-007) |
+| I-008 | 盯盘 launchd 模板拉不起、异常不自愈、跨日 close_done 残留：绝对路径 + SIGABRT + 按日归零 | ✅ 已完成 | 2026-11-02 | [详情](#I-008) |
 
 <a id="I-001"></a>
 
@@ -72,3 +74,26 @@
 - **后续防范**：消费用户手维状态文件的改动，合入前必须对真实文件实测（schema 探查 + 端到端渲染），不能只按自设 fixture 验证。已机制化（0.0.14）：契约定义、漂移 `warn:` 可观测与合入前实测规约见 [04 · portfolio.json 契约](../../references/04-report.md#portfoliojson-契约)，selftest 钉在 `diagnose.py` T11d 与 `postmortem.py` 持仓契约段。
 - **同类问题影响**：其余读 `~/.vibe-stock/` 的入口（names.json）由 report 写穿维护、形状自控，不受影响。
 - **注意事项**：`portfolio.json` 属用户手维 SSOT，只读合并、永不写回；空表视同缺失（清仓收起持仓两列）。
+
+<a id="I-007"></a>
+
+## I-007：盯盘 P1 selftest fixture 写入真实持仓（公开仓）
+
+- **问题描述**：`batch/monitor/watch.py` 初版 selftest 的宇宙派生 fixture 直接用了用户实盘两只持仓的真实代码、数量与成本，rules.py 用例沿用真实止损/目标价；仓库为 PUBLIC，提交即泄露。
+- **表因根因**：脱敏断言只检查产物（universe.json 无成本字段），不检查测试输入本身；编写 fixture 时顺手取了会话上下文里的真实数值。
+- **处理方式**：提交前对抗评审拦下（未进入正式提交历史）——全部 fixture 换成合成号段与虚构数值（600001/00001 @10.00 等），新增「fixture 与真实 portfolio.json 零重合」负断言（文件缺失跳过），提交前对新增/改动行做真实代码与成本的全量扫描。
+- **后续防范**：规约句落 [07 · 宇宙层](../../references/07-monitor.md#宇宙层) 脱敏条（fixture 一律合成标的 + 负断言）；README/CHANGELOG 不写实盘只数等可推断持仓的数字。
+- **同类问题影响**：scripts/ 既有 fixture 使用 evals 合成快照，不受影响；凡新增读 `~/.vibe-stock/portfolio.json` 的测试均适用本条。
+- **注意事项**：git 历史一旦含真实值需改写历史并轮换——本次未提交即修复，无需处理。
+
+<a id="I-008"></a>
+
+## I-008：盯盘 launchd 模板拉不起、异常不自愈、跨日 close_done 残留
+
+- **问题描述**：① plist 用 `/usr/bin/env uv`，launchd 默认 PATH 不含 `~/.local/bin`，exit 127；② `KeepAlive.Crashed` 只认信号崩溃，Python 未捕获异常 exit 1 不重拉；③ `close_done`/`src_fail` 跨日继承，次日起收盘复核静默跳过；④ `fetch_daily_bars` 传 datetime 而非 int epoch 且未解包四元组，`--close` 全部挂起；⑤ `--close` 港股回退链缺 yfinance 依赖，东财限流即单源全挂。
+- **表因根因**：launchd 语义与 shell 环境差异未实机核对；外部函数契约凭印象调用；日粒度状态只重置了 rules 子树。
+- **处理方式**：plist 改 `__UV_PATH__` 绝对路径占位 + `AfterInitialDemand` + README sed 安装命令（实测零残留占位、plutil OK）；`--loop` 未捕获异常 → 通知 + `os.abort()`（SIGABRT）；`ensure_state` 按日期归零 close_done/src_fail/next_due；`fetch_daily_bars(..., int(now.timestamp()))` 四元组解包；运行时统一 `--with akshare --with efinance --with yfinance`；`--close` 加收盘时点门。selftest 增跨日归零钉。
+- **后续防范**：07「宿主形态」与「收盘复核」节写入全部坑位；调用 scripts/ 函数一律对照其 docstring 与既有调用点（fetch.py:1943、postmortem.py:186）。
+- **同类问题影响**：P2 会话接管 exit 2 同受 Crashed 语义约束（不重拉为预期）。
+- **注意事项**：launchd 首次投递通知会触发 macOS 授权弹窗，需用户手动允许。
+
