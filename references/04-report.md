@@ -85,17 +85,21 @@
 - **时间线索引**（适用：report / postmortem 之后）：做法——`index.md` 由
   signals.json 整体重建（只覆盖 cn/hk），总览表列股票、股票名称、最新日期、
   最新信号→动作、置信、诊断次数、pending、持仓数量与持仓成本（条件：
-  `~/.vibe-stock/portfolio.json` 存在且可解析才加，`<code>.<market>` 键归一，
-  数量 qty / 成本 cost）与参考买点 / 止损 / 目标1（恒在，取组内最新 signal 的
+  `~/.vibe-stock/portfolio.json` 存在且解析出非空持仓表才加——文件为 v2
+  结构，持仓在 `holdings` 列表（元素 `code`/`market`/`quantity`/
+  `cost_price`），加载时归一 `<code>.<market>` → {qty, cost}，合法空表
+  视同缺失（清仓收起两列）；成本按登记币种原样显示（HKD 不折算，人民币
+  敞口见报告汇率节））与参考买点 / 止损 / 目标1（恒在，取组内最新 signal 的
   `key_levels`），单股表新→旧列版本、信号→动作、置信、登记价、状态与
   T+1/3/5/10 涨跌及判定；内容未变不重写。持仓合并口径：portfolio.json 是
   用户手维的持仓 SSOT——渲染时只读合并、永不写回、不复制进 signals.json
   （索引是 signals.json 与 portfolio.json 两个 SSOT 的合并派生视图，清仓/
   加仓后 signals 不留过期持仓）。坑位：索引是派生视图，手改会在下次重建时
   丢失（要持仓/价位列就写 portfolio.json / 依赖注册落账，不手补列）；信号
-  与后验的事实源始终是 signals.json；portfolio.json 缺失/损坏整体跳过持仓
-  两列，老信号无 `key_levels` 与脏持仓字段（非数值 qty/cost）一律标 —
-  降级，索引重建不得中断；股票名称解析顺序：信号组内最新非空 `stock_name`
+  与后验的事实源始终是 signals.json；portfolio.json 缺失/损坏/无可用持仓
+  整体跳过持仓两列，老信号无 `key_levels` 与脏持仓字段（非数值/非有限
+  quantity/cost_price，含 NaN/Infinity）一律标 — 降级，索引重建不得中断；
+  股票名称解析顺序：信号组内最新非空 `stock_name`
   （登记时刻历史名）→ `~/.vibe-stock/names.json` 显示名缓存（report 取到
   名称时写穿，存量信号经此显名）→ `—`（名称是行情面数据，A 股 qt 全量
   快照 / 港股 qt 紧凑快照，取数失败如实缺省）。

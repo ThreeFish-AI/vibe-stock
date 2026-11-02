@@ -13,6 +13,7 @@
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -289,24 +290,42 @@ def portfolio_path(state_dir):
 
 
 def load_portfolio(state_dir):
-    """~/.vibe-stock/portfolio.json 持仓 SSOT（<code>.<market> → {qty, cost}）
-    存在性加载：缺失/损坏/非对象一律回 {}（总览整体跳过持仓列）。用户手维
-    文件只读合并、永不写回——持仓事实不复制进 signals.json（索引是两个 SSOT
-    的合并派生视图，清仓/加仓后 signals 不留过期持仓）。"""
+    """~/.vibe-stock/portfolio.json 持仓 SSOT（v2：持仓在 holdings 列表，
+    元素 {code, market, quantity, cost_price, ...}）存在性加载并归一为
+    <code>.<market> → {qty, cost}（与总览 dirname 同键）：缺失/损坏/非对象/
+    无 holdings 一律回 {}（总览整体跳过持仓列）；元素脏值不在此拦截——
+    归一后经 _hold_cell 在渲染层统一降级。用户手维文件只读合并、永不写
+    回——持仓事实不复制进 signals.json（索引是两个 SSOT 的合并派生视图，
+    清仓/加仓后 signals 不留过期持仓）。"""
     try:
         with open(portfolio_path(state_dir), encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
         return {}
-    return data if isinstance(data, dict) else {}
+    holdings = data.get("holdings") if isinstance(data, dict) else None
+    if not isinstance(holdings, list):
+        return {}
+    out = {}
+    for e in holdings:
+        if not isinstance(e, dict):
+            continue
+        code, market = e.get("code"), e.get("market")
+        if not isinstance(code, str) or not isinstance(market, str):
+            continue
+        out["%s.%s" % (code, market)] = {"qty": e.get("quantity"),
+                                         "cost": e.get("cost_price")}
+    return out
 
 
 def _hold_cell(v):
-    """持仓单元格：缺失/非数值（含 bool）降级 —（手维文件脏值不得让索引重建
-    崩栈）；整数形态去零尾（100），小数固两位（1700.50）。"""
+    """持仓单元格：缺失/非数值（含 bool 与 NaN/Infinity 非有限值——json 容忍
+    NaN/Infinity 字面量与 1e999）降级 —（手维文件脏值不得让索引重建崩栈）；
+    整数形态去零尾（100），小数固两位（1700.50）。"""
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return "—"
     v = float(v)
+    if not math.isfinite(v):
+        return "—"
     return "%d" % v if v.is_integer() else "%.2f" % v
 
 
@@ -331,8 +350,9 @@ def render_stock_index(signals, market, code, names=None):
 
 
 def render_root_index(signals, names=None, portfolio=None):
-    """总览表。持仓列存在性合并 portfolio（~/.vibe-stock/portfolio.json 持仓
-    SSOT，<code>.<market> 键）：缺失/损坏整体跳过持仓两列；三价位列恒在，取
+    """总览表。持仓列存在性合并 portfolio（load_portfolio 归一的
+    <code>.<market> → {qty, cost}）：缺失/损坏/无可用持仓整体跳过持仓两列；
+    三价位列恒在，取
     组内最新 signal 的 key_levels（report 注册时按 06 三价纪律落账），老信号
     无该字段标 —。缺数据如实降级不虚构——索引重建挂在 report / postmortem
     主流程末段，任何 portfolio 缺口不得抛错中断。"""

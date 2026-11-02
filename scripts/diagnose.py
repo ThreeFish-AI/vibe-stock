@@ -2885,9 +2885,9 @@ def _selftest_archive(evidence, verdict, opinions):
             assert "# 00700.hk · 腾讯控股 · 诊股时间线" in \
                 read(os.path.join(rd, "00700.hk", "index.md"))
         # T11c 总览持仓列与三价位列（0.0.13）：持仓=~/.vibe-stock/portfolio.json
-        # 存在性合并（<code>.<market> 键），三价位=组内最新 signal 的 key_levels；
-        # portfolio 缺失整体跳过持仓列，老信号无 key_levels 与脏持仓字段标 —，
-        # 降级不得让索引重建崩栈
+        # 存在性合并（v2 holdings 归一 <code>.<market>），三价位=组内最新
+        # signal 的 key_levels；portfolio 缺失/空表整体跳过持仓列，老信号无
+        # key_levels 与脏持仓字段标 —，降级不得让索引重建崩栈
         with tempfile.TemporaryDirectory() as rd:
             sxk = [dict(base, id="k1", created_at="2026-11-01T10:00:00",
                         stock_name="贵州茅台",
@@ -2912,17 +2912,47 @@ def _selftest_archive(evidence, verdict, opinions):
             root = read(os.path.join(rd, "index.md"))
             assert "持仓数量" not in root and "| 参考买点 | 止损 | 目标1 |" in root
             assert "1650.00 | 1550.00 | 1850.00 |" in root, "三价位列不随持仓缺席"
-        # T11c-port 持仓 SSOT 加载：缺失/损坏/非对象回 {}（只读合并，永不抛错写回）
+        # T11c-port 持仓 SSOT 加载（v2 结构：持仓在 holdings 列表，元素
+        # {code, market, quantity, cost_price}，归一 <code>.<market> →
+        # {qty, cost}）：缺失/损坏/非对象/无 holdings 回 {}（只读合并，
+        # 永不抛错写回）
         with tempfile.TemporaryDirectory() as td2:
             assert ar.load_portfolio(td2) == {}
             write(os.path.join(td2, "portfolio.json"), "[bad")
             assert ar.load_portfolio(td2) == {}, "持仓文件损坏须降级空（不抛错）"
             write(os.path.join(td2, "portfolio.json"), "[1, 2]")
             assert ar.load_portfolio(td2) == {}, "非对象形态降级空"
+            write(os.path.join(td2, "portfolio.json"), '{"version": 2}')
+            assert ar.load_portfolio(td2) == {}, "无 holdings 键降级空"
             write(os.path.join(td2, "portfolio.json"),
-                  '{"600519.cn": {"qty": 100, "cost": 1700.5}}')
-            assert ar.load_portfolio(td2) == {"600519.cn": {"qty": 100,
-                                                            "cost": 1700.5}}
+                  '{"version": 2, "holdings": "脏"}')
+            assert ar.load_portfolio(td2) == {}, "holdings 非列表降级空"
+            write(os.path.join(td2, "portfolio.json"),
+                  '{"version": 2, "holdings": []}')
+            assert ar.load_portfolio(td2) == {}, "空持仓表视同缺失（收起持仓列）"
+            write(os.path.join(td2, "portfolio.json"), json.dumps({
+                "version": 2, "updated_at": "2026-11-01", "operations": [],
+                "holdings": [
+                    {"code": "600519", "market": "cn", "name": "贵州茅台",
+                     "quantity": 100, "cost_price": 1700.5, "currency": "CNY"},
+                    {"code": "00268", "market": "hk", "quantity": 200,
+                     "cost_price": 9.86, "currency": "HKD"},
+                    {"code": 600519, "market": "cn", "quantity": 1},
+                    "脏元素"]}, ensure_ascii=False))
+            assert ar.load_portfolio(td2) == {
+                "600519.cn": {"qty": 100, "cost": 1700.5},
+                "00268.hk": {"qty": 200, "cost": 9.86}}, \
+                "v2 holdings 归一 <code>.<market>（脏元素/非字符串码跳过不崩）"
+            assert ar._hold_cell(float("nan")) == "—" and \
+                ar._hold_cell(float("-inf")) == "—", \
+                "NaN/Infinity 脏值（json 容忍字面量）须降级 —"
+            # 集成钉：v2 文件经 load_portfolio 归一直通总览（loader↔render 契约）
+            with tempfile.TemporaryDirectory() as rd3:
+                ar.rebuild_indexes(rd3, sxk, portfolio=ar.load_portfolio(td2))
+                root = read(os.path.join(rd3, "index.md"))
+                assert "| 贵州茅台 | 2026-11-01 | buy→buy | 0.60 | 2 | 2 | 100 | " \
+                       "1700.50 | 1650.00 | 1550.00 | 1850.00 |" in root, \
+                    "v2 真实结构经归一后持仓列如实渲染（loader 不得返回 v2 顶层）"
         # T12 存量迁移：照现网形态（3 信号共用一被覆盖文件）
         legacy_md = render_report(evidence, verdict, opinions, "601888")
 
