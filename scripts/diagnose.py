@@ -3016,6 +3016,19 @@ def _selftest_archive(evidence, verdict, opinions):
                     "warn 不回显持仓值：%s" % warns[0]
                 assert ("持仓数量" in root) is cols, "降级渲染不随 warn 改变：%r" % frag
             assert "| — | 12.50 |" in root, "键改名（quantity→qty）照常降级标 —"
+            # 超 float 上限整数字面量（json 可解析）：float() 抛 OverflowError（不属
+            # OSError/ValueError，三处 except 接不住），须降级 — 不崩；code 在总览
+            # （本行持仓格标 —）与不在总览（只诊断）两种
+            for code, minute in (("000001", 30), ("600519", 31)):
+                warns, root = report_pf({"version": 2, "holdings": [
+                    dict(good, code=code, quantity=10 ** 400)]}, minute)
+                assert len(warns) == 1 and \
+                    "1 条 quantity/cost_price 缺失或非有限数值" in warns[0], \
+                    "溢出整数须恰 1 条 warn：%s" % warns
+                row = next(ln for ln in root.splitlines()
+                           if ln.startswith("| [000001.cn]"))
+                assert "持仓数量" in root and ("| — | 12.50 |" in row if code == "000001"
+                                              else "| — | — |" in row), row
             p = []
             assert ar.load_portfolio(os.path.join(td, "无此目录"), p) == {} and p == [], \
                 "文件不存在：problems 不追加"

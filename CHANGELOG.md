@@ -22,7 +22,9 @@
   类型与条数，不回显持仓值），文件缺失与合法空表保持静默；04 同节立规约句：
   改动消费此类仓外状态文件时，合入前须对真实文件做 schema 探查 + loader
   端到端重建，Fixture 以 04 契约为准。selftest 增 T11d（diagnose）与持仓
-  契约段（postmortem）钉漂移出 warn、缺失/合法/空表静默。
+  契约段（postmortem）钉漂移出 warn、缺失/合法/空表静默。持仓格对超 float
+  上限的整数字面量（json 可解析、float() 抛 OverflowError）同样降级 —，
+  不再让索引重建崩栈。
   版本依据：报告/索引层可观测性增补（裁决链零改动），按 0.0.x patch 序列
   升 0.0.14。
 

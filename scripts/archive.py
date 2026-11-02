@@ -345,11 +345,14 @@ def load_portfolio(state_dir, problems=None):
 
 def _hold_cell(v):
     """持仓单元格：缺失/非数值（含 bool 与 NaN/Infinity 非有限值——json 容忍
-    NaN/Infinity 字面量与 1e999）降级 —（手维文件脏值不得让索引重建崩栈）；
-    整数形态去零尾（100），小数固两位（1700.50）。"""
+    NaN/Infinity 字面量与 1e999，及超 float 上限的整数字面量）降级 —（手维
+    文件脏值不得让索引重建崩栈）；整数形态去零尾（100），小数固两位（1700.50）。"""
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return "—"
-    v = float(v)
+    try:
+        v = float(v)
+    except OverflowError:  # 309 位以上整数：OverflowError 不属 (OSError, ValueError)
+        return "—"
     if not math.isfinite(v):
         return "—"
     return "%d" % v if v.is_integer() else "%.2f" % v
