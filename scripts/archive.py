@@ -4,7 +4,8 @@
 规约见 references/04-report.md（布局与去冗余）、references/05-postmortem.md（信号字段）：
   - reports/<code>.<market>/<date>.md：一股一日一文件，同日重跑追加 v<N> 版本，
     与上一版逐字相同的节写「同 vK。」；快照模式进 _snapshot/<code>/。
-  - reports/<code>.<market>/index.md 与 reports/index.md：signals.json 的派生视图，
+  - reports/<code>.<market>/index.md 与 reports/index.md：signals.json 的派生视图
+    （总览持仓列存在性合并 ~/.vibe-stock/portfolio.json 持仓 SSOT），
     report / postmortem 时整体重建。
   - 函数一律显式接收 reports_dir / 路径，不读全局状态目录（selftest 靠参数隔离）。
 由 diagnose.py（report / migrate-reports）与 postmortem.py 调用，自身无 CLI。
@@ -12,6 +13,7 @@
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -27,7 +29,9 @@ SAME_RE = re.compile(r"^同 v(\d+)。$")
 LEGACY_RE = re.compile(r"^(.+)-(\d{4}-\d{2}-\d{2})\.md$")
 LOST = "（报告已被覆盖，无法恢复）"
 HORIZONS = (1, 3, 5, 10)
-INDEX_NOTE = "> 由 signals.json 派生：report / postmortem 时整体重建，勿手改。"
+INDEX_NOTE = ("> 派生视图：数据源 signals.json（总览持仓列另合并 "
+              "~/.vibe-stock/portfolio.json 持仓 SSOT，存在时）；report / "
+              "postmortem 时整体重建，勿手改。")
 OWNER_TOLERANCE_S = 2  # 迁移：文件 mtime 与信号 created_at 同刻判定容差
 
 
@@ -279,6 +283,52 @@ def _display_name(signals, market, code, names):
     return _group_name(signals) or (names or {}).get("%s:%s" % (market, code))
 
 
+# ---------------------------------------------------------------- 持仓 SSOT（只读合并）
+
+def portfolio_path(state_dir):
+    return os.path.join(state_dir, "portfolio.json")
+
+
+def load_portfolio(state_dir):
+    """~/.vibe-stock/portfolio.json 持仓 SSOT（v2：持仓在 holdings 列表，
+    元素 {code, market, quantity, cost_price, ...}）存在性加载并归一为
+    <code>.<market> → {qty, cost}（与总览 dirname 同键）：缺失/损坏/非对象/
+    无 holdings 一律回 {}（总览整体跳过持仓列）；元素脏值不在此拦截——
+    归一后经 _hold_cell 在渲染层统一降级。用户手维文件只读合并、永不写
+    回——持仓事实不复制进 signals.json（索引是两个 SSOT 的合并派生视图，
+    清仓/加仓后 signals 不留过期持仓）。"""
+    try:
+        with open(portfolio_path(state_dir), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    holdings = data.get("holdings") if isinstance(data, dict) else None
+    if not isinstance(holdings, list):
+        return {}
+    out = {}
+    for e in holdings:
+        if not isinstance(e, dict):
+            continue
+        code, market = e.get("code"), e.get("market")
+        if not isinstance(code, str) or not isinstance(market, str):
+            continue
+        out["%s.%s" % (code, market)] = {"qty": e.get("quantity"),
+                                         "cost": e.get("cost_price")}
+    return out
+
+
+def _hold_cell(v):
+    """持仓单元格：缺失/非数值（含 bool 与 NaN/Infinity 非有限值——json 容忍
+    NaN/Infinity 字面量与 1e999）降级 —（手维文件脏值不得让索引重建崩栈）；
+    整数形态去零尾（100），小数固两位（1700.50）。"""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return "—"
+    v = float(v)
+    if not math.isfinite(v):
+        return "—"
+    return "%d" % v if v.is_integer() else "%.2f" % v
+
+
 def render_stock_index(signals, market, code, names=None):
     dirname = "%s.%s" % (code, market)
     rows = [s for s in signals if s.get("market") == market and s.get("code") == code]
@@ -299,23 +349,43 @@ def render_stock_index(signals, market, code, names=None):
     return "\n".join(L) + "\n"
 
 
-def render_root_index(signals, names=None):
+def render_root_index(signals, names=None, portfolio=None):
+    """总览表。持仓列存在性合并 portfolio（load_portfolio 归一的
+    <code>.<market> → {qty, cost}）：缺失/损坏/无可用持仓整体跳过持仓两列；
+    三价位列恒在，取
+    组内最新 signal 的 key_levels（report 注册时按 06 三价纪律落账），老信号
+    无该字段标 —。缺数据如实降级不虚构——索引重建挂在 report / postmortem
+    主流程末段，任何 portfolio 缺口不得抛错中断。"""
     groups = {}
     for s in signals:
         groups.setdefault((s.get("market"), s.get("code")), []).append(s)
     latest = sorted(((_ordered(g)[0], g) for g in groups.values()),
                     key=lambda x: (x[0].get("created_at") or "", x[0].get("id") or ""),
                     reverse=True)
+    head = ["股票", "股票名称", "最新日期", "最新信号→动作", "置信", "诊断次数",
+            "pending"]
+    if portfolio:
+        head += ["持仓数量", "持仓成本"]
+    head += ["参考买点", "止损", "目标1"]
     L = ["# 诊股总览", "", INDEX_NOTE, "",
-         "| 股票 | 股票名称 | 最新日期 | 最新信号→动作 | 置信 | 诊断次数 | pending |",
-         "| --- | --- | --- | --- | --- | --- | --- |"]
+         "| %s |" % " | ".join(head),
+         "| %s |" % " | ".join("---" for _ in head)]
     for s, g in latest:
         dirname = "%s.%s" % (s["code"], s["market"])
-        L.append("| [%s](%s/index.md) | %s | %s | %s→%s | %s | %d | %d |" % (
-            dirname, dirname, _display_name(g, g[0].get("market"), g[0].get("code"), names) or "—",
-            (s.get("created_at") or s.get("date") or "—")[:10],
-            s.get("signal", "?"), s.get("action", "?"), _fmt(s.get("confidence")),
-            len(g), sum(1 for x in g if x.get("status") == "pending")))
+        kl = s.get("key_levels") or {}
+        cells = ["[%s](%s/index.md)" % (dirname, dirname),
+                 _display_name(g, g[0].get("market"), g[0].get("code"), names) or "—",
+                 (s.get("created_at") or s.get("date") or "—")[:10],
+                 "%s→%s" % (s.get("signal", "?"), s.get("action", "?")),
+                 _fmt(s.get("confidence")), str(len(g)),
+                 str(sum(1 for x in g if x.get("status") == "pending"))]
+        if portfolio:
+            h = portfolio.get(dirname)
+            h = h if isinstance(h, dict) else {}
+            cells += [_hold_cell(h.get("qty")), _hold_cell(h.get("cost"))]
+        cells += [_fmt(kl.get("entry_ref")), _fmt(kl.get("stop")),
+                  _fmt(kl.get("target1"))]
+        L.append("| %s |" % " | ".join(cells))
     return "\n".join(L) + "\n"
 
 
@@ -328,10 +398,11 @@ def _write_if_changed(path, text):
     _write_atomic(path, text)
 
 
-def rebuild_indexes(reports_dir, signals, names=None):
+def rebuild_indexes(reports_dir, signals, names=None, portfolio=None):
     """整体重建 cn/hk 各股 index.md 与总览；身份不合规（如旧 4 位港码）的信号
     不进索引（迁移 dry-run 告警）。names=显示名缓存（report 写穿 names.json），
-    存量信号（无 stock_name）经缓存显名。同输入字节相同，未变不重写。"""
+    存量信号（无 stock_name）经缓存显名；portfolio=load_portfolio 加载的持仓
+    SSOT（存在才渲染总览持仓列）。同输入字节相同，未变不重写。"""
     live = []
     for s in signals:
         if s.get("snapshot"):
@@ -354,7 +425,7 @@ def rebuild_indexes(reports_dir, signals, names=None):
                           render_stock_index(group, group[0]["market"],
                                              group[0]["code"], names))
     _write_if_changed(os.path.join(reports_dir, "index.md"),
-                      render_root_index([s for _, s in live], names))
+                      render_root_index([s for _, s in live], names, portfolio))
 
 
 # ---------------------------------------------------------------- 存量迁移
@@ -523,7 +594,8 @@ def apply_migration(reports_dir, signals_path, plan, base_digest, now):
     index_warn = None
     try:  # 派生视图放最后：挂了不吞迁移主流程（①-③已落盘），只告警带回
         rebuild_indexes(reports_dir, signals,
-                        load_names(os.path.dirname(signals_path)))
+                        load_names(os.path.dirname(signals_path)),
+                        load_portfolio(os.path.dirname(signals_path)))
     except (OSError, ValueError) as e:
         index_warn = str(e)
     return {"backup": backup, "moved": moved, "skipped": skipped,

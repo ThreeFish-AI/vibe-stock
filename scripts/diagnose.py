@@ -676,6 +676,7 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
     close0 = quote.get("price") or (bars[-1]["close"] if bars else None)
     date0 = (quote.get("date") or (bars[-1]["date"] if bars else None)
              or now.date().isoformat())
+    kl, _, _ = _key_levels(close0, bars)  # 与报告「关键价位」节同一函数（同源）
     sig = {
         "id": "sig-%s-%s-%s" % (code, date0.replace("-", ""), len(signals) + 1),
         "report_id": report_id, "report_path": report_path,
@@ -693,6 +694,8 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
     }
     if quote.get("name"):  # 名称列数据源（索引侧消费）；取数失败如实缺省不落 null
         sig["stock_name"] = quote["name"]
+    if kl:  # 关键价位三价（总览价位列数据源，06 三价纪律）；price 缺失不落
+        sig["key_levels"] = kl
     if evidence["meta"].get("snapshot"):
         # 快照登记标记（稀疏键，实盘信号不落）：市场推导后身份是 (cn/hk, 归一码)，
         # 索引侧据此排除——报告仍在 _snapshot/，不得进实盘 index/总览
@@ -706,6 +709,22 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
 
 def _fmt_price(v):
     return "—" if v is None else round(v, 2)
+
+
+def _key_levels(price, bars):
+    """关键价位三价（entry_ref/stop/target1）——报告「关键价位」节与 signal
+    记录 key_levels 的同一事实源，公式即 06 三价纪律：止损=max(−5%线,
+    0.99×lo20) 取紧、参考买点=max(lo20, 0.97×现价)、目标1=hi20（与
+    batch/portfolio.py 同口径）。bars 缺失回退 [price or 0]（与报告 20 日
+    低/高行同口径）；price 缺失返回 (None, lo20, hi20)——无现价锚不落
+    key_levels（老信号无字段，索引侧标 — 向后兼容）。"""
+    close_n = [b["close"] for b in bars[-20:]] or [price or 0]
+    lo20, hi20 = _fmt_price(min(close_n)), _fmt_price(max(close_n))
+    if not price:
+        return None, lo20, hi20
+    return {"entry_ref": _fmt_price(max(lo20 or 0, price * 0.97)),
+            "stop": _fmt_price(max(price * 0.95, (lo20 or 0) * 0.99)),
+            "target1": hi20}, lo20, hi20
 
 
 def _one_line(text):
@@ -830,8 +849,7 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None):
     # 从不产出 price 键；quote 缺失再退日 K 末根收盘
     price = (evidence["blocks"].get("quote", {}).get("price")
              or (bars[-1]["close"] if bars else None))
-    close_n = [b["close"] for b in bars[-20:]] or [price or 0]
-    lo20, hi20 = _fmt_price(min(close_n)), _fmt_price(max(close_n))
+    kl, lo20, hi20 = _key_levels(price, bars)  # 三价与 signal 登记同源
     ma20 = tech.get("ma20")
     rows = _opinions_with_rationale(verdict, opinions)
     rationale = _conclusion_reason(rg, rows, risk)
@@ -901,11 +919,10 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None):
         _fmt_price(price),
         "（盘中价）" if _price_kind(evidence) == "intraday" else "",
         lo20, hi20, _fmt_price(ma20)))
-    if price:
+    if kl:
         L.append("- 参考买点 %s（近 20 日低点上方）· 止损 %s（跌破 20 日低/−5%%）"
                  "· 目标 %s（20 日高点）" % (
-                     _fmt_price(max(lo20 or 0, price * 0.97)),
-                     _fmt_price(price * 0.95), hi20))
+                     kl["entry_ref"], kl["stop"], kl["target1"]))
     if lens:
         L.extend(_report_lens_section(lens))
     L.append("")
@@ -1022,7 +1039,8 @@ def cmd_report(args, now=None):
     except (OSError, ValueError):
         names = ar.load_names(STATE_DIR)
     try:
-        ar.rebuild_indexes(reports_dir, ar.load_signals(SIGNALS), names)
+        ar.rebuild_indexes(reports_dir, ar.load_signals(SIGNALS), names,
+                           ar.load_portfolio(STATE_DIR))
     except (OSError, ValueError) as e:  # 索引是派生视图：挂了不回滚已写的报告与信号
         print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s" % e)
     print("report -> %s（v%d）" % (path, version))
@@ -2196,6 +2214,10 @@ def selftest():
         for section in ("# 诊股报告", "## 结论", "## 证据状态", "## 关键价位",
                         "## 操作建议", "## 检查清单", "不构成投资建议"):
             assert section in report, "报告缺节：%s" % section
+        # 三价纪律钉（0.0.13）：lo20=12.7 > −5%线 11.78 → 止损按 0.99×lo20=12.57
+        # 取紧；报告显示值与 register_signal 落账的 key_levels 同一函数同源
+        assert "- 参考买点 12.7（近 20 日低点上方）· 止损 12.57（跌破 20 日低/−5%）" \
+               "· 目标 14.6（20 日高点）" in report, report
         assert "## 汇率（人民币敞口）" in report and "HKD/CNY 0.849" in report, \
             "报告情报面须含人民币敞口行（与 pack 同源）"
         assert "untrusted" not in report, "报告不得复述哨兵原文"
@@ -2483,10 +2505,18 @@ def selftest():
         # 登记基准价与报告现价同口径：quote.price（12.4）优先于日 K 末根（14.6）
         assert sigs3[-1]["close_at_signal"] == 12.4, sigs3[-1]["close_at_signal"]
         assert sigs3[-1]["price_kind"] == "unknown", "无时段登记口径须标 unknown"
+        # key_levels 落账钉（0.0.13）：登记价 12.4、lo20 12.7 / hi20 14.6——
+        # 与报告三价逐字同源（同一 _key_levels），止损取紧 0.99×lo20
+        assert sigs3[-1]["key_levels"] == {"entry_ref": 12.7, "stop": 12.57,
+                                           "target1": 14.6}, \
+            sigs3[-1]["key_levels"]
         register_signal(ev_i, verdict, opinions, "r5", "p5")
         register_signal(ev_c, verdict, opinions, "r6", "p6")
         sigs5 = json.load(open(SIGNALS, encoding="utf-8"))
         assert [s["price_kind"] for s in sigs5[-2:]] == ["intraday", "close"], sigs5[-2:]
+        # 盘中/收盘登记三价同源：lo20 9.7 贴着现价 → 止损 0.99×9.7=9.6 取紧
+        assert sigs5[-2]["key_levels"] == {"entry_ref": 9.7, "stop": 9.6,
+                                           "target1": 10.1}, sigs5[-2]["key_levels"]
         import postmortem as pm
         pm.evaluate_signals(sigs5, {"000001": ib})  # 新增键不破坏后验读取
         # 快照模式登记市场推导：meta 无 market（快照真实路径，经 fx.fetch 钉形状）时
@@ -2499,6 +2529,8 @@ def selftest():
         sn_sigs = json.load(open(SIGNALS, encoding="utf-8"))
         assert (sn_sigs[-2]["market"], sn_sigs[-2]["code"]) == ("cn", "600519"), sn_sigs[-2]
         assert (sn_sigs[-1]["market"], sn_sigs[-1]["code"]) == ("?", "TEST"), sn_sigs[-1]
+        assert "key_levels" not in sn_sigs[-1] and "key_levels" not in sn_sigs[-2], \
+            "无现价锚（快照稀疏 blocks）不落 key_levels（稀疏键向后兼容）"
         print("  ok 快照登记：meta 无 market 时 detect_market 推导（推不出维持 ?）")
         # 存量 ('?', 原始 symbol) 对立失效漏配修复：新归一身份登记对立族时，
         # 存量经 detect_market 归一比对恢复失效；推不出的存量记录维持不匹配
@@ -2852,6 +2884,75 @@ def _selftest_archive(evidence, verdict, opinions):
             assert "| 腾讯控股 |" in root, "无 stock_name 的存量组经缓存显名"
             assert "# 00700.hk · 腾讯控股 · 诊股时间线" in \
                 read(os.path.join(rd, "00700.hk", "index.md"))
+        # T11c 总览持仓列与三价位列（0.0.13）：持仓=~/.vibe-stock/portfolio.json
+        # 存在性合并（v2 holdings 归一 <code>.<market>），三价位=组内最新
+        # signal 的 key_levels；portfolio 缺失/空表整体跳过持仓列，老信号无
+        # key_levels 与脏持仓字段标 —，降级不得让索引重建崩栈
+        with tempfile.TemporaryDirectory() as rd:
+            sxk = [dict(base, id="k1", created_at="2026-11-01T10:00:00",
+                        stock_name="贵州茅台",
+                        key_levels={"entry_ref": 1650.0, "stop": 1550.0,
+                                    "target1": 1850.0}),
+                   dict(base, id="k2", created_at="2026-10-30T10:00:00"),
+                   dict(base, id="k3", market="hk", code="00700",
+                        created_at="2026-10-29T10:00:00")]
+            ar.rebuild_indexes(rd, sxk, portfolio={
+                "600519.cn": {"qty": 100, "cost": 1700.5},
+                "00700.hk": {"qty": "脏值", "cost": None}})
+            root = read(os.path.join(rd, "index.md"))
+            assert "| 股票 | 股票名称 | 最新日期 | 最新信号→动作 | 置信 | 诊断次数" \
+                   " | pending | 持仓数量 | 持仓成本 | 参考买点 | 止损 | 目标1 |" \
+                   in root, root
+            assert "| 贵州茅台 | 2026-11-01 | buy→buy | 0.60 | 2 | 2 | 100 | " \
+                   "1700.50 | 1650.00 | 1550.00 | 1850.00 |" in root, \
+                "持仓合并 + 三价位取组内最新 signal（k2 旧信号无 key_levels 不干扰）"
+            assert "| — | — | — | — | — |" in root, \
+                "无 key_levels 的老信号价位标 —，脏持仓字段降级 —"
+            ar.rebuild_indexes(rd, sxk)  # portfolio 缺失：持仓列整体跳过
+            root = read(os.path.join(rd, "index.md"))
+            assert "持仓数量" not in root and "| 参考买点 | 止损 | 目标1 |" in root
+            assert "1650.00 | 1550.00 | 1850.00 |" in root, "三价位列不随持仓缺席"
+        # T11c-port 持仓 SSOT 加载（v2 结构：持仓在 holdings 列表，元素
+        # {code, market, quantity, cost_price}，归一 <code>.<market> →
+        # {qty, cost}）：缺失/损坏/非对象/无 holdings 回 {}（只读合并，
+        # 永不抛错写回）
+        with tempfile.TemporaryDirectory() as td2:
+            assert ar.load_portfolio(td2) == {}
+            write(os.path.join(td2, "portfolio.json"), "[bad")
+            assert ar.load_portfolio(td2) == {}, "持仓文件损坏须降级空（不抛错）"
+            write(os.path.join(td2, "portfolio.json"), "[1, 2]")
+            assert ar.load_portfolio(td2) == {}, "非对象形态降级空"
+            write(os.path.join(td2, "portfolio.json"), '{"version": 2}')
+            assert ar.load_portfolio(td2) == {}, "无 holdings 键降级空"
+            write(os.path.join(td2, "portfolio.json"),
+                  '{"version": 2, "holdings": "脏"}')
+            assert ar.load_portfolio(td2) == {}, "holdings 非列表降级空"
+            write(os.path.join(td2, "portfolio.json"),
+                  '{"version": 2, "holdings": []}')
+            assert ar.load_portfolio(td2) == {}, "空持仓表视同缺失（收起持仓列）"
+            write(os.path.join(td2, "portfolio.json"), json.dumps({
+                "version": 2, "updated_at": "2026-11-01", "operations": [],
+                "holdings": [
+                    {"code": "600519", "market": "cn", "name": "贵州茅台",
+                     "quantity": 100, "cost_price": 1700.5, "currency": "CNY"},
+                    {"code": "00268", "market": "hk", "quantity": 200,
+                     "cost_price": 9.86, "currency": "HKD"},
+                    {"code": 600519, "market": "cn", "quantity": 1},
+                    "脏元素"]}, ensure_ascii=False))
+            assert ar.load_portfolio(td2) == {
+                "600519.cn": {"qty": 100, "cost": 1700.5},
+                "00268.hk": {"qty": 200, "cost": 9.86}}, \
+                "v2 holdings 归一 <code>.<market>（脏元素/非字符串码跳过不崩）"
+            assert ar._hold_cell(float("nan")) == "—" and \
+                ar._hold_cell(float("-inf")) == "—", \
+                "NaN/Infinity 脏值（json 容忍字面量）须降级 —"
+            # 集成钉：v2 文件经 load_portfolio 归一直通总览（loader↔render 契约）
+            with tempfile.TemporaryDirectory() as rd3:
+                ar.rebuild_indexes(rd3, sxk, portfolio=ar.load_portfolio(td2))
+                root = read(os.path.join(rd3, "index.md"))
+                assert "| 贵州茅台 | 2026-11-01 | buy→buy | 0.60 | 2 | 2 | 100 | " \
+                       "1700.50 | 1650.00 | 1550.00 | 1850.00 |" in root, \
+                    "v2 真实结构经归一后持仓列如实渲染（loader 不得返回 v2 顶层）"
         # T12 存量迁移：照现网形态（3 信号共用一被覆盖文件）
         legacy_md = render_report(evidence, verdict, opinions, "601888")
 
