@@ -14,4 +14,6 @@
   不扰动 verdict 与 quality（零权重钉）。
 - 回归执法：`scripts/adjudicate.py --selftest`、`scripts/diagnose.py --selftest`、
   `scripts/postmortem.py --selftest`、`scripts/lens.py --selftest` 四件全绿是
-  提交前置（AGENTS.md）。
+  提交前置（AGENTS.md）；盯盘件 `batch/monitor/{rules,watch}.py --selftest`
+  为非阻塞第五条（Fixture 内联于脚本、一律合成标的，见
+  [07](../references/07-monitor.md)「回归门禁」）。

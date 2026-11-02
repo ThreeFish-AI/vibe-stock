@@ -51,10 +51,21 @@ uv run --no-project scripts/adjudicate.py --opinions .vs/opinions.json \
 uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 ```
 
-文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（六篇规约 +
-PIPELINE）→ [batch/](batch/)（批量子技能参考实现）→ [strategies/](strategies/)
-（策略库）。回归：
-`scripts/*.py --selftest` 四件全绿。
+## 盘中盯盘（07 子技能）
+
+对在册股票（实盘持仓 + 模拟配置 + 观察票）做盘中价格面轮询：确定性规则锚定
+每日报告的止损/目标/参考买点三价位，击穿/收回/触目标/异动/触板/停牌等事件
+落台账并发本地事实通知，15:10/16:10 收盘复核终判后出日报；launchd 每个交易日
+09:15 自动拉起。边界：只发本地事实告警，不接第三方推送、不执行任何交易，盘中
+结论以收盘复核为准，当日信号登记仍归每晚全诊。见
+[references/07-monitor.md](references/07-monitor.md) 与
+[batch/monitor/](batch/monitor/)。
+
+文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（七篇规约 +
+PIPELINE）→ [batch/](batch/)（批量子技能参考实现）→
+[batch/monitor/](batch/monitor/)（盯盘参考实现）→ [strategies/](strategies/)
+（策略库）。回归：`scripts/*.py --selftest` 四件全绿（硬门禁）+
+`batch/monitor/*.py --selftest` 两件全绿（非阻塞第五条）。
 
 ## 免责
 
