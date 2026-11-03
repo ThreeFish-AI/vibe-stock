@@ -126,7 +126,8 @@
 
 - LaunchAgent 模板随仓交付（`batch/monitor/com.threefish.vibestock.monitor.plist`，
   安装命令见 [batch/monitor/README](../batch/monitor/README.md)）：
-  StartCalendarInterval 周一至周五 09:15 拉起 `--loop`；`KeepAlive.Crashed`
+  StartCalendarInterval 周一至周五 09:15 主槽拉起 `--loop`（0.0.16 起叠加
+  交易时段补拉槽与 16:15 盘后兜底槽，语义见下条，I-009）；`KeepAlive.Crashed`
   只认信号级崩溃（launchd.plist(5)），故 watch.py 把 `--loop` 的 Python 未捕获
   异常转为通知 + SIGABRT 才能自愈；正常收口 exit 0、重复实例 exit 3、P2 会话
   接管 exit 2 均不重拉（防「触发-退出-拉起」空转循环）；`AfterInitialDemand`
@@ -134,6 +135,28 @@
   launchd 不继承 shell PATH（默认 /usr/bin:/bin:/usr/sbin:/sbin），模板用
   `__UV_PATH__` 绝对路径占位；launchd 不建日志父目录（安装命令先 mkdir，
   watch.py 入口亦自建）。
+- **补拉槽语义（0.0.16，I-009）**：条件——工作日 09:15 主槽之后系统重启/开机/
+  重新登录/进程被非崩溃信号杀死时，launchd 对关机/重启期间错过的日历触发
+  **不补发**（launchd.plist(5) 只承诺睡眠期间错过的触发在唤醒时合并补发一次），
+  仅 09:15 单槽的旧模板当日不再拉起、直至手动 kickstart；做法——模板保留
+  09:15 主槽，叠加周一至周五交易时段补拉槽（09:45–11:45、13:15–15:45 各每
+  30min 一槽，相邻槽交易盲窗 ≤30min；11:45 槽为覆盖港股早盘尾段而设，两市
+  共同休市窗 12:00–13:00 零槽）与 16:15 盘后兜底槽（进程在收盘复核前死亡时
+  `close_done` 未置，16:15 重拉即补跑 `--close`；已置则立即 exit 0，幂等无
+  副作用）；`RunAtLoad` 维持 false、`AfterInitialDemand` 维持 true——补拉只靠
+  日历槽、不靠投机拉起（I-008 初衷与 launchd.plist(5) 对 RunAtLoad 的告诫均
+  不回退）；watch.py 运行时零改动（任意时刻拉起自洽：盘前等待、日期守卫停轮、
+  收口即退），watch.py selftest 以 plistlib 解析模板钉死全部关键属性。已知
+  坑位：① 槽位落在进程运行期间会被 launchd **直接丢弃**——不并发第二实例、
+  进程退出后也不排队补拉（2026-11-03 本机探针实测：双日历槽 + 150s 常驻
+  进程，运行期间槽位被丢、runs 不增；与 launchd.plist(5) StartInterval 的
+  missed-firing 语义同构）——故正常运行日补拉槽零开销、无 watch.lock exit 3
+  风暴，单实例锁仅作兜底；② 槽位按系统本地时区触发，沿用 09:15 主槽
+  「机器时区 = Asia/Shanghai」的既有假设，机器时区非 UTC+8 时先改系统时区；
+  ③ 当日彻底停盯盘不能只 kill 进程（≤30min 内会被下一补拉槽拉起），须
+  `launchctl bootout` 卸载作业；④ P2 会话接管（exit 2）落地时须重估补拉槽
+  与「launchd 拉起 `--once` 补轮」的协调——接管期间 `--loop` 重拉会破坏
+  「触发即退出交还会话」语义。
 - `--loop` 生命周期：盘前等待 → 按 `session_phase` 逐市场门控轮询（A/港独立，
   交叉窗口 11:30–12:00 / 15:00–16:00 各自正确）→ 15:10/16:10 后自动跑一次
   --close → exit 0。节假日误拉起由日期守卫停轮兜底（P4 交易日历前不依赖人）。
@@ -216,6 +239,6 @@ whipsaw 路径判据用日 K high/low（tick 缺口不影响判定）。
 ## 回归门禁
 
 `batch/monitor/rules.py --selftest`（36 checks）与 `watch.py --selftest`
-（22 checks）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
+（30 checks，含 launchd 模板回归钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
 scripts/ 四件硬门禁成员（AGENTS.md 测试段第五条非阻塞），P4 机械判据合流
 scripts/ 后归四件 selftest 接管。判据只许收严（门禁只收严红线）。

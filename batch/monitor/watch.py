@@ -1034,6 +1034,38 @@ def selftest():
                          uni_rows, today)
     check("末根非当日挂起", out[0]["verdicts"] == ["末根日 K 未出或非当日，次日补判"])
 
+    # 7) launchd 模板回归钉（I-009：仅 09:15 单槽时重启/开机后当日盲窗——钉住
+    #    补拉槽语义；模板与 selftest 同目录，plistlib 解析兼钉标准 XML 合法）
+    import plistlib
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "com.threefish.vibestock.monitor.plist"), "rb") as f:
+        job = plistlib.load(f)
+    check("模板拉起 --loop", "--loop" in job["ProgramArguments"])
+    check("KeepAlive 崩溃自愈 + 防投机拉起",
+          job["KeepAlive"] == {"Crashed": True, "AfterInitialDemand": True})
+    check("RunAtLoad=false（I-008 初衷不回退）", job["RunAtLoad"] is False)
+    day_slots = {}
+    for ent in job["StartCalendarInterval"]:
+        day_slots.setdefault(ent["Weekday"], set()).add(
+            ent["Hour"] * 60 + ent["Minute"])
+    check("槽位仅周一至周五且五日一致",
+          sorted(day_slots) == [1, 2, 3, 4, 5]
+          and len({frozenset(v) for v in day_slots.values()}) == 1)
+    mins = sorted(next(iter(day_slots.values())))
+    check("09:15 主槽在列", 9 * 60 + 15 in mins)
+    check("两市共同休市零槽（12:00–13:00）",
+          not any(12 * 60 <= m < 13 * 60 for m in mins))
+    trade = ((570, 720), (780, 960))   # A+港并集交易分钟：09:30–12:00 / 13:00–16:00
+
+    def blind(a, b):                   # 相邻槽 [a,b) 内未覆盖的交易分钟数
+        return sum(max(0, min(b, hi) - max(a, lo)) for lo, hi in trade)
+
+    cyc = mins + [mins[0] + 1440]      # 跨日闭环：单槽形态即整日盲窗，必红
+    check("相邻补拉槽交易盲窗 ≤30min",
+          max(blind(a, b) for a, b in zip(cyc, cyc[1:])) <= 30)
+    check("盘后兜底槽在 16:10–16:40（收盘复核补跑）",
+          any(16 * 60 + 10 <= m <= 16 * 60 + 40 for m in mins))
+
     print("watch selftest: %d checks OK" % ok[0])
     return True
 
