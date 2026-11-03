@@ -215,7 +215,9 @@ def latest_allocation(state_dir):
 
 def latest_signals(state_dir):
     """signals.json 组内最新信号（价位锚 SSOT）：{code: {...}}（append 序，
-    后写覆盖前写 = 组内最新）。"""
+    后写覆盖前写 = 组内最新）。只取 default 轨——position 轨的波段带键
+    （band_lo/band_hi/trail_ref）语义不同，混入会覆盖短线止损/目标锚
+    （07「价位锚分轨」句；波段带锚走 P2 带内状态规则，另行接入）。"""
     path = os.path.join(state_dir, "signals.json")
     out = {}
     if not os.path.exists(path):
@@ -226,6 +228,8 @@ def latest_signals(state_dir):
     except (OSError, ValueError):
         return out
     for s in sigs:
+        if s.get("profile", "default") != "default":
+            continue
         out[s["code"]] = {"market": s.get("market"), "name": s.get("stock_name"),
                           "key_levels": s.get("key_levels") or {},
                           "date": s.get("date")}
@@ -949,7 +953,12 @@ def selftest():
                  "key_levels": {"stop": 9.80, "target1": 11.50}},
                 {"code": "600003", "market": "cn", "stock_name": "合成丙",
                  "date": "2026-11-02",
-                 "key_levels": {"stop": 19.00, "target1": 22.00}}], f)
+                 "key_levels": {"stop": 19.00, "target1": 22.00}},
+                # position 轨波段带信号：不得覆盖短线三价锚（profile 过滤钉）
+                {"code": "600001", "market": "cn", "profile": "position",
+                 "date": "2026-11-03",
+                 "key_levels": {"band_lo": 8.00, "band_hi": 12.00,
+                                "trail_ref": 10.50}}], f)
         with open(os.path.join(td, "names.json"), "w", encoding="utf-8") as f:
             json.dump({"cn:600001": "合成甲", "cn:000002": "合成乙"}, f)
         uni = derive_universe(td)
@@ -959,6 +968,9 @@ def selftest():
         by = {r["code"]: r for r in uni["rows"]}
         check("实盘取 signals 价位", by["600001"]["stop"] == 9.80
               and by["600001"]["kind"] == "real")
+        check("position 轨波段带不覆盖短线锚（profile 过滤）",
+              by["600001"]["target1"] == 11.50
+              and "band_lo" not in by["600001"].get("key_levels", {}))
         check("模拟回退 allocation", by["000002"]["stop"] == 9.50
               and by["000002"]["levels_source"] == "allocation"
               and by["000002"]["entry_ref"] == 9.70)

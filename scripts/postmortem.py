@@ -2,10 +2,13 @@
 """postmortem.py · 决策信号后验自校准（蓝本：DSA decision_signal_outcome_service）。
 
 机制（与 references/05-postmortem.md 同源）：
-  - 对每条 pending 信号，回看 1/3/5/10 个交易日后的实际收盘价：
-    买入族 ≥ +2% 记 hit、≤ −2% 记 miss、中间记 neutral；卖出族对称。
+  - 对每条 pending 信号，按其 profile 的 horizons 回看实际收盘价：
+    default=T+1/3/5/10、±2% 固定带；position=T+20/60/120、σ√h 判定带且
+    仅 T+60 记分（T+20/120 照落实判供展示、不进台账）。
+    买入族越过带上/下沿记 hit/miss、带内记 neutral；卖出族对称。
     watch/hold/avoid/alert 只观察不记分。
-  - 每个判定结果按信号记录时的 sources 归因，累计进 ledger.json（wins/losses）。
+  - 每个判定结果按信号记录时的 sources 归因，累计进各自台账（default=
+    ledger.json、position=ledger.position.json，wins/losses）。
   - 绩效因子与画像升降档由 adjudicate.performance_factor / profile 消费：
     命中率 ≥60% 且样本 ≥10 → promote；≤40% 且样本 ≥10 → demote；否则 observe。
   - 评估后重建 reports/ 时间线索引（archive.rebuild_indexes），T+n 结果进 index.md。
@@ -19,6 +22,7 @@ import argparse
 import bisect
 import datetime as dt
 import json
+import math
 import os
 import sys
 import tempfile
@@ -30,10 +34,16 @@ import fetch as fx  # noqa: E402
 STATE_DIR = os.path.expanduser("~/.vibe-stock")
 SIGNALS = os.path.join(STATE_DIR, "signals.json")
 LEDGER = os.path.join(STATE_DIR, "ledger.json")
+LEDGER_POSITION = os.path.join(STATE_DIR, "ledger.position.json")
 
 NEUTRAL_BAND = 0.02
 PROMOTE_RATE, DEMOTE_RATE, MIN_SAMPLES = 0.60, 0.40, 10
 SCORABLE = {"buy": "bull", "reduce": "bear", "sell": "bear"}
+# position 轨唯一记分期限：T+60 与 T+20/T+120 收益强相关（约 0.58/0.71），
+# 多期限记分是伪重复样本——会使信号提前离开 <30 样本中性门、破坏 Beta(15,15)
+# 收缩；20/120 照落 evaluated 实判（hit/miss/neutral）供展示、不进台账
+# （规约见 references/05 期限轨）
+LEDGER_HORIZON_POSITION = 60
 
 
 def _load(path, default):
@@ -45,23 +55,25 @@ def _load(path, default):
 
 
 def _save(path, obj):
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=1)
+    # I-005：原子写（tmp+replace），崩溃不留半截 JSON 被 _load 静默当空
+    ar.write_json_atomic(path, obj)
 
 
-def score(action, base, later):
-    """返回 hit/miss/neutral 或 None（不可判定）。"""
+def score(action, base, later, band=NEUTRAL_BAND):
+    """返回 hit/miss/neutral 或 None（不可判定）。band=判定带半径（fraction）：
+    default 轨恒 ±2%（NEUTRAL_BAND 逐字不变，07 P3 import 兼容）；position 轨
+    按 horizon 波动率缩放（见 evaluate_signals——±2% 在 T+120 neutral 占比仅
+    ~7%，判定退化为大盘 beta 方向，丧失区分度）。"""
     chg = later / base - 1 if base else None
     if chg is None:
         return None
     fam = SCORABLE.get(action)
     if fam == "bull":
-        return ("hit" if chg >= NEUTRAL_BAND else
-                "miss" if chg <= -NEUTRAL_BAND else "neutral")
+        return ("hit" if chg >= band else
+                "miss" if chg <= -band else "neutral")
     if fam == "bear":
-        return ("hit" if chg <= -NEUTRAL_BAND else
-                "miss" if chg >= NEUTRAL_BAND else "neutral")
+        return ("hit" if chg <= -band else
+                "miss" if chg >= band else "neutral")
     return None  # watch/hold 等只观察
 
 
@@ -73,20 +85,39 @@ def _fx_on(series, keys, date):
 
 
 def evaluate_signals(signals, bars_by_code, cny_by_date=None):
-    """就 bars（按代码）评估已到期 horizon；原位更新 signals，返回归因增量。
+    """就 bars（按代码）评估已到期 horizon；原位更新 signals，返回
+    (ledger_delta_map, changed, notes)：delta_map 按 profile 分桶
+    （{"default": {...}, "position": {...}}，台账分文件不串轨）；changed=是否有
+    任何 evaluated 落笔（neutral-only 也算——索引重建据此触发，不再只看台账
+    增量）；notes=诊断行（超窗信号等，run 侧打印）。
+    判定口径（两轨同守）：基准价用同复权 closes[i]（与 closes[j] 同序列），
+    不用 close_at_signal（qt 实时未复权价——窗口内除息/送转会系统性低估收益、
+    高股息 buy 偏 miss）；close_at_signal 仅作登记价展示。
+    position 轨判定带 band=σ_d×√h（σ_d=信号日前 60 日已实现日波动，无前视；
+    样本不足退化 2%×√(h/10) 并在 entry 注记），且仅 h=60 记分（20/120 只观察）。
     cny_by_date（--cny 时传入 fx.hkd_cny_daily 产物）：hk 信号的 evaluated 附
     cny_close / cny_chg_pct 展示字段（人民币口径收益，含汇兑项）——仅展示，
     outcome 判定与台账归因仍按标的币种收盘（默认口径不变）。"""
-    ledger_delta = {}
+    delta_map = {"default": {}, "position": {}}
+    changed, notes = False, []
     fx_keys = sorted(cny_by_date) if cny_by_date else []
     for s in signals:
         if s.get("status") != "pending":
             continue
+        profile = s.get("profile", "default")
         bars = bars_by_code.get(s["code"])
         if not bars:
             continue
         dates = [b["date"] for b in bars]
         closes = [b["close"] for b in bars]
+        if s["date"] < dates[0]:
+            # 超窗：信号日早于取数窗口首日（BARS_WINDOW=250），此后每次后验
+            # 都评不到——不再静默永久 pending，出诊断行（跳过不是修复，人工
+            # 决定留档或清理；保持 pending 不动）
+            notes.append("跳过 %s（%s · %s 轨）：信号日早于日 K 窗口首日 %s，"
+                         "超窗无法后验，保持 pending" % (
+                             s.get("id"), s.get("code"), profile, dates[0]))
+            continue
         try:
             i = dates.index(s["date"])
         except ValueError:
@@ -98,34 +129,53 @@ def evaluate_signals(signals, bars_by_code, cny_by_date=None):
             if j < 0 or s["date"] > dates[-1]:
                 continue
             i = j
+        base_close = closes[i]  # 同复权基准（判定与展示百分比的 SSOT）
+        # position 轨 σ_d：只用信号日「之前」的收盘（无前视）
+        band, band_note = NEUTRAL_BAND, ""
+        if profile == "position":
+            hist = closes[max(0, i - 60):i]
+            sigma_d = (fx.realized_vol(hist, 60) or 0.0) / math.sqrt(252)
         for h in s["horizons"]:
             if str(h) in s.get("evaluated", {}):
                 continue
             j = i + h
             if j >= len(closes):
                 continue  # 未到期
-            outcome = score(s["action"], s["close_at_signal"], closes[j])
+            if profile == "position":
+                if sigma_d > 0:
+                    band = sigma_d * math.sqrt(h)
+                else:  # σ 样本不足：退化带并注记（不虚构精度）
+                    band = NEUTRAL_BAND * math.sqrt(h / 10)
+                    band_note = "band=退化 2%×√(h/10)"
+            outcome = score(s["action"], base_close, closes[j], band)
             entry = {"close": closes[j], "date": dates[j],
-                     "outcome": outcome or "observed"}
+                     "base": base_close, "outcome": outcome or "observed"}
+            if band_note:
+                entry["note"] = band_note
             if fx_keys and s.get("market") == "hk":
                 fx0 = _fx_on(cny_by_date, fx_keys, s["date"])
                 fx1 = _fx_on(cny_by_date, fx_keys, dates[j])
-                if fx0 and fx1 and s["close_at_signal"]:
-                    base_cny = s["close_at_signal"] * fx0
+                if fx0 and fx1 and base_close:
+                    base_cny = base_close * fx0
                     if base_cny:
                         entry["cny_close"] = round(closes[j] * fx1, 4)
                         entry["cny_chg_pct"] = round(
                             (closes[j] * fx1 / base_cny - 1) * 100, 2)
             s.setdefault("evaluated", {})[str(h)] = entry
-            if outcome in ("hit", "miss"):
+            changed = True
+            # 记分门：position 只记 T+60（伪重复治理）；其余期限照落 evaluated
+            scoreable = (profile != "position"
+                         or h == LEDGER_HORIZON_POSITION)
+            if outcome in ("hit", "miss") and scoreable:
                 for src in s.get("sources", []):
-                    d = ledger_delta.setdefault(src, {"wins": 0, "losses": 0})
+                    d = delta_map[profile].setdefault(
+                        src, {"wins": 0, "losses": 0})
                     d["wins" if outcome == "hit" else "losses"] += 1
         if all(str(h) in s["evaluated"] for h in s["horizons"]):
             decisive = [v["outcome"] for v in s["evaluated"].values()
                         if v["outcome"] in ("hit", "miss")]
             s["status"] = "evaluated" if decisive else "observed"
-    return ledger_delta
+    return delta_map, changed, notes
 
 
 def merge_ledger(ledger, delta):
@@ -156,7 +206,14 @@ def profile_report(ledger):
 def run(args):
     # --stock 先归一：识别失败 detect_market 以 SystemExit 如实报错退出（不碰状态文件）
     want = fx.detect_market(args.stock) if args.stock else None
-    signals = _load(SIGNALS, [])
+    # I-005：signals.json 严格加载——损坏即中止退出（状态文件是用户本地
+    # 事实，绝不静默当空后整体覆盖）；台账仍宽松加载——损坏当空后，本次
+    # 增量会整体覆盖写回（历史战绩清零风险，I-005② 在册待修，非无害）
+    try:
+        signals = ar.load_signals(SIGNALS)
+    except ValueError as e:
+        print("signals.json 无法解析（%s），后验中止——不覆盖状态文件" % e)
+        return 2
     if not signals:
         print("signals.json 为空：先跑 diagnose.py report 登记信号")
         return 0
@@ -200,11 +257,43 @@ def run(args):
                 print("人民币口径不可用（%s）：outcome 仍按港币评估" % err)
         else:
             print("--cny：待评估信号无港股标的，人民币口径不适用")
-    delta = evaluate_signals(evaluable, bars_by_code, cny_by_date)
+    delta_map, changed, notes = evaluate_signals(evaluable, bars_by_code,
+                                                 cny_by_date)
+    for n in notes:  # 超窗等诊断行：不再静默永久 pending
+        print("warn: %s" % n)
     _save(SIGNALS, signals)
-    if delta:
-        ledger = merge_ledger(_load(LEDGER, {}), delta)
-        _save(LEDGER, ledger)
+    ledger = _load(LEDGER, {})
+    wrote = []
+    for profile, path in (("default", LEDGER), ("position", LEDGER_POSITION)):
+        delta = delta_map.get(profile) or {}
+        if not delta:
+            continue
+        led = merge_ledger(_load(path, {}), delta)
+        _save(path, led)
+        wrote.append((path, led, delta))
+        if profile == "default":
+            ledger = led
+    if wrote:
+        for path, led, delta in wrote:
+            print("评估完成；台账与绩效已更新（%s）" % path)
+            for src, d in delta.items():
+                print("  归因 %s：+%d 胜 / +%d 负" % (src, d["wins"], d["losses"]))
+    else:  # 全部跳过/未到期时不落「已更新」失实陈述，亦不空写台账文件
+        print("评估完成；本次无台账变动（无可评估项或未到期）")
+    # 中线台账画像（文件存在才打印——与 default 分开升降档，样本不串）
+    for path, tag in ((LEDGER, "default"), (LEDGER_POSITION, "position")):
+        led = ledger if tag == "default" else _load(path, {})
+        rows = profile_report(led)
+        if rows and tag == "position":
+            print("中线画像升降档（ledger.position.json）：")
+            for r in rows:
+                print("  " + r)
+    rows = profile_report(ledger)
+    if rows:
+        print("画像升降档：")
+        for r in rows:
+            print("  " + r)
+    if changed or wrote:  # neutral-only 评估也重建索引（evaluated 有落笔即变）
         pf_warn = []
         try:  # 派生视图放最后：挂了不吞台账（事实源已落盘）；坏索引的
             # UnicodeDecodeError ⊂ ValueError 一并只告警
@@ -215,18 +304,6 @@ def run(args):
             print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s" % e)
         for w in pf_warn:  # 持仓契约漂移可观测（与 diagnose report 同口径）
             print("warn: %s" % w)
-        print("评估完成；台账与绩效已更新（%s）" % LEDGER)
-        for src, d in delta.items():
-            print("  归因 %s：+%d 胜 / +%d 负" % (src, d["wins"], d["losses"]))
-    else:  # 全部跳过/未到期时不落「已更新」失实陈述，亦不空写台账文件；
-        # 无新评估则索引内容不变，跳过重建
-        ledger = _load(LEDGER, {})
-        print("评估完成；本次无台账变动（无可评估项或未到期）")
-    rows = profile_report(ledger)
-    if rows:
-        print("画像升降档：")
-        for r in rows:
-            print("  " + r)
     return 0
 
 
@@ -245,19 +322,70 @@ def selftest():
     sig_watch = {**sig_buy, "id": "w1", "action": "watch", "family": "neutral",
                  "sources": ["role:技术"], "horizons": [1, 3, 5, 10],
                  "evaluated": {}}
-    delta = evaluate_signals([sig_buy, sig_watch], {"000001": bars})
+    delta_map, changed, notes = evaluate_signals([sig_buy, sig_watch],
+                                                 {"000001": bars})
+    delta = delta_map["default"]
     assert sig_buy["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral")
     assert sig_watch["evaluated"]["1"]["outcome"] == "observed", "watch 只观察"
     assert sig_buy["status"] in ("evaluated", "observed"), "全部 horizon 到期应收口"
-    # 时间线索引吃到后验结果：T+1 格带涨跌幅与判定
+    assert changed and not notes
+    # 复权基准修复：判定与展示基准=closes[i]（同复权序列），非 close_at_signal
+    # （fixture 登记价 100.0 而 2026-10-01 收盘 102.0——除息/盘中价错位形态）
+    assert sig_buy["evaluated"]["1"]["base"] == bars[0]["close"] == 102.0
+    assert sig_buy["evaluated"]["1"]["base"] != sig_buy["close_at_signal"]
+    # 时间线索引吃到后验结果：T+1 格带涨跌幅与判定（基准取 evaluated.base）
     row = [ln for ln in ar.render_stock_index([sig_buy], "cn", "000001").splitlines()
            if ln.startswith("| 2026-10-01")][0]
-    assert "%+.1f%% %s" % ((sig_buy["evaluated"]["1"]["close"] / 100.0 - 1) * 100,
+    assert "%+.1f%% %s" % ((sig_buy["evaluated"]["1"]["close"]
+                            / sig_buy["evaluated"]["1"]["base"] - 1) * 100,
                            sig_buy["evaluated"]["1"]["outcome"]) in row, row
     assert delta["strategy:bull_trend"]["wins"] + \
         delta["strategy:bull_trend"]["losses"] <= 4
     ledger = merge_ledger({}, delta)
     assert profile_report(ledger)[0].startswith("strategy:bull_trend")
+    # position 轨：σ√h 判定带 + 仅 T+60 记分（20/120 只观察）+ 台账分桶
+    sig_pos = {**sig_buy, "id": "p1", "profile": "position",
+               "horizons": [20, 60, 120], "date": "2026-10-01",
+               "status": "pending", "evaluated": {}, "close_at_signal": 100.0}
+    pm, pchg, pnotes = evaluate_signals([dict(sig_pos)],
+                                        {"000001": bars})
+    assert set(pm) == {"default", "position"} and not pm["default"], pm
+    # 30 根合成日 K：T+20 落 evaluated、T+60/120 未到期（不虚构）
+    assert "20" in sig_pos["evaluated"] and "60" not in sig_pos["evaluated"]
+    assert sig_pos["evaluated"]["20"].get("base") == 102.0
+    hist = [b["close"] for b in bars[:0]]  # σ_d=信号日前 60 日（i=0 无前史）
+    assert not pm["position"], "i=0 无前史 σ 退化带下 T+20 也只观察不记分"
+    # 退化带注记（σ 样本不足）
+    assert sig_pos["evaluated"]["20"].get("note", "").startswith("band=退化"), \
+        sig_pos["evaluated"]["20"]
+    # 有前史的 σ 带：手工造 130 根（信号在第 100 根），band=σ_d×√20 手算钉
+    bars2 = []
+    q = 100.0
+    for d in range(130):
+        q *= 1.01 if d % 2 else 0.99  # 日波动 ≈1%
+        bars2.append({"date": "2026-%02d-%02d" % (d // 28 + 1, d % 28 + 1),
+                      "open": q, "high": q, "low": q, "close": round(q, 6),
+                      "volume": 1})
+    sig_pos2 = {**sig_buy, "id": "p2", "profile": "position",
+                "horizons": [20], "date": bars2[100]["date"],
+                "status": "pending", "evaluated": {}}
+    pm2, _, _ = evaluate_signals([sig_pos2], {"000001": bars2})
+    sigma_d = (fx.realized_vol([b["close"] for b in bars2[:100]], 60)
+               or 0.0) / math.sqrt(252)
+    want_band = sigma_d * math.sqrt(20)
+    chg = (sig_pos2["evaluated"]["20"]["close"]
+           / sig_pos2["evaluated"]["20"]["base"] - 1)
+    want = ("hit" if chg >= want_band else "miss" if chg <= -want_band
+            else "neutral") if sig_pos2["action"] == "buy" else None
+    assert sig_pos2["evaluated"]["20"]["outcome"] == (want or "observed"), \
+        (chg, want_band, sig_pos2["evaluated"]["20"])
+    assert "note" not in sig_pos2["evaluated"]["20"], "σ 可得时不落退化注记"
+    # 超窗诊断：信号日早于窗口首日 → 保持 pending + 诊断行（不再静默）
+    sig_old = {**sig_buy, "id": "o1", "date": "2020-01-01",
+               "status": "pending", "evaluated": {}}
+    _, _, onotes = evaluate_signals([sig_old], {"000001": bars})
+    assert sig_old["status"] == "pending" and sig_old["evaluated"] == {}
+    assert any("超窗" in n and "o1" in n for n in onotes), onotes
     # 阈值路径
     assert profile_report({"s": {"wins": 10, "losses": 0}})[0].endswith(
         "promote（命中率 100% ≥ 60%）")
@@ -276,10 +404,16 @@ def selftest():
     import contextlib
     import io
     with tempfile.TemporaryDirectory() as td:
-        global SIGNALS, LEDGER
-        _old_paths = (SIGNALS, LEDGER, fx.STATE_DIR, fx.FETCH_STATE)
+        # STATE_DIR 一并隔离（run() 的索引重建/名单/持仓都读它）——否则
+        # selftest 会把合成 index.md 写进真实 ~/.vibe-stock/reports/（覆盖
+        # 用户真实总览，无告警）
+        global STATE_DIR, SIGNALS, LEDGER, LEDGER_POSITION
+        _old_paths = (STATE_DIR, SIGNALS, LEDGER, LEDGER_POSITION,
+                      fx.STATE_DIR, fx.FETCH_STATE)
         _old_fns = (fx.load_fetch_state, fx.save_fetch_state, dict(fx.DAILY_FETCHERS))
+        STATE_DIR = td
         SIGNALS, LEDGER = os.path.join(td, "signals.json"), os.path.join(td, "ledger.json")
+        LEDGER_POSITION = os.path.join(td, "ledger.position.json")
         fx.STATE_DIR, fx.FETCH_STATE = td, os.path.join(td, "fetch_state.json")
         fx.load_fetch_state = lambda: {"breakers": {}, "cooldowns": {}}
         fx.save_fetch_state = lambda st: None
@@ -315,6 +449,10 @@ def selftest():
                 "缺 code 记录须保持 pending 不动"
             assert "1" in sigs["c1"]["evaluated"] and "1" in sigs["c2"]["evaluated"]
             assert sigs["c1"]["status"] == "observed" and sigs["c2"]["status"] == "observed"
+            # 索引重建隔离钉：neutral-only 评估（changed=True）也触发重建，
+            # 产物必须落在隔离 STATE_DIR——写真实目录即覆盖用户总览（回归）
+            assert os.path.exists(os.path.join(td, "reports", "index.md")), \
+                "run() 索引重建必须落在隔离 STATE_DIR（不得写真实 ~/.vibe-stock）"
             # --stock 过滤：归一（sh600519→cn:600519）后只评该股；未入过滤集的坏记录不报
             calls.clear()
             _save(SIGNALS, _state())
@@ -339,6 +477,16 @@ def selftest():
             assert "1" in sigs["c1"]["evaluated"] and sigs["c1"]["status"] == "observed"
             assert sigs["x1"]["status"] == "pending" and sigs["x1"]["evaluated"] == {}
             assert "跳过 x1" in out.getvalue()
+            # I-005：signals.json 损坏 → 严格加载中止（退出码 2、文件字节不变）
+            with open(SIGNALS, "w", encoding="utf-8") as f:
+                f.write("{corrupt")
+            before = open(SIGNALS, encoding="utf-8").read()
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert run(argparse.Namespace(stock=None)) == 2
+            assert "后验中止" in out.getvalue() and \
+                open(SIGNALS, encoding="utf-8").read() == before, \
+                "损坏的 signals.json 不得被静默清空/覆盖"
             # 无匹配 / 识别失败：如实报、不取数
             calls.clear()
             _save(SIGNALS, _state())
@@ -353,16 +501,16 @@ def selftest():
                 pass
             assert calls == []
         finally:
-            SIGNALS, LEDGER = _old_paths[:2]
-            fx.STATE_DIR, fx.FETCH_STATE = _old_paths[2:]
+            STATE_DIR, SIGNALS, LEDGER, LEDGER_POSITION = _old_paths[:4]
+            fx.STATE_DIR, fx.FETCH_STATE = _old_paths[4:]
             (fx.load_fetch_state, fx.save_fetch_state) = _old_fns[:2]
             fx.DAILY_FETCHERS.clear()
             fx.DAILY_FETCHERS.update(_old_fns[2])
     print("  ok run() 守卫：未知市场跳过不阻塞 · --stock 过滤/归一/无匹配/识别失败")
     # 持仓契约漂移可观测（04「portfolio.json 契约」，与 diagnose report 同口径）：
     # 有新评估触发索引重建时，文件存在但与契约不符 → warn: 行、台账照常落盘；
-    # 缺失 / 合法 v2 / 合法空表静默。STATE_DIR 一并隔离（不读真实状态目录）
-    global STATE_DIR
+    # 缺失 / 合法 v2 / 合法空表静默。STATE_DIR 一并隔离（不读真实状态目录；
+    # global 声明已在前块——同名一处声明，此处复用）
     _old_pf = (STATE_DIR, SIGNALS, LEDGER, fx.STATE_DIR, fx.FETCH_STATE,
                fx.load_fetch_state, fx.save_fetch_state, dict(fx.DAILY_FETCHERS))
     good = {"code": "000001", "market": "cn", "quantity": 300, "cost_price": 12.5}
@@ -431,11 +579,13 @@ def selftest():
             "cny_chg_pct" in sig_hk["evaluated"][h], h
     assert "cny_close" not in sig_hk_base["evaluated"]["1"], \
         "默认口径不得附 cny 展示字段"
-    # 数学钉：h=1 → 10-02 收盘 101.49×汇率 0.898 / 基准 100×0.899 − 1
+    # 数学钉：h=1 → 10-02 收盘 101.49×汇率 0.898 / 基准 closes[i]=102×0.899 − 1
+    # （复权基准修复后 cny 展示同用 closes[i]，与 outcome 同源；登记价 100 不再作基准）
     ev1 = sig_hk["evaluated"]["1"]
+    assert ev1["base"] == 102.0
     assert abs(ev1["cny_close"] - 101.49 * 0.898) < 0.01, ev1
     assert abs(ev1["cny_chg_pct"]
-               - (101.49 * 0.898 / (100 * 0.899) - 1) * 100) < 0.01, ev1
+               - (101.49 * 0.898 / (102 * 0.899) - 1) * 100) < 0.01, ev1
     # 汇率序列窗口不足（信号日早于汇率首根）：如实缺省不附字段、不误报
     s5 = {**sig_buy, "id": "h3", "market": "hk", "code": "01810",
           "close_at_signal": 100.0, "status": "pending", "date": "2026-10-05",
@@ -450,9 +600,9 @@ def selftest():
           "close_at_signal": None, "status": "pending", "date": "2026-10-01",
           "horizons": [1], "evaluated": {}}
     evaluate_signals([s6], {"01810": bars}, cny_map)
-    assert "cny_close" not in s6["evaluated"]["1"] and \
-        s6["evaluated"]["1"]["outcome"] == "observed", \
-        "null 基准价在 --cny 口径下须照常评估、只缺 cny 展示字段"
+    assert s6["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral") \
+        and "cny_close" in s6["evaluated"]["1"], \
+        "复权基准修复后 null 登记价不再降级：outcome 与 cny 展示均以 closes[i] 为基"
     print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动 · 非交易日回退 · 索引后验格")
     print("  ok 人民币口径展示：hk 附 cny 字段 · outcome/归因仍港币 · 缺根如实缺省")
     print("SELFTEST PASSED ✔")

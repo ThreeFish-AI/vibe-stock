@@ -1,11 +1,48 @@
 # 05 · 决策信号后验自校准（SSOT）
 
-后验只评估短线信号（策略/角色意见）：基本面锚（lens.py 三档结论，12 个月
-量级）不进后验——T+1/3/5/10 短窗证伪不了基本面论点（期限正交），把透镜塞进
-短窗归因只会错杀长周期视角。
+后验评估两条期限轨的信号（策略/角色意见）：基本面锚（lens.py 三档结论，
+12 个月量级）仍不进后验——两轨窗都证伪不了基本面论点（期限正交），把透镜
+塞进短窗归因只会错杀长周期视角。
 
 实现：[scripts/diagnose.py](../scripts/diagnose.py) `register_signal` +
 [scripts/postmortem.py](../scripts/postmortem.py)；状态在 `~/.vibe-stock/`。
+
+## 期限轨（profile，0.0.16 起）
+
+- **双轨登记**（条件：`diagnose.py report`；做法：default 轨照旧登记一条；
+  workdir 存在 `verdict.position.json` 时同刻再登记一条 `profile=position`
+  信号——horizons 取 `archive.HORIZONS_OF` SSOT（default=[1,3,5,10]、
+  position=[20,60,120]≈1/3/6 个月），key_levels 按轨取（default=20 日三价、
+  position=波段带三键，见 [04](04-report.md) 4b）；坑位：无 position 文件时
+  单轨登记，行为与历史逐字节一致；两轨同用同一份 evidence/报告文件，
+  report_id 相同、profile 不同）。
+- **对立失效按 profile 隔离**（无条件全局规则：期限正交的执法面）：失效与
+  superseded 都只作用于同 profile 的信号——短线 sell 不得把中线 pending buy
+  标 invalidated（反之亦然），存量无 profile 键的信号按 default 兜底。
+- **superseded（I-004 落地）**（条件：同股、同 profile、同 report_id 的旧
+  pending 信号；做法：登记新版时旧版标 `superseded`——同日重跑以最新版为
+  准，不再一事多票污染样本；坑位：superseded 保持未评估形态（区别于
+  invalidated 的对立失效与 evaluated 的到期收口）。
+- **position 轨判定带**：band=σ_d×√h（σ_d=信号日**前** 60 日已实现日波动，
+  无前视；样本不足退化 2%×√(h/10) 并在 evaluated entry 的 note 注记）——
+  ±2% 固定带在 T+120 neutral 占比仅 ~7%、判定退化为大盘 beta 方向；
+  default 轨判定带恒 ±2%（`NEUTRAL_BAND` 逐字不变，07 P3 import 兼容）。
+- **仅 T+60 记分**（position 轨）：T+20/120 照落 evaluated 实判（hit/miss/
+  neutral）供展示、不进台账——多期限记分是伪重复样本（T+60 与 T+120 收益
+  相关约 0.71），会使信号提前离开 <30 样本中性门、破坏 Beta(15,15) 收缩。
+- **台账分文件**：default 增量写 `ledger.json`（裸键原样）、position 写
+  `ledger.position.json`；裁决器经 `--ledger` 按轨查表（[03](03-synthesis.md)
+  双跑制），绩效因子与画像升降档互不串轨。
+- **复权基准（两轨同修，正确性修正）**：outcome 判定与涨跌幅展示基准=
+  同复权 `closes[i]`（evaluated entry 落 `base`），不用 `close_at_signal`
+  （qt 实时未复权价——窗口内除息/送转系统性低估收益、高股息 buy 偏 miss）；
+  `close_at_signal` 仍作登记价与索引展示兜底（存量旧 entry 无 base 键时）。
+  ±2%/σ√h 阈值本身不动（判据未放宽，修的是基准价口径）。
+- **超窗诊断**（条件：信号日早于日 K 窗口首日（BARS_WINDOW=250））：
+  做法——打印 `warn:` 诊断行并保持 pending（不再静默永久 pending）；
+  坑位：跳过不是修复，超窗信号每次后验都会重复报告，人工决定留档或清理。
+- **索引重建条件**：evaluated 有任何落笔（含 neutral-only）即重建——
+  原「台账有增量才重建」会让纯 neutral 评估的索引滞后。
 
 ## 信号登记（report 时）
 
@@ -19,7 +56,8 @@
   对立信号标 invalidated——不同 profile 可并存相反动作；比对按读时归一（港股
   补 5 位；快照符号两侧同口径归一），存量 4 位港码/带后缀旧形态信号同样互通。
 - **置信门**：buy 族置信 <0.5 → 登记 watch（不算可执行建议）。
-- 期限 horizons = [1, 3, 5, 10] 个交易日。
+- 期限 horizons 按轨取 `archive.HORIZONS_OF`：default=[1,3,5,10]、
+  position=[20,60,120]（交易日）。
 - 报告指针（适用：读信号定位报告时）：做法——`report_id` = `<code>-<date>` 日级
   分组键，定位用 `report_path` + `report_version`（布局见 [04](04-report.md)
   「落盘与跟踪」）；坑位——迁移还原的丢失版带 `report_lost: true`，正文不可得。
@@ -59,9 +97,12 @@
   无匹配打印说明、退出码 0（不写 signals/ledger）；坑位——匹配键是 detect_market
   归一后形态，存量 code 未归一（快照兜底登记的原始 symbol 形态）会匹配不上，
   以无参全量跑（守卫跳过口径）兜底。
-- 回看各 horizon 实际收盘：买入族 ≥+2% hit / ≤−2% miss / 其间 neutral；
-  卖出族对称；watch/hold 只观察不记分。
-- 归因：hit/miss 计入信号登记时的每个 source 的台账（ledger.json wins/losses）。
+- 回看各 horizon 实际收盘：买入族 ≥+band hit / ≤−band miss / 其间 neutral；
+  卖出族对称；watch/hold 只观察不记分——band 见上文「期限轨」（default 恒
+  ±2%、position=σ_d×√h）。
+- 归因：hit/miss 计入信号登记时的每个 source 的台账——default 轨
+  ledger.json、position 轨 ledger.position.json（分文件不串轨；position 仅
+  T+60 记分）。
 - 绩效因子：见 [03](03-synthesis.md)（Beta(15,15)、钳 0.83–1.2、<30 样本中性）。
 - 画像升降档：命中率 ≥60% 且样本 ≥10 → promote；≤40% 且样本 ≥10 → demote；
   其余 observe（<10 样本只观察不动手）。

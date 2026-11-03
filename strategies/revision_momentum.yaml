@@ -1,0 +1,38 @@
+# 预期修正动量 / Revision Momentum（中线 · profile=position）
+# 证据依据：A 股 SUE1 等权 1.13%/月（t=7.02）、CH-4 α 0.68%/月（HQZ 多重
+# 检验幸存者）；上调后 60 日超额约 4.0%，但公告前 20 日涨幅 >+20% 时显著
+# 变弱——置信保守。调研报告第 2/6 章
+name: revision_momentum
+display_name: 预期修正
+description: 分析师/EPS 预期上修与预告超预期的中线漂移，先扣抢跑。
+category: position
+profile: position
+required_evidence: [research, forecast, daily_bars, technical]
+aliases: [预期上修, 业绩漂移]
+default_priority: 45
+market_regimes: [any]
+
+instructions: |
+  **预期修正动量（profile=position · 只写进 opinions.position.json，中线轨）**
+
+  判定（research/forecast 结构化源为主，technical.mid_term 扣抢跑；
+  置信上限 0.65）：
+
+  1. **修正源（按可得性取）**：HK 用 research.consensus.eps_revision_90d
+     direction=up；A 股 v1 用 forecast 业绩预告中值 vs research 一致预期的
+     正预期差（预告超预期）+ 评级趋势（上调占比）——A 股 EPS 修正历史
+     暂不可得（Phase 4 回收，缺则如实注明用代理口径）。
+  2. **资格门（抢跑扣减）**：公告/预告前 20 日涨幅 <+15%——已抢跑透支的
+     上修按 08「利好出尽」族处理：本策略降档或弃权，并提示风险角色
+     downgrade；覆盖机构 ≥3 家（共识才有意义）。
+  3. **持有窗语义**：20–60 交易日（中线轨 T+20/60/120）；漂移在 1–3 个月
+     内衰减，不外推到 6 个月。
+  4. **下修方向**：direction=down 或预告低于预期 → 弃权（本策略不做空；
+     与价格破位并发时移交风险角色）。
+
+  评分调整：
+  - 上修/正预期差 + 未抢跑 + 覆盖 ≥3 家 → buy（置信 0.55–0.65）。
+  - research/forecast 缺失（fetch_failed/missing；HK forecast 为
+    not_supported 制度差异）→ 只看可得源并降一档注明；双缺 → 弃权。
+  - 抢跑成立（近 20 日涨幅 >+20% 且逼近 52 周高）→ hold 并注明
+     「预期已在价内」。
