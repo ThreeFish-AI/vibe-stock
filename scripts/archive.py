@@ -28,7 +28,11 @@ VER_RE = re.compile(r"^## v(\d+) · (\d\d:\d\d:\d\d)$")
 SAME_RE = re.compile(r"^同 v(\d+)。$")
 LEGACY_RE = re.compile(r"^(.+)-(\d{4}-\d{2}-\d{2})\.md$")
 LOST = "（报告已被覆盖，无法恢复）"
-HORIZONS = (1, 3, 5, 10)
+# 期限轨 SSOT（register_signal / postmortem / 索引表头共用）：default=短线
+# T+1/3/5/10；position=中线 T+20/60/120（≈1/3/6 个月，仅 T+60 进台账记分——
+# 多期限记分是伪重复样本，规约见 references/05「期限轨」与 08）
+HORIZONS_OF = {"default": (1, 3, 5, 10), "position": (20, 60, 120)}
+HORIZONS = HORIZONS_OF["default"]  # 向后兼容别名（短线表头）
 INDEX_NOTE = ("> 派生视图：数据源 signals.json（总览持仓列另合并 "
               "~/.vibe-stock/portfolio.json 持仓 SSOT，存在时）；report / "
               "postmortem 时整体重建，勿手改。")
@@ -224,7 +228,9 @@ def _horizon_cell(s, h):
     ev = (s.get("evaluated") or {}).get(str(h))
     if not ev:
         return "—"
-    base, outcome = s.get("close_at_signal"), ev.get("outcome", "")
+    # base 优先取评估时的同复权基准（closes[i]）；存量旧条目无 base 回退登记价
+    base = ev.get("base") or s.get("close_at_signal")
+    outcome = ev.get("outcome", "")
     pct = ("%+.1f%%" % ((ev["close"] / base - 1) * 100)
            if base and ev.get("close") is not None else "")
     return " ".join(x for x in (pct, "" if outcome == "observed" else outcome) if x) or "—"
@@ -365,57 +371,86 @@ def render_stock_index(signals, market, code, names=None):
     rows = [s for s in signals if s.get("market") == market and s.get("code") == code]
     name = _display_name(rows, market, code, names)
     L = ["# %s%s · 诊股时间线" % (dirname, " · %s" % name if name else ""),
-         "", INDEX_NOTE, "",
-         "| 日期 | 版本 | 信号→动作 | 置信 | 登记价 | 状态 | %s |" %
-         " | ".join("T+%d" % h for h in HORIZONS),
-         "| --- | --- | --- | --- | --- | --- | %s |" % " | ".join("---" for _ in HORIZONS)]
-    for s in _ordered(rows):
-        ver = "v%d" % s["report_version"] if s.get("report_version") else "—"
-        if s.get("report_lost"):
-            ver += "（已丢失）"
-        L.append("| %s | %s | %s→%s | %s | %s | %s | %s |" % (
-            _report_cell(s, dirname), ver, s.get("signal", "?"), s.get("action", "?"),
-            _fmt(s.get("confidence")), _fmt(s.get("close_at_signal")),
-            s.get("status", "?"), " | ".join(_horizon_cell(s, h) for h in HORIZONS)))
+         "", INDEX_NOTE, ""]
+
+    def _table(rs, title, horizon_key):
+        hz = HORIZONS_OF[horizon_key]
+        out = []
+        if title:
+            out += ["", title, ""]
+        out += ["| 日期 | 版本 | 信号→动作 | 置信 | 登记价 | 状态 | %s |" %
+                " | ".join("T+%d" % h for h in hz),
+                "| --- | --- | --- | --- | --- | --- | %s |" %
+                " | ".join("---" for _ in hz)]
+        for s in _ordered(rs):
+            ver = "v%d" % s["report_version"] if s.get("report_version") else "—"
+            if s.get("report_lost"):
+                ver += "（已丢失）"
+            out.append("| %s | %s | %s→%s | %s | %s | %s | %s |" % (
+                _report_cell(s, dirname), ver, s.get("signal", "?"),
+                s.get("action", "?"), _fmt(s.get("confidence")),
+                _fmt(s.get("close_at_signal")), s.get("status", "?"),
+                " | ".join(_horizon_cell(s, h) for h in hz)))
+        return out
+
+    L += _table([s for s in rows if s.get("profile", "default") == "default"],
+                None, "default")
+    mid = [s for s in rows if s.get("profile") == "position"]
+    if mid:  # 中线轨单独成表（T+20/60/120；无中线信号不出，向后兼容）
+        L += _table(mid, "## 中线（profile=position · T+20/60/120）", "position")
     return "\n".join(L) + "\n"
 
 
 def render_root_index(signals, names=None, portfolio=None):
     """总览表。持仓列存在性合并 portfolio（load_portfolio 归一的
     <code>.<market> → {qty, cost}）：缺失/损坏/无可用持仓整体跳过持仓两列；
-    三价位列恒在，取
-    组内最新 signal 的 key_levels（report 注册时按 06 三价纪律落账），老信号
-    无该字段标 —。缺数据如实降级不虚构——索引重建挂在 report / postmortem
+    三价位列恒在，取组内最新 **default 轨** signal 的 key_levels（report 注册时
+    按各轨口径落账：default=06 三价纪律、position=波段带三键），老信号无该
+    字段标 —；中线两列（信号→动作/pending）取组内最新 position 信号，无中线
+    信号标 —。缺数据如实降级不虚构——索引重建挂在 report / postmortem
     主流程末段，任何 portfolio 缺口不得抛错中断。"""
     groups = {}
     for s in signals:
         groups.setdefault((s.get("market"), s.get("code")), []).append(s)
-    latest = sorted(((_ordered(g)[0], g) for g in groups.values()),
+    # 短线列只算 default 轨（中线信号不得顶替「最新信号」列/诊断次数）；中线
+    # 两列取组内最新 position 信号（无则 —，向后兼容存量全 default 形态）
+    latest = []
+    for g in groups.values():
+        dflt = [s for s in g if s.get("profile", "default") == "default"] or g
+        latest.append((_ordered(dflt)[0], g))
+    latest = sorted(latest,
                     key=lambda x: (x[0].get("created_at") or "", x[0].get("id") or ""),
                     reverse=True)
     head = ["股票", "股票名称", "最新日期", "最新信号→动作", "置信", "诊断次数",
             "pending"]
     if portfolio:
         head += ["持仓数量", "持仓成本"]
-    head += ["参考买点", "止损", "目标1"]
+    head += ["参考买点", "止损", "目标1", "中线信号→动作", "中线pending"]
     L = ["# 诊股总览", "", INDEX_NOTE, "",
          "| %s |" % " | ".join(head),
          "| %s |" % " | ".join("---" for _ in head)]
     for s, g in latest:
         dirname = "%s.%s" % (s["code"], s["market"])
         kl = s.get("key_levels") or {}
+        mids = [x for x in g if x.get("profile") == "position"]
+        msig = _ordered(mids)[0] if mids else None
+        dflt_g = [x for x in g if x.get("profile", "default") == "default"]
         cells = ["[%s](%s/index.md)" % (dirname, dirname),
                  _display_name(g, g[0].get("market"), g[0].get("code"), names) or "—",
                  (s.get("created_at") or s.get("date") or "—")[:10],
                  "%s→%s" % (s.get("signal", "?"), s.get("action", "?")),
-                 _fmt(s.get("confidence")), str(len(g)),
-                 str(sum(1 for x in g if x.get("status") == "pending"))]
+                 _fmt(s.get("confidence")), str(len(dflt_g) or len(g)),
+                 str(sum(1 for x in dflt_g if x.get("status") == "pending"))]
         if portfolio:
             h = portfolio.get(dirname)
             h = h if isinstance(h, dict) else {}
             cells += [_hold_cell(h.get("qty")), _hold_cell(h.get("cost"))]
         cells += [_fmt(kl.get("entry_ref")), _fmt(kl.get("stop")),
-                  _fmt(kl.get("target1"))]
+                  _fmt(kl.get("target1")),
+                  "%s→%s" % (msig.get("signal", "?"), msig.get("action", "?"))
+                  if msig else "—",
+                  str(sum(1 for x in mids if x.get("status") == "pending"))
+                  if mids else "—"]
         L.append("| %s |" % " | ".join(cells))
     return "\n".join(L) + "\n"
 

@@ -98,7 +98,7 @@
 
 | 块 | 源链（主→回退） | 簇 | 港股 |
 | --- | --- | --- | --- |
-| moneyflow | A：新浪直连 60 日四档净额（主力=r0_net+r1_net 自算，summary 另出 20/60 日累计——中线口径，不足 60 日如实缺省）；HK：南向持股 RPT_MUTUAL_STOCK_HOLDRANKS 直连（T-1 披露，单页 60 行另出持股比 20/60 日变化） | sina_flow；HK=em_datacenter | 南向持股（港股通标的；非标的=not_supported） |
+| moneyflow | A：新浪直连 60 日四档净额（主力=r0_net+r1_net 自算，summary 另出 20/60 日累计——中线口径，不足 60 日如实缺省）；HK：南向持股 RPT_MUTUAL_STOCK_HOLDRANKS 直连（T-1 披露，单页 65 行另出持股比 20/60 日变化） | sina_flow；HK=em_datacenter | 南向持股（港股通标的；非标的=not_supported） |
 | notices | em_notice(8 类枚举)→cninfo(26 类，监管权威)；HK=em_notice(ann_type=H 单源，盈警/回购标题分型) | em_notice/cninfo | em-notice-h 单源（HKEXnews 回退在 backlog） |
 | research | em_report(逐篇)+datacenter 直连(评级共识+目标价+EPS1..4 前瞻回收)；HK=etnet(逐券商目标价/EPS/评级)→yf(analyst 互验+eps_trend 90 日修正) | em_report/em_datacenter；HK=etnet/yf | etnet+yf 双源（东财 reportapi 港股 0 覆盖不入链） |
 | forecast | datacenter 直连×2（预告+披露日历） | em_datacenter | not_supported（港股无预告制度，见制度差异句） |

@@ -44,6 +44,11 @@ FETCH_STATE = os.path.join(STATE_DIR, "fetch_state.json")
 BREAKER_FAILS, BREAKER_COOLDOWN = 3, 300
 CONN_COOLDOWN = 15
 BARS_WINDOW = 250
+# 往返成本常量（fraction）：波段带宽下限「3×往返成本」的锚——口径 SSOT 在
+# references/08-midterm.md 静态表（A 股印花税 0.05% 卖出单边 2023-08-28 起、
+# 港股 0.1%×双边 2023-11-17 起，均含佣金/杂费量级，estimated 待官方页逐项
+# 复核后带生效日期固化）
+ROUNDTRIP_COST = {"cn": 0.0015, "hk": 0.0035}
 STALE_DAYS = {"quote": 1, "daily_bars": 5, "news": 3, "fundamentals": 120,
               "chip": 5, "moneyflow": 10, "notices": 1, "research": 30,
               "forecast": 1, "unlock": 1, "holder": 7, "market": 1,
@@ -323,20 +328,22 @@ def _sina_json(text):
         return json.loads(re.sub(r"([{,]\s*)([A-Za-z_]\w*)\s*:", r'\1"\2":', text))
 
 
+def _tor(v):
+    """换手率坏值清洗：'--' 占位/NaN/非数 → None（弃键不崩链，两 em 系路径共用）。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None
+
+
 def _daily_via_akshare(market, code):
     import akshare as ak  # noqa: 延迟导入，缺库不致命
     df = (ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
           if market == "cn" else
           ak.stock_hk_hist(symbol=code.zfill(5), period="daily", adjust="qfq"))
     # 换手率列仅 em 系源提供（qq-tx/yf 回退链无此列，mid_term 换手键缺席
-    # 如实为 None，禁止跨源硬凑——references/08 换手口径句）；"--" 占位/NaN
-    # 归 None，坏点不得让整链崩到回退源
-    def _tor(v):
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            return None
-        return f if f == f else None
+    # 如实为 None，禁止跨源硬凑——references/08 换手口径句）；坏值经 _tor 弃键
     return [{"date": str(r["日期"]), "open": float(r["开盘"]), "high": float(r["最高"]),
              "low": float(r["最低"]), "close": float(r["收盘"]),
              "volume": float(r["成交量"]),
@@ -353,8 +360,16 @@ def _daily_via_efinance(market, code):
     for _, r in df.tail(BARS_WINDOW).iterrows():
         row = {}
         for cn, en in key.items():
-            if cn in r:
-                row[en] = str(r[cn]) if en == "date" else float(r[cn])
+            if cn not in r:
+                continue
+            if en == "date":
+                row[en] = str(r[cn])
+            elif en == "turnover":  # 坏值（'--'/NaN）弃键不崩链（_tor 同口径）
+                t = _tor(r[cn])
+                if t is not None:
+                    row[en] = t
+            else:
+                row[en] = float(r[cn])
         rows.append(row)
     return rows
 
@@ -545,8 +560,8 @@ def _limit_up_pct(market, code):
     if market != "cn" or not code:
         return None
     c = str(code)
-    if c.startswith(("300", "301", "688", "689")):
-        return 20.0
+    if c.startswith(("30",)) or c.startswith(("688", "689")):
+        return 20.0  # 创业板全 30 号段（300/301/302…，301 耗尽后 302 扩容）
     if c.startswith(("43", "83", "87", "92")):
         return 30.0
     return 10.0
@@ -566,19 +581,29 @@ def _mid_term(bars, market=None, code=None):
     mt = {}
     if n >= 127:  # 跳近月（≈21 交易日）的 6 个月动量
         mt["ret_6_1"] = round((closes[-22] / closes[-127] - 1) * 100, 2)
-    if n >= 22:   # 12-1 动量的 ≈11 个月近似（250 根窗物理上限，08 注记）
+    if n >= 127:  # 12-1 近似（短窗 closes[0] 锚失真——次新股量成上市初期涨幅，缺席不虚构）
         mt["ret_12_1_approx"] = round((closes[-22] / closes[0] - 1) * 100, 2)
     if n >= 2:    # 全窗时序动量（窗口不足 250 时为可用最大窗）
         mt["tsmom_250d"] = round((closes[-1] / closes[0] - 1) * 100, 2)
-    mt["rv60"] = realized_vol(closes, 60)
-    mt["rv120"] = realized_vol(closes, 120)
-    rets20 = [(closes[i] / closes[i - 1] - 1) * 100
-              for i in range(max(1, n - 20), n)]
+    # 波动率锚喂原始序列（含坏点）——断链语义归 realized_vol 自身（SSOT，
+    # 与 lens 透镜同输入同输出；预过滤序列仅供索引型因子）
+    raw_closes = [b.get("close") for b in bars]
+    mt["rv60"] = realized_vol(raw_closes, 60)
+    mt["rv120"] = realized_vol(raw_closes, 120)
+    # 近 20 日单日收益：坏点断链配对（同 realized_vol 口径，不跨坏点拼收益）
+    rets20 = []
+    prev = None
+    for c in closes[-21:]:
+        if prev is not None:
+            rets20.append((c / prev - 1) * 100)
+        prev = c
     if rets20:
         mt["max_ret_20d"] = round(max(rets20), 2)  # MAX/彩票效应（08 只降不升）
         lim = _limit_up_pct(market, code)
         if lim is not None:
-            # 四舍五入容差 0.15pp：行情端涨幅按前收四舍五入两位披露
+            # 容差 0.15pp 有意从严（只降不升方向：9.85%~9.99% 未及板涨幅计入
+            # 计数，虚高只触发降档闸不放大买入风险）；次新股上市初期无涨跌幅
+            # 限制的极端值如实保留（08 次新股豁免注记）
             mt["limit_up_count_20d"] = sum(
                 1 for r in rets20 if r >= lim - 0.15)
     if n >= 2:
@@ -605,8 +630,10 @@ def _mid_term(bars, market=None, code=None):
             mt["vr_63d"] = round(_var(rq) / (q * v1), 3)  # <1 偏均值回复、>1 偏趋势
     tos = [b["turnover"] for b in bars
            if isinstance(b.get("turnover"), (int, float)) and b["turnover"] > 0]
+    tail_ok = isinstance(bars[-1].get("turnover"), (int, float)) \
+        if bars else False  # 末根无换手（回退链/近端缺失）→ 三键缺席不硬凑
     tos = tos[-BARS_WINDOW:]
-    if len(tos) >= 40:
+    if len(tos) >= 40 and tail_ok:
         avg20 = sum(tos[-20:]) / min(20, len(tos))
         avg_all = sum(tos) / len(tos)
         if avg_all > 0:
@@ -1077,6 +1104,26 @@ def _ext_fail(name, e):
             "note": type(e).__name__}
 
 
+def _mf_window_keys(nets):
+    """A 股主力净额中线窗键（20/60 日累计）：序列不足整窗如实缺省 None，
+    不按可用窗外推（references/08 资金面句）。纯函数（selftest 三态钉）。"""
+    return {"main_net_20d_yi": (round(sum(nets[:20]), 4)
+                                if len(nets) >= 20 else None),
+            "main_net_60d_yi": (round(sum(nets[:60]), 4)
+                                if len(nets) >= 60 else None)}
+
+
+def _hk_hold_chg(rows):
+    """港股南向持股比 20/60 日变化（百分点）：rows 按日新→旧；行数不足整窗
+    或比值为 '--' 占位（None）时该键缺省，不虚构。纯函数（selftest 三态钉）。"""
+    out = {}
+    hp = [_fnum(x.get("HOLD_SHARES_RATIO")) for x in rows]
+    for w in (20, 60):
+        if len(hp) >= w + 1 and hp[0] is not None and hp[w] is not None:
+            out["hold_pct_chg_%dd" % w] = round(hp[0] - hp[w], 3)
+    return out
+
+
 def fetch_moneyflow_hk(code, st, now):
     """扩展块·资金流（港股）：南向（港股通）持股是港股唯一日更的个股级公开
     资金面信号（港股无 A 股四档资金流数据）。RPT_MUTUAL_STOCK_HOLDRANKS 直连
@@ -1113,12 +1160,8 @@ def fetch_moneyflow_hk(code, st, now):
                "net_mv_chg_10d_hkd": r.get("HOLD_MARKETCAP_CHG10"),
                "close_price": r.get("CLOSE_PRICE"),
                "currency": "HKD"}
-    # 中线口径：持股比 20/60 日变化（百分点）——同端点单页 60 行零增请求；
-    # 行数不足或比值为 "--" 占位时如实缺省，不虚构（references/08 资金面句）
-    hp = [_fnum(x.get("HOLD_SHARES_RATIO")) for x in rows]
-    for w in (20, 60):
-        if len(hp) >= w + 1 and hp[0] is not None and hp[w] is not None:
-            summary["hold_pct_chg_%dd" % w] = round(hp[0] - hp[w], 3)
+    # 中线口径：持股比 20/60 日变化（百分点）——同端点单页 65 行零增请求
+    summary.update(_hk_hold_chg(rows))
     return {"state": state, "source": "dc-hsgt", "summary": summary, "note": note}
 
 
@@ -1201,12 +1244,7 @@ def fetch_moneyflow(market, code, st, now):
                    "main_net_3d_yi": round(sum(nets[:3]), 4),
                    "main_net_5d_yi": round(sum(nets[:5]), 4),
                    "main_net_10d_yi": round(sum(nets[:10]), 4),
-                   # 中线口径（1/3 个月累计，序列 60 日封顶——不足 60 日如实
-                   # 缺省 None，不按可用窗外推；references/08 资金面句）
-                   "main_net_20d_yi": (round(sum(nets[:20]), 4)
-                                       if len(nets) >= 20 else None),
-                   "main_net_60d_yi": (round(sum(nets[:60]), 4)
-                                       if len(nets) >= 60 else None),
+                   **_mf_window_keys(nets),
                    "main_streak_days": streak,
                    "streak_direction": ("inflow" if nets[0] > 0 else "outflow")}
         return {"state": "available", "source": "sina-flow", "days": days,
@@ -2067,8 +2105,16 @@ def fetch(symbol, snapshot_dir=None):
     if snapshot_dir:
         blocks = snapshot_blocks(snapshot_dir)
         # 快照模式不判时段：快照取于何时不可知，如实标 unknown（不出盘中警示）
-        meta = {"symbol": symbol, "snapshot": True,
-                "session": {"phase": "unknown", "note": "快照模式不判时段"}}
+        # meta 补 market/code（detect_market 纯函数零网络）——否则合并重算
+        # mid_term 时 _limit_up_pct 恒 None，A 股涨停计数静默缺席；推不出
+        # （非 A/港代码形态）不落键，维持「推不出 → '?' 兜底」既有契约
+        _snap_meta = {"symbol": symbol, "snapshot": True,
+                      "session": {"phase": "unknown", "note": "快照模式不判时段"}}
+        try:
+            _snap_meta["market"], _snap_meta["code"] = detect_market(symbol)
+        except SystemExit:
+            pass
+        meta = _snap_meta
     else:
         market, code = detect_market(symbol)
         st = load_fetch_state()

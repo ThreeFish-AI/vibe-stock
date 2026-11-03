@@ -11,13 +11,13 @@ mid_term 因子由 [scripts/fetch.py](../scripts/fetch.py) `derive_technical` �
 
 | 层 | 期限 | 载体 | 进裁决？ | 进后验？ |
 | --- | --- | --- | --- | --- |
-| 短线 | T+1/3/5/10 | 现有十策略 + 三角色（default 轨） | 是 | 是（±2% 带） |
-| 中线 | 1–6 个月 | mid_term 因子（信息面）+ 本文件风险判据族 | 只降不升（risk.json） | 本版不进 |
+| 短线 | T+1/3/5/10 | 十个短线策略 + 三角色（default 轨） | 是 | 是（±2% 带） |
+| 中线 | 1–6 个月 | 五个 position 策略（方向票，置信帽 0.65）+ 三族风险判据 | 方向票 + 只降不升（risk.json 两轨共用） | 是（T+20/60/120，σ√h 带，仅 T+60 记分） |
 | 基本面锚 | 12 个月 | [lens.py](../scripts/lens.py) 透镜 | 只降不升（downgrade 线索） | 否 |
 
-坑位：本版（0.0.16 起）中线只以「信息面 + 风险判据族」接入 default 轨——中线
-利好**没有升档通道**（正向判断由现有策略按证据自行合流，本文件不提供买点）；
-profile=position 独立裁决/登记/后验轨为预留（见文末）。
+坑位：中线方向票只经 `profile: position` 策略进 opinions.position.json
+（[03](03-synthesis.md) 双跑制）；两轨裁决互不替代、对立失效与台账按
+profile 隔离（[05](05-postmortem.md) 期限轨）。
 
 ## mid_term 因子口径（technical.mid_term）
 
@@ -28,16 +28,16 @@ context-pack 渲染三行（动量/长均线 · 波动/回撤 · 情绪/拥挤�
 | 字段 | 语义 | 条件/坑位 |
 | --- | --- | --- |
 | ret_6_1 | 跳近月 6 个月动量（closes[-22]/closes[-127]−1） | 需 ≥127 根；A 股月度反转强、动量弱——只作弱条件与风险线索，不作追高依据 |
-| ret_12_1_approx | 12-1 动量的 ≈11 个月近似（closes[-22]/closes[0]−1） | BARS_WINDOW=250 物理上限；勿当精确 12-1 用 |
+| ret_12_1_approx | 12-1 动量的 ≈11 个月近似（closes[-22]/closes[0]−1） | 需 ≥127 根——短窗下 closes[0] 锚失真（次新股量成上市初期涨幅），缺席不虚构；BARS_WINDOW=250 物理上限，勿当精确 12-1 用 |
 | tsmom_250d | 全窗时序动量 | 窗口不足 250 根时为可用最大窗（语义注记在 pack） |
 | rv60 / rv120 | 年化已实现波动率（与 lens 透镜共享 realized_vol，SSOT 在 fetch.py） | σ 带与仓位讨论的波动锚 |
-| max_ret_20d | 近 20 日最大单日涨幅（MAX/彩票效应） | A 股按代码段涨停阈值天然饱和（见下）；只降不升判据用 |
+| max_ret_20d | 近 20 日最大单日涨幅（MAX/彩票效应） | A 股单日涨幅通常受代码段涨停阈值约束；坑位：次新股上市初期（前 5 个交易日）无涨跌幅限制，极端值如实保留不截断；只降不升判据用 |
 | limit_up_count_20d | 近 20 日涨停计数 | 主板 10% / 创业板·科创板 20% / 北交所 30%，容差 0.15pp（前收四舍五入）；**ST 5% 特例依赖 quote.name，由风险角色按名称收严判读**；港股无涨跌停不出 |
 | mdd_250 / cur_dd | 全窗最大回撤 / 现价距运行峰值回撤 | 250 根窗内口径 |
 | ma150 / ma200 | 长均线（Weinstein/Minervini 口径） | 不足窗口缺席 |
 | vr_63d | Lo–MacKinlay 方差比 VR(63) | 重叠窗口（自相关有偏）——**方向参考（<1 偏均值回复、>1 偏趋势），不作硬阈值结论** |
 | turnover_avg_20d | 近 20 日均换手（%） | 仅 em 系链首提供换手列（ak-em/ef-em）；qq-tx/yf 回退时三键整体缺席，禁止跨源硬凑 |
-| turnover_abnormal | 异常换手比（近 20 日均/全窗均） | 个股级最强情绪信号之一（LSY PMO 口径的近似）；estimated——历史换手按当前股本回溯，增发/解禁期失真放大 |
+| turnover_abnormal | 异常换手比（近 20 日均/全窗均） | 个股级最强情绪信号之一（LSY PMO 口径的近似）；estimated——历史换手按当前股本回溯，增发/解禁期失真放大；坑位：末根无换手值（回退链/近端缺失）时三键整体缺席——「近 20 日均」不可信时不硬凑 |
 | turnover_pctile_250 | 近 20 日均换手在窗内滚动均值序列的分位 | 公式 (<=cur)/n，与估值分位表同口径 |
 
 资金面扩行（moneyflow summary）：A 股 `main_net_20d_yi/main_net_60d_yi`
@@ -141,7 +141,9 @@ context-pack 渲染三行（动量/长均线 · 波动/回撤 · 情绪/拥挤�
 | 港股 | ≈0.25–0.35% | 印花税 0.1%×双边（2023-11-17 起恢复）+ 佣金/交易费/交收费 |
 
 坑位：表值是带宽下限的保守锚不是精确费率；高抛低吸带带宽 ≥ max(2σ_d×√21,
-3×往返成本) 才有意义（rebalance 数学见调研报告第 10 章）。
+3×往返成本)——σ_d 为**日**已实现波动（mid_term.rv60/√252 同源）、√21 折算月窗
+（2σ_d×√21 即月收益 2 倍标准差；A 股典型 σ_d 1%–2% → g≈9%–18%，成本下限仅在
+极低波动票上生效）；rebalance 数学见调研报告第 10 章。
 
 ## 证据准入与拒绝清单
 
@@ -152,16 +154,33 @@ context-pack 渲染三行（动量/长均线 · 波动/回撤 · 情绪/拥挤�
 美林时钟择时、TMT 成交占比硬阈值、AH 收敛套利等）及依据见调研报告
 「拒绝引入清单」节——拒绝清单**只增不删**（对应门禁只收严）。
 
-## 预留（P2–P4，未实施）
+## 双轨管道（0.0.16 已落地）
 
-- **P2 双轨管道**：profile=position 独立裁决/登记（horizons=[20,60,120]，仅
-  T+60 记分）/台账分文件（ledger.position.json，经 adjudicate 既有 --ledger
-  参数零改动路由）/σ√h 缩放后验判定带/同复权基准价修复；报告「中线裁决」节
-  与 _mid_key_levels 波段带（band_lo/band_hi/trail_ref）；对立失效按 profile
-  隔离（向 [05](05-postmortem.md)「不同 profile 可并存相反动作」规约看齐）。
-- **P3 策略激活与编排**：五个 position 策略（quality_value / revision_momentum
-  / policy_staged / turnaround_catalyst / swing_band，置信帽 0.65）；06 批量中线
-  选池（三价参数化、波动倒数权重、卫星仓硬帽 ≤30%）；07 盯盘波段带告警
-  （band_lo/band_hi/trail_ref 三键，与短线三价不互覆）。
-- **P4 数据增强**：A 股 EPS 修正序列回收（research 逐篇盈利预测列）；指数日 K
-  取数链与超额收益判定带；市场级情绪扩展块。
+- **意见生产**：default 轨读十个短线策略出 opinions.json；position 轨只读
+  五个 `profile: position` 策略（quality_value / revision_momentum /
+  policy_staged / turnaround_catalyst / swing_band，[strategies/](../strategies/)）
+  出 opinions.position.json——置信上限 0.65（首批 T+60 记分样本落地前的
+  防御性设定，非实证结论）；两轨意见不混写。
+- **裁决双跑**：adjudicate.py 零改动跑两次（[03](03-synthesis.md)）；风险
+  risk.json 两轨共用（三族判据对两轨同时只降不升）。
+- **登记/后验/台账**：profile 隔离的对立失效、同 report_id superseded、
+  horizons [20,60,120] 仅 T+60 记分、σ√h 判定带、台账 ledger.position.json
+  分文件（[05](05-postmortem.md) 期限轨）。
+- **报告/索引/盯盘**：「中线裁决」节与波段带三键（[04](04-report.md) 4b）；
+  索引双表与总览中线两列；监控价位锚只取 default 轨（[07](07-monitor.md)
+  价位锚分轨；波段带带内状态规则规约先行、实施随其 P2）。
+- **批量中线档**：三价参数化/波动倒数权重/卫星仓硬帽 ≤30%/20 交易日复核
+  （[06](06-batch-scan.md) 中线档）。
+
+## 预留（P4，未实施）
+
+- **A 股 EPS 修正序列回收**：research 逐篇盈利预测列（akshare 1.20 源码已核
+  列存在、当前被丢弃，零新增 HTTP）——revision_momentum A 股侧从「预告
+  预期差代理」升级为真修正序列（列名随年份动态生成须表头模式匹配；仅
+  ak-em 链首可得，回退源标 estimated）。
+- **指数日 K 取数链与超额收益判定带**：σ√h 带不能分离大盘 beta（政策/主题
+  行情的个股归因存在系统性混淆）——需新增 fetch 簇与探针，与 07 P3 的
+  HS300/HSI MA60 自动取数共用一次接入。
+- **市场级情绪扩展块**（两融余额/新开户/全 A 换手分位/ERP）：方向正确但
+  需 2–4 个新零权重块，待 position 轨跑顺后按 [01](01-evidence.md) backlog
+  评审。

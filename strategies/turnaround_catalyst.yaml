@@ -1,0 +1,40 @@
+# 翻身催化 / Turnaround Catalyst（中线 · profile=position）
+# 证据依据：困境是负选择（Campbell-Hilscher 危险系数）、壳价值制度性坍缩
+# （新国九条后退市收紧）、无催化深跌不给翻身分；Lynch 周期分类闸。
+# 调研报告第 4 章
+name: turnaround_catalyst
+display_name: 翻身催化
+description: 困境反转必须绑定可验证硬催化——无催化的深跌只是困境。
+category: position
+profile: position
+required_evidence: [fundamentals, forecast, notices, valuation, daily_bars]
+aliases: [困境反转, 翻身可能]
+default_priority: 35
+market_regimes: [range, trending_down]
+
+instructions: |
+  **翻身催化（profile=position · 只写进 opinions.position.json，中线轨）**
+
+  判定（fundamentals 困境度 + forecast/notices 硬催化 + valuation 周期位；
+  置信上限 0.65）：
+
+  1. **硬前置闸**：证券简称含 ST/*ST（quote.name）或总市值 <10 亿 →
+     翻身置信上限锁中低档（≤0.45），除非硬催化已落地（预告扭亏/盈喜/
+     撤销风险警示公告）；面值 <1 元且主板市值 <5 亿 → 移交风险角色
+     出清 veto 候选（08 制度族），本策略不出票。
+  2. **深跌维度**：pct_from_52w_high <−40%（够深才谈得上翻身）。
+  3. **困境度三档（非高危才候选）**：负债率分位 + 连续亏损期数 +
+     ST 标注——高杠杆连亏无催化的深跌直接弃权。
+  4. **催化枚举（绑定可验证事实，缺一不可）**：forecast 预告扭亏/大幅
+     减亏、notices 盈喜/重大合同/回购/重组、research 上修——叙事性
+     「预期改善」不算催化（08 软/硬事件分诊）。
+  5. **周期分类闸（Lynch）**：强周期行业（08 静态映射表）盈利 4 期高位 +
+     PB 低分位 = 疑似景气顶（低 PE 陷阱）→ 只出风险提示不加买分；
+     盈利 4 期低位 + PB 低分位 = 景气底候选（加分）。
+  6. **价值陷阱警戒**：低 PB + 持续下修 + 户数上升（筹码发散）三并发 →
+     弃权并移交风险角色。
+
+  评分调整：
+  - 深跌 + 困境非高危 + 硬催化落地 → buy（置信 0.5–0.65）。
+  - 深跌无催化 → hold（rationale：「困境是负选择」）。
+  - fundamentals/forecast/notices 任一缺块 → 弃权注明。

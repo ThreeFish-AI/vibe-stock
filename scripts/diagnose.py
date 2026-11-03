@@ -22,6 +22,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import math
 import re
 import sys
 
@@ -466,9 +467,10 @@ def render_context_pack(evidence, workdir):
                               "turnover_avg_20d", "turnover_abnormal",
                               "turnover_pctile_250") if mt.get(k) is not None)
             if pairs:
-                lines.append("  情绪/拥挤：%s（A 股 max_ret_20d 已按代码段涨停阈值"
-                             "饱和、ST 5%% 特例按 quote.name 收严判读；换手键仅 em 系"
-                             "源可得，缺席=回退链无换手列）" % pairs)
+                lines.append("  情绪/拥挤：%s（A 股单日涨幅通常受代码段涨跌停阈值"
+                             "约束——次新股上市初期无涨跌幅限制、极端值如实保留；"
+                             "ST 5%% 特例按 quote.name 收严判读；换手键仅 em 系源"
+                             "可得，缺席=回退链无换手列或末根缺值）" % pairs)
     if bars:
         lines.append("")
         lines.append("## 近 10 根日 K（日期 开 高 低 收 量 涨跌幅%）")
@@ -607,13 +609,16 @@ def cmd_prepare(args):
                 os.remove(p)
     pack = render_context_pack(evidence, args.workdir)
     for name, default in (("opinions.json", []), ("risk.json",
-                         {"veto": False, "downgrade": False, "severity": "medium"})):
+                         {"veto": False, "downgrade": False, "severity": "medium"}),
+                          # 中线轨意见文件一并铺底（默认双轨；口径 references/08）
+                          ("opinions.position.json", [])):
         p = os.path.join(args.workdir, name)
         if not os.path.exists(p):
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(default, f, ensure_ascii=False, indent=1)
-    print("context-pack -> %s\n下一步：按 SKILL.md 工作流产意见，然后跑 "
-          "adjudicate.py 出 verdict.json" % pack)
+    print("context-pack -> %s\n下一步：按 SKILL.md 工作流产意见（双轨：短线 "
+          "opinions.json + 中线 opinions.position.json），然后各跑一次 "
+          "adjudicate.py 出 verdict.json / verdict.position.json" % pack)
     return 0
 
 
@@ -641,7 +646,14 @@ def _price_kind(evidence):
 
 
 def register_signal(evidence, verdict, opinions, report_id, report_path,
-                    report_version=None, now=None):
+                    report_version=None, now=None, profile="default",
+                    horizons=None):
+    """信号登记（双轨）：profile=default 短线 / position 中线——horizons 缺省
+    取 archive.HORIZONS_OF[profile]（期限轨 SSOT）。返回 (action, invalidated,
+    superseded)。条件：同股同 profile 同 report_id 的旧 pending 信号标
+    superseded（I-004 去重：同日重跑以最新版为准，旧版不再双计样本）；做法：
+    对立失效与 superseded 都只动同 profile 的信号（不同 profile 可并存相反
+    动作，向 references/05 规约看齐——存量无 profile 键按 default 兜底）。"""
     now = now or dt.datetime.now()
     market = evidence["meta"].get("market", "?")
     code = stock_code(evidence)
@@ -693,9 +705,19 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
             return nm == market and nc == code
         return False
 
+    superseded = 0
     for s in signals:
-        if (_same_stock(s)
-                and s.get("status") == "pending"
+        if not _same_stock(s):
+            continue
+        # 期限轨隔离（05 规约落地）：不同 profile 可并存相反动作——失效/去重
+        # 都只看本轨；存量无 profile 键按 default 兜底
+        if s.get("profile", "default") != profile:
+            continue
+        if s.get("report_id") == report_id and s.get("status") == "pending":
+            s["status"] = "superseded"  # I-004：同日重跑旧版让位最新版
+            superseded += 1
+            continue
+        if (s.get("status") == "pending"
                 and families.get(s.get("action"), "neutral") != fam
                 and fam != "neutral"):
             s["status"] = "invalidated"
@@ -708,15 +730,18 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
     close0 = quote.get("price") or (bars[-1]["close"] if bars else None)
     date0 = (quote.get("date") or (bars[-1]["date"] if bars else None)
              or now.date().isoformat())
-    kl, _, _ = _key_levels(close0, bars)  # 与报告「关键价位」节同一函数（同源）
+    # key_levels 按轨取（SSOT）：default=20 日三价纪律；position=中线波段带
+    kl = (_mid_key_levels(close0, bars, market) if profile == "position"
+          else _key_levels(close0, bars)[0])
     sig = {
         "id": "sig-%s-%s-%s" % (code, date0.replace("-", ""), len(signals) + 1),
         "report_id": report_id, "report_path": report_path,
         "report_version": report_version,
         "source_type": "skill", "market": market, "code": code,
-        "profile": "default", "action": action, "family": fam,
+        "profile": profile, "action": action, "family": fam,
         "signal": final, "confidence": conf,
-        "horizons": [1, 3, 5, 10], "regime": verdict["disagreement"]["conflicts"]
+        "horizons": list(horizons or ar.HORIZONS_OF[profile]),
+        "regime": verdict["disagreement"]["conflicts"]
         and "conflict" or "aligned",
         "date": date0, "close_at_signal": close0,
         "price_kind": _price_kind(evidence),
@@ -734,7 +759,30 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
         sig["snapshot"] = True
     signals.append(sig)
     ar.write_json_atomic(SIGNALS, signals)
-    return action, invalidated
+    return action, invalidated, superseded
+
+
+def _mid_key_levels(price, bars, market):
+    """中线波段带三键（profile=position）：band_lo/band_hi/trail_ref——报告
+    「中线裁决」节与 position 信号 key_levels 的同一事实源。带宽
+    g=max(2σ_d×√21, 3×往返成本)（σ_d=rv60 年化/√252，与 mid_term 同源实现；
+    成本常量 fetch.ROUNDTRIP_COST，口径 references/08 静态表）；
+    band_lo=max(lo60, price−g)、band_hi=min(hi60, price+g)、trail_ref=MA60。
+    三层下行门（箱体下沿−5% 总回撤/regime 失效/基本面证伪走 risk.json）在
+    报告文字化——本函数只出价位带，不是止损指令。price/bars 缺失返回 None
+    （无现价锚不落 key_levels，与 _key_levels 同口径）。"""
+    closes = [b["close"] for b in bars[-60:]] or [price or 0]
+    lo60, hi60 = min(closes), max(closes)
+    if not price:
+        return None
+    sigma_d = (fx.realized_vol([b["close"] for b in bars], 60) or 0.0) \
+        / math.sqrt(252)
+    g = max(2 * sigma_d * math.sqrt(21),
+            3 * fx.ROUNDTRIP_COST.get(market, 0.0015))
+    ma60 = round(sum(closes) / len(closes), 3) if len(closes) == 60 else None
+    return {"band_lo": _fmt_price(max(lo60, price - g)),
+            "band_hi": _fmt_price(min(hi60, price + g)),
+            "trail_ref": _fmt_price(ma60)}
 
 
 # ---------------------------------------------------------------- report
@@ -812,6 +860,49 @@ def _conclusion_reason(rg, rows, risk):
     return "%s——%s" % (note, why) if note else why
 
 
+def _report_position_section(evidence, pverdict, popinions, risk):
+    """报告「中线裁决」节（04 规约）：position 轨终裁/裁决链/分歧 + 波段带
+    三键 + 期限正交声明。条件：workdir 存在 verdict.position.json（cmd_report
+    传入）；做法：只渲染不重算（数字 SSOT 在 verdict.position.json 与
+    key_levels）；坑位：波段带是纪律参考线不是止损指令，三层下行门文字化。"""
+    agg, rg = pverdict["aggregate"], pverdict["risk_guard"]
+    bars = evidence["blocks"].get("daily_bars", {}).get("bars", [])
+    price = (evidence["blocks"].get("quote", {}) or {}).get("price") \
+        or (bars[-1]["close"] if bars else None)
+    market = evidence["meta"].get("market", "cn")
+    kl = _mid_key_levels(price, bars, market)
+    L = ["", "## 中线裁决（profile=position · T+20/60/120）"]
+    L.append("**%s**（置信 %.2f · 共识 %s · 可执行=%s）——1–6 个月口径，与短线"
+             "结论期限正交：互不替代、各自登记各自后验。" % (
+                 rg["final"], agg["confidence"], agg["consensus_level"],
+                 "是" if pverdict.get("executable") else "否"))
+    L.append("- 裁决链：%s → RiskGuard(%s) → **%s**（独立台账 ledger.position."
+             "json，绩效因子与短线轨不串轨）" % (
+                 agg["final_signal"],
+                 "; ".join(x for x in rg["log"] if x != "no-op"), rg["final"]))
+    conflicts = agg.get("conflicts")
+    if conflicts:
+        L.append("- 分歧：%s" % "；".join(
+            "%s(%s)" % (c["type"], c["severity"]) for c in conflicts))
+    rows = _opinions_with_rationale(pverdict, popinions)
+    if rows:
+        L.append("- 中线意见：")
+        L.extend("  - %s（%s·置信 %.2f）：%s" % (
+            o["source"], o["signal"], o["confidence"], o["rationale"])
+            for o in rows if o["rationale"])
+    if kl:
+        L.append("- 波段带（纪律参考线，非止损指令；带宽 g=max(2σ_d×√21, "
+                 "3×往返成本)）：低吸复核 %s · 高抛复核 %s · 趋势参考 %s"
+                 % (kl.get("band_lo"), kl.get("band_hi"), kl.get("trail_ref")))
+        L.append("  - 三层下行门：①总回撤门——收盘价跌破箱体下沿 −5%% 硬离场"
+                 "复核；②regime 失效门——vr_63d 转趋势（>1）或 MA20>MA60 发散"
+                 "创新高，弃-band 让位持有；③基本面证伪——走 risk.json 只降不升"
+                 "（判据族见 references/08）。均值回复 regime 不设贴价止损。")
+    L.append("- 期限声明：本节不进短线 T+1/3/5/10 后验；反向亦然——短线信号不"
+             "评中线绩效（references/05 期限轨）。" )
+    return L
+
+
 def _report_lens_section(lens):
     """报告「目标可达性」节：四锚表 + 三档结论 + 正交声明（04 规约）。
     lens=None 或 abstained 不出节（不硬凑）。"""
@@ -870,7 +961,8 @@ def _report_lens_section(lens):
     return L
 
 
-def render_report(evidence, verdict, opinions, stock, risk=None, lens=None):
+def render_report(evidence, verdict, opinions, stock, risk=None, lens=None,
+                  position=None):
     risk = risk if isinstance(risk, dict) else {}
     q = evidence["quality"]
     agg = verdict["aggregate"]
@@ -957,6 +1049,9 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None):
                      kl["entry_ref"], kl["stop"], kl["target1"]))
     if lens:
         L.extend(_report_lens_section(lens))
+    if position:  # 中线裁决节（profile=position；workdir 有 verdict.position.json 才出）
+        L.extend(_report_position_section(evidence, position[0], position[1],
+                                          risk))
     L.append("")
     L.append("## 风险与利好")
     # 逐条可溯源（04 §5）：意见带 source 与 signal/置信；风险栏另挂风险角色
@@ -1051,9 +1146,20 @@ def cmd_report(args, now=None):
         return 2
     now = now or dt.datetime.now()
     date = now.date().isoformat()
+    # 中线轨（可选）：workdir 有 verdict.position.json 才出节/登记（无则与
+    # 单轨现状逐字节一致；pverdict 身份不符按残留拒绝，防上一只票污染）
+    pverdict = load_json(os.path.join(wd, "verdict.position.json"), None)
+    popinions = load_json(os.path.join(wd, "opinions.position.json"), [])
+    position = None
+    if pverdict:
+        if pverdict.get("stock_code") not in (None, code):
+            print("verdict.position 身份 %s 与证据 %s 不符（工作区残留？），"
+                  "未写报告" % (pverdict.get("stock_code"), code))
+            return 2
+        position = (pverdict, popinions)
     sections, footer = ar.split_report(
         render_report(evidence, verdict, opinions, args.stock, risk=risk,
-                      lens=lens))
+                      lens=lens, position=position))
     path = os.path.join(sdir, date + ".md")
     try:
         version = ar.append_version(path, ar.day_title(os.path.basename(sdir), date),
@@ -1061,9 +1167,15 @@ def cmd_report(args, now=None):
     except ValueError as e:
         print("未写报告：%s" % e)
         return 2
-    action, invalidated = register_signal(evidence, verdict, opinions,
-                                          "%s-%s" % (code, date), path,
-                                          report_version=version, now=now)
+    action, invalidated, superseded = register_signal(
+        evidence, verdict, opinions, "%s-%s" % (code, date), path,
+        report_version=version, now=now)
+    if position:  # 双轨登记：profile=position（horizons=T+20/60/120，波段带锚）
+        paction, pinv, psup = register_signal(
+            evidence, pverdict, popinions, "%s-%s" % (code, date), path,
+            report_version=version, now=now, profile="position")
+        print("signal(position): action=%s（对立失效 %d · 同日旧版 superseded "
+              "%d）" % (paction, pinv, psup))
     quote_name = (evidence["blocks"].get("quote", {}) or {}).get("name")
     try:  # 显示名写穿（存量信号经 names.json 缓存显名）；失败只降级为不缓存
         names = (ar.update_names(STATE_DIR, market, code, quote_name)
@@ -1079,7 +1191,8 @@ def cmd_report(args, now=None):
     for w in pf_warn:  # 持仓契约漂移可观测：只告警，不中断、不改降级渲染
         print("warn: %s" % w)
     print("report -> %s（v%d）" % (path, version))
-    print("signal: action=%s（对立信号失效 %d 条）" % (action, invalidated))
+    print("signal: action=%s（对立信号失效 %d 条 · 同日旧版 superseded %d 条）"
+          % (action, invalidated, superseded))
     print("后验：uv run --no-project scripts/postmortem.py --stock %s" % args.stock)
     return 0
 
@@ -2575,7 +2688,62 @@ def selftest():
         assert "持股比变化（百分点，中线口径）：20 日 1.23 · 60 日 —" in open(
             render_context_pack(ev_hk_mf, td), encoding="utf-8").read(), \
             "港股南向持股比 20/60 日变化渲染（缺省打「—」）"
+        # Review 修复钉（0.0.16 对抗评审）：302 号段/容差边界/短窗缺席/
+        # rv 坏点断链一致/换手末根门/快照 market 回填/资金流窗口三态
+        assert fx._limit_up_pct("cn", "302132") == 20.0, \
+            "创业板 302 号段按 20% 阈值（301 耗尽后扩容段）"
+        lim_bars = [{"date": "d%d" % i, "open": 100.0, "high": 100.0,
+                     "low": 100.0, "close": 100.0, "volume": 1}
+                    for i in range(30)]
+        lim_bars[-1]["close"] = 109.84  # +9.84% 不计（< 9.85 门槛）
+        assert fx.derive_technical(lim_bars, None, "cn", "600519")[
+            "mid_term"]["limit_up_count_20d"] == 0, "9.84 不计"
+        lim_bars[-1]["close"] = 109.85  # +9.85% 计（0.15pp 容差有意从严）
+        assert fx.derive_technical(lim_bars, None, "cn", "600519")[
+            "mid_term"]["limit_up_count_20d"] == 1, "9.85 计（从严口径）"
+        short60 = fx.derive_technical(ib, None, "cn", "600519")["mid_term"]
+        assert "ret_12_1_approx" not in short60, \
+            "n<127 短窗 closes[0] 锚失真——缺席不虚构（次新股防虚假动量）"
+        bad_bars = [dict(b) for b in mib[:200]]
+        for i in (150, 151, 152):
+            bad_bars[i]["close"] = 0.0  # 坏点：rv 须断链（与 lens 同输入同输出）
+        bad_raw = [b.get("close") for b in bad_bars]
+        mt_bad = fx.derive_technical(bad_bars, None, "cn", "600519")["mid_term"]
+        assert mt_bad["rv60"] == fx.realized_vol(bad_raw, 60) \
+            and mt_bad["rv120"] == fx.realized_vol(bad_raw, 120), \
+            "mid_term.rv 喂原始序列（断链归 SSOT 函数），与透镜路径不漂移"
+        tail_bars = [dict(b) for b in mib]
+        tail_bars[-1].pop("turnover")  # 末根缺换手 → 三键缺席（近端不可信）
+        assert "turnover_abnormal" not in fx.derive_technical(
+            tail_bars, None, "cn", "600519")["mid_term"], "末根无换手键缺席"
+        snap_dir = os.path.join(td, "snap-mid")
+        os.makedirs(snap_dir, exist_ok=True)
+        with open(os.path.join(snap_dir, "daily_bars.json"), "w",
+                  encoding="utf-8") as f:  # 30 根含一个 +10% 板（快照真实形态）
+            json.dump({"state": "available", "bars": lim_bars}, f)
+        snap_ev = fx.fetch("600519", snap_dir)
+        assert snap_ev["meta"].get("market") == "cn" \
+            and snap_ev["blocks"]["technical"]["mid_term"].get(
+                "limit_up_count_20d") == 1, \
+            "快照 meta 回填 market → 涨停计数不缺席（与联网口径一致）"
+        assert fx.fetch("TEST", os.path.join(td, "snap-mid"))["meta"].get(
+            "market") is None, "推不出不落 market 键（'?' 兜底契约不变）"
+        for n, e20, e60 in ((19, None, None), (20, 20.0, None),
+                            (59, 20.0, None), (60, 20.0, 60.0)):
+            w = fx._mf_window_keys([1.0] * n)  # [1.0]*n → 20d=min(n,20)、60d=min(n,60)
+            assert w["main_net_20d_yi"] == e20 and w["main_net_60d_yi"] == e60, \
+                (n, w)
+        mk = lambda n, r0=10.0, rw=5.0: [{"HOLD_SHARES_RATIO": (r0 if i == 0
+                                                               else rw)}
+                                         for i in range(n)]
+        assert fx._hk_hold_chg(mk(60)) == {"hold_pct_chg_20d": 5.0}, "60 行仅 20d"
+        assert fx._hk_hold_chg(mk(65)) == {"hold_pct_chg_20d": 5.0,
+                                           "hold_pct_chg_60d": 5.0}, "65 行双键"
+        assert fx._hk_hold_chg(mk(61)) == {"hold_pct_chg_20d": 5.0,
+                                           "hold_pct_chg_60d": 5.0}, "61 行恰双键"
+        assert "hold_pct_chg_60d" not in fx._hk_hold_chg(mk(59)), "59 行无 60d"
         print("  ok mid_term 中线派生：跳月动量/回撤/长均线/涨停分段/异常换手手算钉 · VR 方向 · 缺项不虚构 · realized_vol SSOT · pack 渲染")
+        print("  ok review 修复钉：302 号段 20%% · 9.84/9.85 容差边界 · ret_12_1 短窗缺席 · rv 坏点断链与透镜同输入同输出 · 换手末根门 · 快照 market 回填 · 资金流窗口三态")
         ev_i = json.loads(json.dumps(evidence))
         ev_i["meta"]["session"] = ss_in
         ev_i["blocks"]["quote"] = {"state": "available", "price": 9.7}
@@ -2596,11 +2764,11 @@ def selftest():
         # 信号登记（隔离 state 目录）
         global STATE_DIR, SIGNALS
         STATE_DIR, SIGNALS = td, os.path.join(td, "signals.json")
-        action, inv = register_signal(evidence, verdict, opinions, "r1", "p1")
+        action, inv, _sup = register_signal(evidence, verdict, opinions, "r1", "p1")
         assert action == "watch" and inv == 0, "veto 后非买入族登记为观察"
         sigs = json.load(open(SIGNALS, encoding="utf-8"))
         assert sigs[0]["status"] == "pending" and sigs[0]["horizons"] == [1, 3, 5, 10]
-        action2, inv2 = register_signal(evidence, verdict, opinions, "r2", "p2")
+        action2, inv2, _sup2 = register_signal(evidence, verdict, opinions, "r2", "p2")
         assert inv2 == 0  # 同族不失效
         # 对立失效路径
         verdict_buy = dict(verdict, executable=True, risk_guard={
@@ -2609,8 +2777,86 @@ def selftest():
         register_signal(evidence, verdict_buy, opinions, "r3", "p3")
         verdict_sell = dict(verdict, executable=True, risk_guard={
             **verdict["risk_guard"], "final": "sell"})
-        action3, inv3 = register_signal(evidence, verdict_sell, opinions, "r4", "p4")
+        action3, inv3, _ = register_signal(evidence, verdict_sell, opinions, "r4", "p4")
         assert action3 == "reduce" and inv3 == 1, "对立信号须失效旧买入信号"
+        # -- 双轨（profile=position）：horizons/三价锚分轨 · 跨轨对立不失效 ·
+        #    同 report_id 重跑 superseded（I-004）· 无 profile 键存量兜底 default --
+        pverdict = dict(verdict_buy, stock_code="000001")
+        paction, pinv, psup = register_signal(
+            evidence, pverdict, opinions, "rp", "pp", profile="position")
+        sigs_p = json.load(open(SIGNALS, encoding="utf-8"))
+        pos = sigs_p[-1]
+        assert paction == "buy" and pinv == 0, \
+            "跨轨对立（短线 sell 在册）不得失效中线 buy（期限轨隔离）"
+        assert pos["profile"] == "position" \
+            and pos["horizons"] == [20, 60, 120], pos.get("horizons")
+        assert set(pos.get("key_levels", {})) == {"band_lo", "band_hi",
+                                                 "trail_ref"}, pos.get("key_levels")
+        # 同 profile 对立照常失效（中线轨内部互斥仍成立）
+        pverdict_sell = dict(verdict_sell, stock_code="000001")
+        _, pinv2, _ = register_signal(evidence, pverdict_sell, opinions,
+                                      "rp2", "pp2", profile="position")
+        assert pinv2 == 1, "同 profile 对立须照常失效"
+        # 同 report_id 重跑（同日多版）：旧 pending superseded，不再双计
+        _, _, psup2 = register_signal(evidence, pverdict_sell, opinions,
+                                      "rp2", "pp2", profile="position")
+        sigs_s = json.load(open(SIGNALS, encoding="utf-8"))
+        sup = [s for s in sigs_s if s.get("status") == "superseded"]
+        assert psup2 == 1 and len(sup) == 1, "同 report_id 旧版让位最新版（I-004）"
+        # 存量无 profile 键按 default 兜底（不因缺键失配）
+        json.dump([{"id": "old", "market": "cn", "code": "000001",
+                    "action": "buy", "family": "bull", "status": "pending",
+                    "horizons": [1, 3, 5, 10], "evaluated": {},
+                    "sources": []}], open(SIGNALS, "w"))
+        _, inv_old, _ = register_signal(evidence, verdict_sell, opinions,
+                                        "r9", "p9")
+        assert inv_old == 1, "无 profile 键存量信号按 default 参与失效（兜底）"
+        # 波段带数学钉：60 根 100/101 交替——g=max(2σ_d×√21, 3×往返成本)、
+        # band_lo=max(lo60, price−g)、band_hi=min(hi60, price+g)、trail_ref=MA60
+        band_bars = [{"date": "d%d" % i, "open": 100.0, "high": 101.0,
+                      "low": 100.0, "close": 100.0 if i % 2 else 101.0,
+                      "volume": 1} for i in range(60)]
+        price = band_bars[-1]["close"]
+        sig_d = (fx.realized_vol([b["close"] for b in band_bars], 60) or 0.0) \
+            / math.sqrt(252)
+        g = max(2 * sig_d * math.sqrt(21), 3 * fx.ROUNDTRIP_COST["cn"])
+        want = {"band_lo": _fmt_price(max(100.0, price - g)),
+                "band_hi": _fmt_price(min(101.0, price + g)),
+                "trail_ref": _fmt_price(
+                    round(sum(b["close"] for b in band_bars) / 60, 3))}
+        got = _mid_key_levels(price, band_bars, "cn")
+        assert got == want, (got, want)
+        assert got["trail_ref"] == 100.5, got
+        # 报告「中线裁决」节：position 传入才出，band 三键与期限声明齐全
+        rep_p = render_report(evidence, pverdict, opinions, "TEST",
+                              position=(pverdict, opinions))
+        assert "## 中线裁决（profile=position · T+20/60/120）" in rep_p \
+            and "波段带（纪律参考线" in rep_p \
+            and "不进短线 T+1/3/5/10 后验" in rep_p, "中线裁决节要素"
+        assert "中线裁决" not in render_report(evidence, verdict, opinions,
+                                             "TEST"), "无 position 不出节"
+        # 索引分轨：单股双表 + 总览中线两列（default 列不被 position 顶替）
+        base_sig = {"market": "cn", "code": "000001", "stock_name": "平安银行",
+                    "close_at_signal": 12.4, "confidence": 0.6,
+                    "horizons": [1, 3, 5, 10], "evaluated": {}, "sources": []}
+        mix = [dict(base_sig, id="d1", created_at="2026-10-28T10:00:00",
+                    report_path="p", report_version=1, profile="default",
+                    signal="hold", action="watch", status="pending",
+                    key_levels={"entry_ref": 12.7, "stop": 12.57,
+                                "target1": 14.6}),
+               dict(base_sig, id="m1", created_at="2026-10-28T11:00:00",
+                    report_path="p", report_version=1, profile="position",
+                    signal="buy", action="buy", status="pending",
+                    horizons=[20, 60, 120],
+                    key_levels={"band_lo": 11.0, "band_hi": 14.0,
+                                "trail_ref": 13.0})]
+        sidx = ar.render_stock_index(mix, "cn", "000001")
+        assert "T+1" in sidx and "T+120" in sidx \
+            and "## 中线（profile=position" in sidx, "单股时间线双表"
+        ridx = ar.render_root_index(mix)
+        assert "中线信号→动作" in ridx and "buy→buy" in ridx, "总览中线两列"
+        row_d = [ln for ln in ridx.splitlines() if ln.startswith("| [000001")][0]
+        assert "watch" in row_d and "1" in row_d, "短线列仍取 default 轨"
         sigs3 = json.load(open(SIGNALS, encoding="utf-8"))
         # 登记基准价与报告现价同口径：quote.price（12.4）优先于日 K 末根（14.6）
         assert sigs3[-1]["close_at_signal"] == 12.4, sigs3[-1]["close_at_signal"]
@@ -2652,7 +2898,7 @@ def selftest():
                     "horizons": [1], "evaluated": {}, "sources": []}],
                   open(SIGNALS, "w", encoding="utf-8"))
         ev_leg = {"meta": {"symbol": "sh600519"}, "blocks": {}}
-        _, inv_leg = register_signal(ev_leg, verdict_sell, opinions, "r-leg", "p-leg")
+        _, inv_leg, _ = register_signal(ev_leg, verdict_sell, opinions, "r-leg", "p-leg")
         assert inv_leg == 1, "存量 ('?', 原始 symbol) 同股对立记录须失效（归一比对）"
         leg = json.load(open(SIGNALS, encoding="utf-8"))
         assert leg[0]["status"] == "invalidated", leg[0]
@@ -2849,7 +3095,7 @@ def _selftest_archive(evidence, verdict, opinions):
                  "horizons": [1, 3, 5, 10], "evaluated": {}, "sources": []}])
             ev_hk5 = json.loads(json.dumps(ev_hk))
             ev_hk5["meta"]["code"] = "00700"
-            _, inv = register_signal(ev_hk5, dict(v_hk, executable=True,
+            _, inv, _ = register_signal(ev_hk5, dict(v_hk, executable=True,
                                                   risk_guard={**rg, "final": "sell"}),
                                      opinions, "r", "p")
             assert inv == 1, "存量 4 位与新 5 位港码须是同一身份（读时归一）"
@@ -2861,7 +3107,7 @@ def _selftest_archive(evidence, verdict, opinions):
                  "horizons": [1, 3, 5, 10], "evaluated": {}, "sources": []}])
             ev_snap = json.loads(json.dumps(evidence))
             ev_snap["meta"] = {"symbol": "0700.HK", "snapshot": True}
-            _, inv_snap = register_signal(
+            _, inv_snap, _ = register_signal(
                 ev_snap, dict(verdict, executable=True,
                               risk_guard={**rg, "final": "sell"}), opinions, "r", "p")
             assert inv_snap == 1, "快照存量后缀形态与新归一码须是同一身份（读时归一）"

@@ -1,0 +1,38 @@
+# 质量价值底仓 / Quality Value（中线 · profile=position）
+# 证据依据：A 股质量溢价集中于盈利支柱（ROE/ROIC）、EP 优于 BM（CH-4）、
+# 盈利年约 38% 均值回复、成长持续性≈随机——docs/research/midterm-strategies.md 第 2/3 章
+name: quality_value
+display_name: 质量价值
+description: 持续发展（quality×value）合流的中线底仓候选——多条件缺一弃权。
+category: position
+profile: position
+required_evidence: [fundamentals, valuation, daily_bars, technical]
+aliases: [质量底仓, 持续发展]
+default_priority: 40
+market_regimes: [any]
+
+instructions: |
+  **质量价值（profile=position · 只写进 opinions.position.json，中线轨）**
+
+  判定（fundamentals 为主，valuation 分位与 technical.mid_term 交叉；
+  置信上限 0.65——首批 T+60 记分样本落地前无本仓实证，防御性设定）：
+
+  1. **质量支柱（盈利单支柱，勿建复合分）**：fundamentals 近 4 期 ROE 均值
+     达标（≥10% 参考线，行业差异在 rationale 注明）且稳定性可接受
+     （4 期极差/均值 ≤0.5）；毛利率趋势向上加分。A 股质量与价值高度纠缠，
+     ROE 溢价可被 EP 吸收——单独高 ROE 不构成买点。
+  2. **价值交叉**：valuation.pe_percentile_5y <50（EP 优先于 PB；亏损股
+     PE 缺席则按 PB 分位并降置信注明）；股息率 >4%（A）/ >5%（HK）只作
+     加分不作断言。
+  3. **位置约束**：pct_from_52w_high ∈ [−40%, 0%]（深跌超 −40% 属
+     turnaround_catalyst 地盘；逼近新高属动量地盘——A 股追高是负期望）。
+  4. **折价纪律**：增速 >50% 的高增长按两年均值回复折价，不给估值溢价；
+     市值最小 30% 分位或 ST/*ST 排除（壳价值制度性坍缩，references/08 制度族）。
+  5. **风控分流**：估值分位 >p90 + 60 日涨幅 >+40% 的过热形态、换手分位
+     >95% 滞涨——走风险角色 risk.json（08 拥挤族），本策略只降不升。
+
+  评分调整：
+  - 质量 + 价值 + 位置三条件合流 → buy（置信 0.55–0.65）。
+  - 任一关键证据块缺失（fundamentals/valuation 非 available/fallback）→
+    弃权（hold 并注明缺块，缺证据不出方向意见）。
+  - 只有两条合流 → hold（置信 ≤0.5），rationale 写明缺哪条。

@@ -1,9 +1,19 @@
 # 策略库
 
 每个策略一个 YAML「说明书」：声明元数据（name/category/priority/market_regimes/
-aliases/required_evidence），正文 `instructions` 是写给模型读的自然语言交易逻辑。
+aliases/required_evidence/profile），正文 `instructions` 是写给模型读的自然语言交易逻辑。
 结构与形态借鉴 ZhuLinsen/daily_stock_analysis 的 strategies/（MIT），判据口径按
 vibe-stock 证据包（evidence.json 的 blocks/technical 字段）重写。
+
+## 期限轨（profile）
+
+- `profile` 缺省 = `default`（短线轨：读全部证据出意见进 opinions.json，
+  T+1/3/5/10 后验）；`profile: position`（中线轨：只写进
+  opinions.position.json，T+20/60/120 后验、仅 T+60 记分，置信上限 0.65，
+  台账 ledger.position.json——规约见 [references/08](../references/08-midterm.md)
+  与 [references/05](../references/05-postmortem.md)「期限轨」）。
+- 短线意见生产时只读 default 策略；中线意见只读 position 策略——两轨
+  意见不混写（裁决器各跑一次，见 [SKILL.md](../SKILL.md) 工作流）。
 
 ## 使用与扩展
 

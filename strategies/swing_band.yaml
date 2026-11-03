@@ -1,0 +1,46 @@
+# 波段带 / Swing Band（中线 · profile=position · regime 门控高抛低吸）
+# 证据依据：再平衡 excess growth rate 仅年化 ~1–3pct 且 regime 条件性强；
+# 无条件网格在趋势段等价做空跨式；均值回复下紧止损有害——三层下行门替代
+# 贴价止损。调研报告第 10 章；带宽纪律 references/08
+name: swing_band
+display_name: 波段带
+description: 均值回复 regime 门控的高抛低吸——带宽覆盖 3×往返成本，趋势市弃权。
+category: position
+profile: position
+required_evidence: [daily_bars, technical, valuation]
+aliases: [高抛低吸, 波段]
+default_priority: 30
+market_regimes: [range]
+
+instructions: |
+  **波段带（profile=position · 只写进 opinions.position.json，中线轨）**
+
+  判定（technical.mid_term 的 vr_63d/box_60d/换手三键 + valuation 分位；
+  报告「中线裁决」节的 band_lo/band_hi/trail_ref 是价位 SSOT；
+  置信上限 0.65）：
+
+  1. **资格门（regime 门控——无条件网格在趋势市尾部无界）**：
+     vr_63d <0.9（均值回复 regime，方向参考不作硬阈值——落在 0.9–1.1
+     之间按箱体形态判）或 box_60d 成形（width_pct 在 5%–30% 且 pos_pct
+     不贴边）；且带宽 g=max(2σ_d×√21, 3×往返成本) 能覆盖（A 股 ≥0.45%、
+     港股 ≥1.05%，08 成本常量表）。
+  2. **下沿低吸**：box_60d.pos_pct <15 且缩量（vol_ratio_5 <0.8 或
+     盘中外推值）→ buy 候选；估值分位 <50 加分、>p90 弃权。
+  3. **上沿高抛**：pos_pct >90 且放量滞涨（vol_ratio_5 >1.5 但当日收阴/
+     长上影）或 turnover_abnormal >1.5 → sell（减仓语义，非清仓做空）。
+  4. **趋势关闭阀**：MA20>MA60 同向发散且 new_high_20d（或
+     tsmom_250d 强 + vr_63d >1）→ 本策略弃权（hold，让位持有/趋势逻辑，
+     勿在趋势段接飞刀）。
+  5. **三层下行门（不设贴价止损——均值回复下紧止损有害）**：①总回撤门
+     （收盘破箱体下沿 −5% 硬离场复核）；②regime 失效门（同关闭阀）；
+     ③基本面证伪走 risk.json（08 判据族，只降不升）。
+  6. **预期管理**：波段带的确定性收益是再平衡 excess growth（年化约
+     1–3pct），其余依赖标的 alpha——rationale 不得承诺收益；往返成本
+     覆盖检查必须写进 rationale。
+
+  评分调整：
+  - 资格门 + 下沿缩量 → buy（置信 0.55–0.65，仓位提示：卫星仓 ≤30%、
+    每 20 交易日复核）。
+  - 上沿滞涨 → sell（置信 0.5–0.6，减仓语义注明）。
+  - 趋势 regime 或换手键缺席（回退链无换手列，HK 南向+量能代理）→
+    hold 并注明门控依据不足。

@@ -17,7 +17,7 @@
 | 分歧显式化（三桶 + 冲突分级） | `adjudicate.py aggregate/disagreement` |
 | RiskGuard 只降不升 | `adjudicate.py risk_guard`（veto/单向降档/永不升级） |
 | 决策信号八态 + 对立失效 + 后验 | `diagnose.py register_signal` + `postmortem.py` |
-| 策略 YAML 说明书（策略即数据） | `strategies/` 十策略 + 自定义扩展位 |
+| 策略 YAML 说明书（策略即数据） | `strategies/` 十五策略（十短线 default + 五中线 position）+ 自定义扩展位 |
 | 扩展证据块 | 十块零权重情报面（资金流/公告/研报/预告/解禁/股东户数/大盘/行业/估值/汇率）不进质量分；簇级熔断（fx 汇率为港股专属块） |
 
 ## 港股覆盖
@@ -51,16 +51,24 @@ uv run --no-project scripts/adjudicate.py --opinions .vs/opinions.json \
 uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 ```
 
-## 中线视角（08 规约）
+## 中线双轨（08 规约，0.0.16 起）
 
-1–6 个月操作周期的证据面：`technical.mid_term` 纯函数派生中线因子（跳月动量、
-已实现波动、最大回撤、长均线、方差比 VR(63)、涨停计数、异常换手——A 股月度
-反转强于动量、换手是最强情绪信号等 A/HK 实证口径），随每份 context-pack 透出；
-利好出尽 / 主题拥挤与 AI 情绪 / 制度与政策风险三族判据走风险角色 risk.json
-**只降不升**（不提供中线买点，正向判断仍由既有策略按证据合流）。调研依据
-（IEEE 引文与效应量、拒绝引入清单）见
-[docs/research/midterm-strategies.md](docs/research/midterm-strategies.md) 与
-[references/08-midterm.md](references/08-midterm.md)。
+1–6 个月操作周期与短线并行成轨（默认双轨）：
+
+- **证据面**：`technical.mid_term` 纯函数派生中线因子（跳月动量、已实现波动、
+  最大回撤、长均线、方差比 VR(63)、涨停计数、异常换手——A 股月度反转强于
+  动量、换手是最强情绪信号等 A/HK 实证口径），随每份 context-pack 透出。
+- **方向票**：五个 `profile: position` 策略（质量价值 / 预期修正 / 国策分层 /
+  翻身催化 / 波段带，置信帽 0.65）出 opinions.position.json，adjudicate 零改动
+  第二跑（`--ledger ledger.position.json` 绩效不串轨），报告出「中线裁决」节
+  与波段带三键（band_lo/band_hi/trail_ref）。
+- **风险面**：利好出尽 / 主题拥挤与 AI 情绪 / 制度与政策三族判据走风险角色
+  risk.json **只降不升**，两轨共用。
+- **自校准**：T+20/60/120 后验（σ√h 判定带，仅 T+60 记分，台账分文件）；
+  对立失效与同日重跑去重均按 profile 隔离。
+- 调研依据（IEEE 引文与效应量、拒绝引入清单）见
+  [docs/research/midterm-strategies.md](docs/research/midterm-strategies.md) 与
+  [references/08-midterm.md](references/08-midterm.md)。
 
 ## 盘中盯盘（07 子技能）
 

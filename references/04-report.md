@@ -30,8 +30,16 @@
    时不出节、不硬凑）：参考价隐含 PE(TTM) 与 5 年分位（免汇率比值法，
    estimated）、共识目标价位置/离散度/≥参考价家数、EPS 90 日修正方向、
    12 个月波动触及概率（必须注明「波动可达≠基本面支持」）+ 三档结论与置信 +
-   「不进裁决聚合/置信帽/T+1/3/5/10 后验（期限正交）」声明；数字 SSOT 在
+   「不进裁决聚合/置信帽/两轨后验（期限正交）」声明；数字 SSOT 在
    lens.json，报告只渲染不重算。
+4b. **中线裁决**（条件：workdir 存在 `verdict.position.json`；做法：在目标
+   可达性节后渲染「## 中线裁决（profile=position · T+20/60/120）」——中线
+   终裁/置信/裁决链/分歧 + 波段带三键（`_mid_key_levels`：band_lo/band_hi/
+   trail_ref=MA60，带宽 g=max(2σ_d×√21, 3×往返成本)，与 position 信号
+   `key_levels` 同一函数取数）+ 三层下行门文字化 + 期限正交声明；无
+   position 文件不出节（单轨形态逐字节兼容）；坑位：波段带是纪律参考线
+   不是止损指令——报告不得把它写成离场价，三层下行门（箱体下沿−5% 总回撤/
+   regime 失效/基本面证伪走 risk.json）是唯一离场口径（[08](08-midterm.md)）。
 5. **风险与利好**：逐条挂反对意见与支持意见的 rationale（有据可查）。条件：
    `report` 渲染（读 workdir 的 opinions.json 与 risk.json）；做法：风险栏=卖出族
    意见 + 风险角色 risk.json.rationale（标注 veto/downgrade 触发态），利好栏=买入族
@@ -82,6 +90,13 @@
 - **身份闸门**（适用：report 写盘前）：做法——证据身份（`stock_code`：港股统一
   5 位）须与 `--stock` 归一后一致，代码须合规范形态，signals.json 须可解析，任一
   不符 exit 2 且零写入。坑位：`.vs/` 残留上一只票的证据是最常见触发。
+- **时间线索引分轨**（0.0.16 起）：单股 index.md 拆两张表——短线表
+  （default 轨，T+1/3/5/10）恒在；中线表（position 轨，T+20/60/120）有
+  中线信号才出。总览表短线列（最新信号/诊断次数/pending/三价）只算
+  default 轨（中线信号不得顶替短线列），表尾恒增「中线信号→动作/中线
+  pending」两列（取组内最新 position 信号，无则 —）。三价列按轨取
+  key_levels：default=entry_ref/stop/target1、position=band_lo/band_hi/
+  trail_ref（键名不互覆，监控侧按 profile 过滤，见 [07](07-monitor.md)）。
 - **时间线索引**（适用：report / postmortem 之后）：做法——`index.md` 由
   signals.json 整体重建（只覆盖 cn/hk），总览表列股票、股票名称、最新日期、
   最新信号→动作、置信、诊断次数、pending、持仓数量与持仓成本（条件：
