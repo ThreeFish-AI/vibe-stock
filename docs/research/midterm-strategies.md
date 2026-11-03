@@ -36,7 +36,7 @@ A 股横截面结构与美股系统性不同：价值用 EP 度量优于 BM，�
 
 困境风险是负选择而非被补偿的风险：按前瞻违约概率排序，收益几乎随风险单调递减，高困境组低收益 + 高 σ + 高 β（美国 1963–2003）（J. Y. Campbell, J. Hilscher, and J. Szilagyi, "In Search of Distress Risk," *The Journal of Finance*, vol. 63, no. 6, pp. 2899-2939, Dec. 2008）。A 股侧的机制是壳价值：最小 30% 市值公司约 30% 市值为借壳期权价值，收益与基本面脱钩；注册制（2019/2020/2023）+ 2024 新国九条退市收紧（主板市值线 3→5 亿元、2024 年退市 52 家创纪录）使壳价值制度性坍缩，2017 年前「小盘困境博翻身」的历史数据不可外推（C. M. C. Lee, Y. Qu, and T. Shen, "Reverse mergers, shell value, and regulation risk in Chinese equity markets," Stanford GSB Working Paper No. 3604, 2017）。
 
-长期反转提供超跌维度的理论锚：3 年输家随后 36 个月跑赢赢家约 24.6%（t=2.20，美国 1926–1982），A 股方向成立但证据层级较低（W. F. M. De Bondt and R. Thaler, "Does the Stock Market Overreact?" *The Journal of Finance*, vol. 40, no. 3, pp. 793-805, 1985）。财务困境预警可用负债率分位 + 连续亏损期数 + ST 标注三档替代（Z-China 模型提前 2–3 年预测 ST 准确率约 80%；Z. Zhang, E. I. Altman, and J. Yen, "Corporate financial distress diagnosis model and application in credit rating for listing firms in China," *Frontiers of Computer Science*, vol. 4, no. 2, pp. 220-236, 2010）。周期股的「高 PE 买、低 PE 卖」有正式理论支撑：competition neglect + 需求外推使高景气→高投资→低回报可预测（R. Greenwood and S. G. Hanson, "Waves in Ship Prices and Investment," *The Quarterly Journal of Economics*, vol. 130, no. 1, pp. 55-109, Feb. 2015；Lynch 六类公司分类作分类闸门，practitioner 档）。落地为 turnaround_catalyst 策略：ST/市值 <30 亿锁死翻身置信上限，深跌 + 困境度非高危 + 可验证催化（预告扭亏/盈喜/摘帽公告）三者齐备才给分。
+长期反转提供超跌维度的理论锚：3 年输家随后 36 个月跑赢赢家约 24.6%（t=2.20，美国 1926–1982），A 股方向成立但证据层级较低（W. F. M. De Bondt and R. Thaler, "Does the Stock Market Overreact?" *The Journal of Finance*, vol. 40, no. 3, pp. 793-805, 1985）。财务困境预警可用负债率分位 + 连续亏损期数 + ST 标注三档替代（Z-China 模型提前 2–3 年预测 ST 准确率约 80%；Z. Zhang, E. I. Altman, and J. Yen, "Corporate financial distress diagnosis model and application in credit rating for listing firms in China," *Frontiers of Computer Science*, vol. 4, no. 2, pp. 220-236, 2010）。周期股的「高 PE 买、低 PE 卖」有正式理论支撑：competition neglect + 需求外推使高景气→高投资→低回报可预测（R. Greenwood and S. G. Hanson, "Waves in Ship Prices and Investment," *The Quarterly Journal of Economics*, vol. 130, no. 1, pp. 55-109, Feb. 2015；Lynch 六类公司分类作分类闸门，practitioner 档）。落地为 turnaround_catalyst 策略：ST/市值 <10 亿锁死翻身置信上限（08③-1 口径），深跌 + 困境度非高危 + 可验证催化（预告扭亏/盈喜/摘帽公告）三者齐备才给分。
 
 ## 第 5 章 换手、注意力与涨停：A 股中期情绪的可计算指纹
 
@@ -122,7 +122,7 @@ A 股是证据意义上的政策驱动市场，但「政策利好」的正向证
 | 异常换手 / 换手分位 | 近 20/250 日换手序列 | partial（ak-em 链首 + moneyflow/chip 回溯，标 estimated；HK not_supported） | risk_downgrade |
 | 涨停计数 / MAX | 日 K 涨跌幅（代码段阈值） | yes（daily_bars，A 股标涨停饱和；HK 不标） | risk_downgrade |
 | 52 周高点锚 | 现价/52 周最高 | yes（technical.pct_from_52w_high，口径略偏） | direction_vote 组合条件（weakened 降档） |
-| 政策四级分层 | 规划清单、部委文件、中标/补贴公告、预告 | partial（industry/notices/forecast/news 拼合，L1 清单静态维护） | direction_vote（policy_staged）+ risk_downgrade |
+| 政策四级分层 | 规划清单、部委文件、中标/补贴公告、预告 | partial（industry/notices/forecast/news 拼合，L1 无静态清单、按规划原文逐案核对——08 政策日历仅会议节点） | direction_vote（policy_staged）+ risk_downgrade |
 | 监管敏感行业 | 行业清单 + 官媒点名/征求意见稿 | no（静态策规维护） | risk_downgrade（触发即 veto/downgrade） |
 | 解禁日历 | 解禁日期/比例/类型 | yes（unlock，A 股；HK not_supported） | risk_downgrade |
 | 抢跑透支 / 隔夜-日内拆分 | 披露日历、20 日涨幅、open/close | yes（forecast.next_disclosure + daily_bars） | risk_downgrade |

@@ -450,7 +450,8 @@ def render_context_pack(evidence, workdir):
             lines.append("mid_term（1–6 个月中线因子，判据口径见 references/08；"
                          "缺项=数据不足，勿臆测）")
             pairs = " ".join("%s=%s" % (k, mt[k]) for k in
-                             ("ret_6_1", "ret_12_1_approx", "tsmom_250d",
+                             ("ret_20d", "ret_60d", "ret_6_1",
+                              "ret_12_1_approx", "tsmom_250d",
                               "ma150", "ma200") if mt.get(k) is not None)
             if pairs:
                 lines.append("  动量/长均线：%s（ret_12_1_approx 为 ≈11 个月近似、"
@@ -515,7 +516,9 @@ def render_context_pack(evidence, workdir):
                 lines.append("报表币种：%s（与行情/目标价币种可能不同，换算注意币种分离）"
                              % cur)
             if name == "fundamentals" and blk.get("history"):
-                periods = sorted(blk["history"], reverse=True)[:2]
+                # 近 4 期全渲染（中线 quality_value/turnaround 的 4 期门槛依赖；
+                # 数据侧 history 只存 4 期，超长值由 PACK_CHAR_CAP 兜底）
+                periods = sorted(blk["history"], reverse=True)[:4]
                 for p in periods:
                     lines.append("%s：%s" % (p, json.dumps(
                         blk["history"][p], ensure_ascii=False)))
@@ -528,14 +531,19 @@ def render_context_pack(evidence, workdir):
     lines.append("1. 角色：技术 / 情报（新闻+公告+研报+预告+资金流+行业+估值）"
                  "/ 风险 三角色各自出意见；风险角色可给 veto/downgrade 建议"
                  "（附触发理由；临近大比例解禁、业绩预亏类事件块是天然线索）。")
-    lines.append("2. 策略：逐个读 strategies/*.yaml，按其 instructions 与当前证据出意见。")
-    lines.append("3. 一律写进 opinions.json：[{\"source\": \"role:技术\" 或 "
+    lines.append("2. 策略（短线轨）：逐个读 strategies/ 中无 profile 字段（=default）"
+                 "的策略，按其 instructions 与当前证据出意见；profile: position 的"
+                 "中线策略不进本轨。")
+    lines.append("3. 短线意见一律写进 opinions.json：[{\"source\": \"role:技术\" 或 "
                  "\"strategy:名\", \"signal\": 五标准信号之一, \"confidence\": 0–1, "
                  "\"rationale\": \"一句依据（引用证据块与数值）\"}]。"
                  "signal 必须是 strong_buy/buy/hold/sell/strong_sell 原词——"
                  "表外写法会被判无效进诊断记录。")
     lines.append("4. 风险角色同时写 risk.json：{\"veto\": bool, \"downgrade\": bool, "
                  "\"severity\": \"high|medium\", \"rationale\": \"...\"}。")
+    lines.append("5. 中线轨（默认双轨）：只读 profile: position 的五个策略，意见写 "
+                 "opinions.position.json（同一证据包、置信帽 0.65、缺证据弃权；"
+                 "两轨意见不混写——规约见 references/08 与 SKILL.md 工作流）。")
     path = os.path.join(workdir, "context-pack.md")
     text = "\n".join(lines)
     if len(text) > PACK_CHAR_CAP:  # 全局护栏：超限整截扩展节（状态行仍可见）
@@ -661,8 +669,9 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
         # 可推导时经 detect_market 推 (market, 归一 code) 成对落账（market 与 code
         # 必须同源，只推 market 留原始 symbol 形态的 code 会取不到数）；推不出
         # （symbol 非 A/港代码形态）维持兜底 '?'，由 postmortem 侧未知市场跳过
-        # 守卫兜底（双层防线）。报告路由不受影响——仍按 meta market='?' 进
-        # _snapshot/，只有信号身份取推导值（后验可取数）。
+        # 守卫兜底（双层防线）。报告路由按 meta.snapshot 旗标进 _snapshot/
+        # （cmd_report 快照旗标优先于 market——meta 回填 market 不改变路由），
+        # 只有信号身份取推导值（后验可取数）。
         try:
             market, code = fx.detect_market(str(code))
         except SystemExit:
@@ -780,9 +789,11 @@ def _mid_key_levels(price, bars, market):
     g = max(2 * sigma_d * math.sqrt(21),
             3 * fx.ROUNDTRIP_COST.get(market, 0.0015))
     ma60 = round(sum(closes) / len(closes), 3) if len(closes) == 60 else None
-    return {"band_lo": _fmt_price(max(lo60, price - g)),
-            "band_hi": _fmt_price(min(hi60, price + g)),
-            "trail_ref": _fmt_price(ma60)}
+    kl = {"band_lo": _fmt_price(max(lo60, price - g)),
+          "band_hi": _fmt_price(min(hi60, price + g))}
+    if ma60 is not None:  # MA60 不足 60 根省键（缺项即缺席）——数值锚不落「—」哨兵
+        kl["trail_ref"] = _fmt_price(ma60)
+    return kl
 
 
 # ---------------------------------------------------------------- report
@@ -893,8 +904,9 @@ def _report_position_section(evidence, pverdict, popinions, risk):
     if kl:
         L.append("- 波段带（纪律参考线，非止损指令；带宽 g=max(2σ_d×√21, "
                  "3×往返成本)）：低吸复核 %s · 高抛复核 %s · 趋势参考 %s"
-                 % (kl.get("band_lo"), kl.get("band_hi"), kl.get("trail_ref")))
-        L.append("  - 三层下行门：①总回撤门——收盘价跌破箱体下沿 −5%% 硬离场"
+                 % (kl.get("band_lo"), kl.get("band_hi"),
+                    kl.get("trail_ref") or "—"))
+        L.append("  - 三层下行门：①总回撤门——收盘价跌破箱体下沿 −5% 硬离场"
                  "复核；②regime 失效门——vr_63d 转趋势（>1）或 MA20>MA60 发散"
                  "创新高，弃-band 让位持有；③基本面证伪——走 risk.json 只降不升"
                  "（判据族见 references/08）。均值回复 regime 不设贴价止损。")
@@ -1139,7 +1151,12 @@ def cmd_report(args, now=None):
         return 2
     reports_dir = os.path.join(STATE_DIR, "reports")
     try:
-        sdir = ar.stock_dir(reports_dir, market, code)
+        # 快照报告路由 _snapshot/（04 布局）：meta.market 回填后只作身份校验
+        # 与 mid_term 派生——快照旗标优先于 market，离线 fixture 不得混进
+        # 实盘个股目录
+        sdir = ar.stock_dir(
+            reports_dir,
+            "?" if evidence["meta"].get("snapshot") else market, code)
         ar.load_signals(SIGNALS)  # 预检：损坏先退，不留无信号指向的孤儿版本
     except ValueError as e:
         print("未写报告：%s" % e)
@@ -1149,6 +1166,13 @@ def cmd_report(args, now=None):
     # 中线轨（可选）：workdir 有 verdict.position.json 才出节/登记（无则与
     # 单轨现状逐字节一致；pverdict 身份不符按残留拒绝，防上一只票污染）
     pverdict = load_json(os.path.join(wd, "verdict.position.json"), None)
+    if pverdict is None and os.path.exists(
+            os.path.join(wd, "verdict.position.json")):
+        # 文件存在却解析失败＝损坏（load_json 吞异常折成 None）——与身份不符
+        # 同口径显式中止，不静默降级单轨（「不静默失效」）
+        print("verdict.position.json 存在但无法解析（损坏/非 JSON），未写报告"
+              "——修复或删除该文件后重跑")
+        return 2
     popinions = load_json(os.path.join(wd, "opinions.position.json"), [])
     position = None
     if pverdict:
@@ -2625,6 +2649,13 @@ def selftest():
         mt = fx.derive_technical(mib, None, "cn", "600519")["mid_term"]
         assert mt["ret_6_1"] == 10.0 and mt["ret_12_1_approx"] == 10.0, \
             "跳近月动量=closes[-22]/closes[-127] 与 /closes[0]（各仅一处抬升）"
+        # 20/60 日累计涨幅：专用 fixture 手算钉（closes[-21]=110、closes[-61]=121）
+        r20 = [{"date": "d%d" % i, "open": 100.0, "high": 100.0, "low": 100.0,
+                "close": (110.0 if i == 229 else 121.0 if i == 189
+                          else 100.0), "volume": 1} for i in range(250)]
+        mt20 = fx.derive_technical(r20, None, "cn", "600519")["mid_term"]
+        assert mt20["ret_20d"] == -9.09 and mt20["ret_60d"] == -17.36, \
+            "20/60 日累计涨幅=closes[-1]/closes[-21|-61]−1（100/110、100/121）"
         assert mt["tsmom_250d"] == 0.0 and mt["ma150"] == 100.17 \
             and mt["ma200"] == 100.128, "全窗动量与长均线（15025.55/150、20025.55/200）"
         assert mt["max_ret_20d"] == 10.55, "近 20 日最大单日涨幅"
@@ -2640,6 +2671,13 @@ def selftest():
         for no_lim in (fx.derive_technical(mib, None, "hk", "00700")["mid_term"],
                        fx.derive_technical(mib)["mid_term"]):
             assert "limit_up_count_20d" not in no_lim, "HK/未给市场不判涨停"
+        # 换手三键仅 A 股：同序列 cn 出键、hk 整体缺席（港股南向+量能代理口径）
+        hk_tos = [dict(b, turnover=2.0) for b in mib]
+        assert "turnover_abnormal" in fx.derive_technical(
+            hk_tos, None, "cn", "600519")["mid_term"] \
+            and "turnover_abnormal" not in fx.derive_technical(
+                hk_tos, None, "hk", "00700")["mid_term"], \
+            "换手三键仅 A 股（references/08 换手口径句）"
         # 方差比方向：季度级趋势摆动（+0.5%/日×100 → −0.5%/日×100）VR>>1 ·
         # 日频反持续（+1%,−1% 交替，63 日窗口互相抵消）VR<<1
         def _vr_series(factors):
@@ -2654,8 +2692,10 @@ def selftest():
         assert _vr_series([1.01, 0.99] * 100) < 1, "均值回复型 VR<1"
         # 短窗/缺换手：不足门槛的字段缺席（不虚构），60 根 fixture 即此形态
         mt_short = fx.derive_technical(ib, None, "cn", "600519")["mid_term"]
-        for k in ("ret_6_1", "ma150", "ma200", "turnover_abnormal", "vr_63d"):
+        for k in ("ret_6_1", "ret_60d", "ma150", "ma200", "turnover_abnormal",
+                  "vr_63d"):
             assert k not in mt_short, "60 根无 %s（数据不足即缺席）" % k
+        assert "ret_20d" in mt_short, "60 根仍出近 20 日涨幅（≥21 根即可）"
         # realized_vol SSOT：lens 与 fetch 同一实现（防双实现漂移）
         import lens as _lens_mod
         assert _lens_mod.realized_vol.__module__ == "fetch", \
@@ -2672,6 +2712,19 @@ def selftest():
             and "turnover_abnormal=1.852" in mt_txt \
             and "ret_6_1=10.0" in mt_txt and "None" not in mt_txt, \
             "pack 须渲染 mid_term 三行且缺项不落 None 字面量"
+        assert "ret_20d=0.0" in mt_txt and "ret_60d=0.0" in mt_txt, \
+            "pack 渲染 20/60 日累计涨幅（判据族数值锚；mib 两窗均平）"
+        assert "profile: position" in mt_txt and "不混写" in mt_txt, \
+            "意见产出要求须双轨分写（短线只读 default 策略→opinions.json）"
+        ev_mt["blocks"]["fundamentals"] = {
+            "state": "available", "data": {"每股收益(元)": 1.2},
+            "history": {"2026-09-30": {"净资产收益率(%)": 11.0},
+                        "2026-06-30": {"净资产收益率(%)": 10.0},
+                        "2026-03-31": {"净资产收益率(%)": 9.0},
+                        "2025-12-31": {"净资产收益率(%)": 12.0}}}
+        mt_txt4 = open(render_context_pack(ev_mt, td), encoding="utf-8").read()
+        assert "2025-12-31" in mt_txt4 and "2026-03-31" in mt_txt4, \
+            "fundamentals 近 4 期全渲染（quality/turnaround 4 期门槛可得）"
         ev_mf20 = json.loads(json.dumps(evidence))
         ev_mf20["blocks"]["moneyflow"]["summary"] = {
             "main_net_yi": 0.5, "main_net_20d_yi": 3.2, "main_net_60d_yi": None,
@@ -2701,6 +2754,16 @@ def selftest():
         lim_bars[-1]["close"] = 109.85  # +9.85% 计（0.15pp 容差有意从严）
         assert fx.derive_technical(lim_bars, None, "cn", "600519")[
             "mid_term"]["limit_up_count_20d"] == 1, "9.85 计（从严口径）"
+        # rets20 坏点断链钉：末 21 根含 0 坏点——121 不与 110 跨点配对（预过滤
+        # 跨点配对会把 110→0→121 拼成两条 +10% 单日、虚计两次涨停）
+        brg = [{"date": "d%d" % i, "open": 100.0, "high": 100.0, "low": 100.0,
+                "close": 100.0, "volume": 1} for i in range(40)]
+        brg[-3]["close"], brg[-2]["close"], brg[-1]["close"] = \
+            110.0, 0.0, 121.0
+        mt_brg = fx.derive_technical(brg, None, "cn", "600519")["mid_term"]
+        assert mt_brg["max_ret_20d"] == 10.0 \
+            and mt_brg["limit_up_count_20d"] == 1, \
+            "rets20 坏点断链（同 realized_vol 口径，不跨坏点拼收益）"
         short60 = fx.derive_technical(ib, None, "cn", "600519")["mid_term"]
         assert "ret_12_1_approx" not in short60, \
             "n<127 短窗 closes[0] 锚失真——缺席不虚构（次新股防虚假动量）"
@@ -2790,8 +2853,9 @@ def selftest():
             "跨轨对立（短线 sell 在册）不得失效中线 buy（期限轨隔离）"
         assert pos["profile"] == "position" \
             and pos["horizons"] == [20, 60, 120], pos.get("horizons")
-        assert set(pos.get("key_levels", {})) == {"band_lo", "band_hi",
-                                                 "trail_ref"}, pos.get("key_levels")
+        # fixture 44 根 <60 → trail_ref 省键（缺项即缺席，不落「—」哨兵）
+        assert set(pos.get("key_levels", {})) == {"band_lo", "band_hi"} \
+            and "—" not in pos["key_levels"].values(), pos.get("key_levels")
         # 同 profile 对立照常失效（中线轨内部互斥仍成立）
         pverdict_sell = dict(verdict_sell, stock_code="000001")
         _, pinv2, _ = register_signal(evidence, pverdict_sell, opinions,
@@ -2827,6 +2891,10 @@ def selftest():
         got = _mid_key_levels(price, band_bars, "cn")
         assert got == want, (got, want)
         assert got["trail_ref"] == 100.5, got
+        # 不足 60 根：trail_ref 省键（缺项即缺席）——数值锚不落展示哨兵「—」
+        kl_short = _mid_key_levels(100.0, band_bars[:40], "cn")
+        assert set(kl_short) == {"band_lo", "band_hi"} \
+            and "—" not in kl_short.values(), kl_short
         # 报告「中线裁决」节：position 传入才出，band 三键与期限声明齐全
         rep_p = render_report(evidence, pverdict, opinions, "TEST",
                               position=(pverdict, opinions))
@@ -2857,6 +2925,13 @@ def selftest():
         assert "中线信号→动作" in ridx and "buy→buy" in ridx, "总览中线两列"
         row_d = [ln for ln in ridx.splitlines() if ln.startswith("| [000001")][0]
         assert "watch" in row_d and "1" in row_d, "短线列仍取 default 轨"
+        # position-only 组：短线列不顶替（—/—/诊断 0），中线两列照常取 position
+        ridx_p = ar.render_root_index([mix[1]])
+        row_p = [ln for ln in ridx_p.splitlines()
+                 if ln.startswith("| [000001")][0]
+        cols_p = [c.strip() for c in row_p.split("|")]
+        assert cols_p[4] == "—" and cols_p[5] == "—" and cols_p[6] == "0" \
+            and cols_p[11] == "buy→buy", cols_p
         sigs3 = json.load(open(SIGNALS, encoding="utf-8"))
         # 登记基准价与报告现价同口径：quote.price（12.4）优先于日 K 末根（14.6）
         assert sigs3[-1]["close_at_signal"] == 12.4, sigs3[-1]["close_at_signal"]
@@ -3120,10 +3195,14 @@ def _selftest_archive(evidence, verdict, opinions):
             register_signal(evidence, verdict, opinions, "r2", "p", now=d1)
             assert "stock_name" not in ar.load_signals(SIGNALS)[-1], \
                 "quote 无 name 时不得落空名称键"
-            # T9 快照：报告进 _snapshot/<code>/（路由按 meta market='?'，不随信号
-            # 市场推导变实盘），不建实盘目录与索引；信号身份取推导 (cn, 600519)、
-            # 带 snapshot 标记（后验可取数，索引侧排除）
-            stage(dict(evidence, meta={"symbol": "600519", "snapshot": True}),
+            # T9 快照：报告进 _snapshot/<code>/（路由按 meta.snapshot 旗标——
+            # fetch 快照分支已回填 market/code 供 mid_term 派生，路由不得随之
+            # 变实盘），不建实盘目录与索引；信号身份取回填 (cn, 600519)、
+            # 带 snapshot 标记（后验可取数，索引侧排除）。meta 用 fetch 实产
+            # 新形态（含 market/code），防旧形态 fixture 掩盖路由回归
+            stage(dict(evidence, meta={"symbol": "600519", "snapshot": True,
+                                       "market": "cn", "code": "600519",
+                                       "session": {"phase": "unknown"}}),
                   ver=dict(verdict, stock_code="600519"))
             assert run(cmd_report, ns(workdir=wd, evidence=None, stock="600519"), d1) == 0
             assert os.path.exists(os.path.join(rd, "_snapshot", "600519", "2026-10-30.md"))

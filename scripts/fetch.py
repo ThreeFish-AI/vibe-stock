@@ -328,26 +328,20 @@ def _sina_json(text):
         return json.loads(re.sub(r"([{,]\s*)([A-Za-z_]\w*)\s*:", r'\1"\2":', text))
 
 
-def _tor(v):
-    """换手率坏值清洗：'--' 占位/NaN/非数 → None（弃键不崩链，两 em 系路径共用）。"""
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if f == f else None
-
-
 def _daily_via_akshare(market, code):
     import akshare as ak  # noqa: 延迟导入，缺库不致命
     df = (ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
           if market == "cn" else
           ak.stock_hk_hist(symbol=code.zfill(5), period="daily", adjust="qfq"))
-    # 换手率列仅 em 系源提供（qq-tx/yf 回退链无此列，mid_term 换手键缺席
-    # 如实为 None，禁止跨源硬凑——references/08 换手口径句）；坏值经 _tor 弃键
+    # 换手率列仅 A 股 em 系源回收（qq-tx/yf 回退链无此列；港股虽有换手率列
+    # 但不回收——港股中期情绪走南向持股+量能代理，references/08 换手口径句；
+    # 禁止跨源/跨市场硬凑）；坏值经 _fnum 弃键（与数值清洗 SSOT 同一实现）
+    keep_to = market == "cn"
     return [{"date": str(r["日期"]), "open": float(r["开盘"]), "high": float(r["最高"]),
              "low": float(r["最低"]), "close": float(r["收盘"]),
              "volume": float(r["成交量"]),
-             **({"turnover": t} if (t := _tor(r["换手率"])) is not None else {})}
+             **({"turnover": t} if keep_to and
+                (t := _fnum(r["换手率"])) is not None else {})}
             for _, r in df.tail(BARS_WINDOW).iterrows()]
 
 
@@ -364,8 +358,8 @@ def _daily_via_efinance(market, code):
                 continue
             if en == "date":
                 row[en] = str(r[cn])
-            elif en == "turnover":  # 坏值（'--'/NaN）弃键不崩链（_tor 同口径）
-                t = _tor(r[cn])
+            elif en == "turnover":  # 坏值（'--'/NaN）弃键不崩链（_fnum 同口径）
+                t = _fnum(r[cn])
                 if t is not None:
                     row[en] = t
             else:
@@ -583,6 +577,10 @@ def _mid_term(bars, market=None, code=None):
         mt["ret_6_1"] = round((closes[-22] / closes[-127] - 1) * 100, 2)
     if n >= 127:  # 12-1 近似（短窗 closes[0] 锚失真——次新股量成上市初期涨幅，缺席不虚构）
         mt["ret_12_1_approx"] = round((closes[-22] / closes[0] - 1) * 100, 2)
+    if n >= 21:  # 近 20 日累计涨幅（08 判据族「近 20 日涨幅 >+20%」的数值锚）
+        mt["ret_20d"] = round((closes[-1] / closes[-21] - 1) * 100, 2)
+    if n >= 61:  # 近 60 日累计涨幅（08②-4 双热「60 日涨幅 >+40%」的数值锚）
+        mt["ret_60d"] = round((closes[-1] / closes[-61] - 1) * 100, 2)
     if n >= 2:    # 全窗时序动量（窗口不足 250 时为可用最大窗）
         mt["tsmom_250d"] = round((closes[-1] / closes[0] - 1) * 100, 2)
     # 波动率锚喂原始序列（含坏点）——断链语义归 realized_vol 自身（SSOT，
@@ -590,10 +588,16 @@ def _mid_term(bars, market=None, code=None):
     raw_closes = [b.get("close") for b in bars]
     mt["rv60"] = realized_vol(raw_closes, 60)
     mt["rv120"] = realized_vol(raw_closes, 120)
-    # 近 20 日单日收益：坏点断链配对（同 realized_vol 口径，不跨坏点拼收益）
+    # 近 20 日单日收益：喂原始末 21 根（含坏点）——坏点处置 prev=None 断链，
+    # 与 realized_vol 同口径、不跨坏点拼收益（预过滤序列会把坏点两侧有效收盘
+    # 拼成「单日」多日涨幅，虚增 max_ret_20d/limit_up_count_20d）
     rets20 = []
     prev = None
-    for c in closes[-21:]:
+    for b in bars[-21:]:
+        c = b.get("close")
+        if not (isinstance(c, (int, float)) and c > 0):
+            prev = None
+            continue
         if prev is not None:
             rets20.append((c / prev - 1) * 100)
         prev = c
@@ -628,8 +632,11 @@ def _mid_term(bars, market=None, code=None):
         v1 = _var(r1)
         if v1 > 0:
             mt["vr_63d"] = round(_var(rq) / (q * v1), 3)  # <1 偏均值回复、>1 偏趋势
+    # 换手三键仅 A 股（港股 em 系虽有换手列但不回收/不消费——港股中期情绪走
+    # 南向持股+量能代理，references/08 换手口径句；市场未知（None）同缺席）
     tos = [b["turnover"] for b in bars
-           if isinstance(b.get("turnover"), (int, float)) and b["turnover"] > 0]
+           if market == "cn" and isinstance(b.get("turnover"), (int, float))
+           and b["turnover"] > 0]
     tail_ok = isinstance(bars[-1].get("turnover"), (int, float)) \
         if bars else False  # 末根无换手（回退链/近端缺失）→ 三键缺席不硬凑
     tos = tos[-BARS_WINDOW:]

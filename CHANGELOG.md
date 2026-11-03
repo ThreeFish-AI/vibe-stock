@@ -31,7 +31,7 @@
     （SSOT 防双实现漂移，lens 留同名导出，调用方零改动）。
   - moneyflow 中线扩行：A 股 summary 增 20/60 日主力累计（序列 60 日封顶、不足
     缺省）；港股南向单页 65 行出持股比 20/60 日变化（同端点零增请求，按披露
-    行数回看、停牌缺行窗缩如实注记）。
+    行数回看、停牌缺行时跨度比名义窗更长如实注记）。
   - context-pack 渲染 mid_term 三行（动量/长均线 · 波动/回撤 · 情绪/拥挤，缺项
     不落 None 字面量）与资金流 20/60 日行（A/HK 两态）。
   - `docs/research/midterm-strategies.md`（新建）：22-agent 调研 Workflow
@@ -56,8 +56,9 @@
     g=max(2σ_d×√21, 3×往返成本)，`fetch.ROUNDTRIP_COST` 常量）；报告新增
     「中线裁决」节（verdict.position.json 存在才出，单轨形态逐字节兼容）；
     cmd_report 可选二登记；postmortem：σ√h 判定带（σ_d=信号日前 60 日已实现
-    日波动无前视，不足退化 2%×√(h/10) 注记）、仅 T+60 记分（T+20/120 只
-    观察——伪重复治理）、台账分文件 ledger.position.json、**复权基准修复
+    日波动无前视，不足退化 2%×√(h/10) 注记）、仅 T+60 记分（T+20/120 照落
+    实判供展示、不进台账——伪重复治理）、台账分文件 ledger.position.json、
+    **复权基准修复
     两轨同修**（判定与展示基准改同复权 closes[i]，evaluated 落 base——修
     qt 未复权价 vs 前复权日 K 的系统性低估；±2%/σ√h 阈值不动）、超窗信号
     warn 诊断（不再静默永久 pending）、索引重建条件改「evaluated 有落笔」；
@@ -89,6 +90,25 @@
     契约）；pack 渲染次新股涨跌幅如实口径；南向单页 65 行口径对齐（01/08/
     代码注释）；带宽 σ_d 语义注记（月窗 2σ_d×√21）；调研报告引文补全与
     计数口径澄清；拒绝清单计数对齐（13 条）；PIPELINE 08 指针补齐。
+  - 评审二轮修复（5 镜头独立 finder + 3 视轴多数决对抗复核，24 条确认项
+    全修，均附回归钉或指针同步）：postmortem selftest 未隔离 STATE_DIR——
+    neutral-only 索引重建会把合成 index 写进真实 ~/.vibe-stock/reports/
+    （P1，补隔离与钉）；_mid_term 新增 ret_20d/ret_60d 累计涨幅——判据族
+    「近 20 日涨幅 >+20%」「60 日涨幅 >+40%」此前在证据包无数值锚（P1）；
+    pack fundamentals 渲染 2 期→4 期（quality_value/turnaround 的 4 期
+    门槛可得，P1）；pack 意见产出要求双轨化（短线轨只读 default 策略，
+    防混轨）；rets20 改喂原始末 21 根真断链（预过滤序列会跨坏点拼「单日」
+    涨幅、虚计涨停）；换手三键双层 A 股门控（ak-em 港股列不回收 + 因子层
+    market 门，港股南向代理口径）；trail_ref 不足 60 根省键（数值锚不落
+    「—」哨兵）；「中线裁决」节 −5%% 文案修复；verdict.position.json 损坏
+    显式中止（不再静默单轨）；总览表去掉 position 顶替短线列的 or g 兜底
+    （04 分轨规约）；_tor 并入 _fnum（坏值清洗单一实现）；02 schema 补
+    profile、PIPELINE 五段图双轨、SKILL description 十五策略、06 中线档
+    「规约先行」限定、08 教培量级 −54%~−70% 与 P4/Phase 5 分标、
+    policy_staged 十五五清单指针改逐案核对、dragon_head 题材三问改「全否
+    +不确定不降」、revision_momentum 表头效应量对齐调研报告实数、
+    issue.md I-004 ✅/I-005 🔄 状态同步、台账宽松加载注释如实化（I-005②
+    在册）、调研报告翻身阈值 30 亿→10 亿对齐 08。
 
 ## [0.0.15] - 2026-11-02
 

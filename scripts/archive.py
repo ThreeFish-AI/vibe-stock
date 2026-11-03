@@ -412,15 +412,20 @@ def render_root_index(signals, names=None, portfolio=None):
     groups = {}
     for s in signals:
         groups.setdefault((s.get("market"), s.get("code")), []).append(s)
-    # 短线列只算 default 轨（中线信号不得顶替「最新信号」列/诊断次数）；中线
-    # 两列取组内最新 position 信号（无则 —，向后兼容存量全 default 形态）
+    # 短线列只算 default 轨（中线信号不得顶替「最新信号」列/诊断次数——组内
+    # 无 default 信号时短线列标 —，04「时间线索引分轨」）；中线两列取组内
+    # 最新 position 信号（无则 —）
     latest = []
     for g in groups.values():
-        dflt = [s for s in g if s.get("profile", "default") == "default"] or g
-        latest.append((_ordered(dflt)[0], g))
-    latest = sorted(latest,
-                    key=lambda x: (x[0].get("created_at") or "", x[0].get("id") or ""),
-                    reverse=True)
+        dflt = [s for s in g if s.get("profile", "default") == "default"]
+        latest.append((_ordered(dflt)[0] if dflt else None, g))
+
+    def _row_key(pair):
+        s, g = pair
+        ref = s or _ordered(g)[0]  # 排序锚：default 最新；无则组内最新（含 position）
+        return (ref.get("created_at") or "", ref.get("id") or "")
+
+    latest = sorted(latest, key=_row_key, reverse=True)
     head = ["股票", "股票名称", "最新日期", "最新信号→动作", "置信", "诊断次数",
             "pending"]
     if portfolio:
@@ -430,16 +435,17 @@ def render_root_index(signals, names=None, portfolio=None):
          "| %s |" % " | ".join(head),
          "| %s |" % " | ".join("---" for _ in head)]
     for s, g in latest:
-        dirname = "%s.%s" % (s["code"], s["market"])
-        kl = s.get("key_levels") or {}
+        dirname = "%s.%s" % (g[0]["code"], g[0]["market"])
+        kl = (s.get("key_levels") or {}) if s else {}
         mids = [x for x in g if x.get("profile") == "position"]
         msig = _ordered(mids)[0] if mids else None
         dflt_g = [x for x in g if x.get("profile", "default") == "default"]
         cells = ["[%s](%s/index.md)" % (dirname, dirname),
                  _display_name(g, g[0].get("market"), g[0].get("code"), names) or "—",
-                 (s.get("created_at") or s.get("date") or "—")[:10],
-                 "%s→%s" % (s.get("signal", "?"), s.get("action", "?")),
-                 _fmt(s.get("confidence")), str(len(dflt_g) or len(g)),
+                 ((s.get("created_at") or s.get("date") or "—")[:10]) if s else "—",
+                 ("%s→%s" % (s.get("signal", "?"), s.get("action", "?")))
+                 if s else "—",
+                 _fmt(s.get("confidence")) if s else "—", str(len(dflt_g)),
                  str(sum(1 for x in dflt_g if x.get("status") == "pending"))]
         if portfolio:
             h = portfolio.get(dirname)

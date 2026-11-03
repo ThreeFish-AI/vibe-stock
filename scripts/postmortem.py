@@ -2,10 +2,13 @@
 """postmortem.py · 决策信号后验自校准（蓝本：DSA decision_signal_outcome_service）。
 
 机制（与 references/05-postmortem.md 同源）：
-  - 对每条 pending 信号，回看 1/3/5/10 个交易日后的实际收盘价：
-    买入族 ≥ +2% 记 hit、≤ −2% 记 miss、中间记 neutral；卖出族对称。
+  - 对每条 pending 信号，按其 profile 的 horizons 回看实际收盘价：
+    default=T+1/3/5/10、±2% 固定带；position=T+20/60/120、σ√h 判定带且
+    仅 T+60 记分（T+20/120 照落实判供展示、不进台账）。
+    买入族越过带上/下沿记 hit/miss、带内记 neutral；卖出族对称。
     watch/hold/avoid/alert 只观察不记分。
-  - 每个判定结果按信号记录时的 sources 归因，累计进 ledger.json（wins/losses）。
+  - 每个判定结果按信号记录时的 sources 归因，累计进各自台账（default=
+    ledger.json、position=ledger.position.json，wins/losses）。
   - 绩效因子与画像升降档由 adjudicate.performance_factor / profile 消费：
     命中率 ≥60% 且样本 ≥10 → promote；≤40% 且样本 ≥10 → demote；否则 observe。
   - 评估后重建 reports/ 时间线索引（archive.rebuild_indexes），T+n 结果进 index.md。
@@ -38,7 +41,8 @@ PROMOTE_RATE, DEMOTE_RATE, MIN_SAMPLES = 0.60, 0.40, 10
 SCORABLE = {"buy": "bull", "reduce": "bear", "sell": "bear"}
 # position 轨唯一记分期限：T+60 与 T+20/T+120 收益强相关（约 0.58/0.71），
 # 多期限记分是伪重复样本——会使信号提前离开 <30 样本中性门、破坏 Beta(15,15)
-# 收缩；20/120 只落 evaluated.observed 供展示（规约见 references/05 期限轨）
+# 收缩；20/120 照落 evaluated 实判（hit/miss/neutral）供展示、不进台账
+# （规约见 references/05 期限轨）
 LEDGER_HORIZON_POSITION = 60
 
 
@@ -203,7 +207,8 @@ def run(args):
     # --stock 先归一：识别失败 detect_market 以 SystemExit 如实报错退出（不碰状态文件）
     want = fx.detect_market(args.stock) if args.stock else None
     # I-005：signals.json 严格加载——损坏即中止退出（状态文件是用户本地
-    # 事实，绝不静默当空后整体覆盖）；台账仍宽松加载（损坏只影响画像打印）
+    # 事实，绝不静默当空后整体覆盖）；台账仍宽松加载——损坏当空后，本次
+    # 增量会整体覆盖写回（历史战绩清零风险，I-005② 在册待修，非无害）
     try:
         signals = ar.load_signals(SIGNALS)
     except ValueError as e:
@@ -399,10 +404,16 @@ def selftest():
     import contextlib
     import io
     with tempfile.TemporaryDirectory() as td:
-        global SIGNALS, LEDGER
-        _old_paths = (SIGNALS, LEDGER, fx.STATE_DIR, fx.FETCH_STATE)
+        # STATE_DIR 一并隔离（run() 的索引重建/名单/持仓都读它）——否则
+        # selftest 会把合成 index.md 写进真实 ~/.vibe-stock/reports/（覆盖
+        # 用户真实总览，无告警）
+        global STATE_DIR, SIGNALS, LEDGER, LEDGER_POSITION
+        _old_paths = (STATE_DIR, SIGNALS, LEDGER, LEDGER_POSITION,
+                      fx.STATE_DIR, fx.FETCH_STATE)
         _old_fns = (fx.load_fetch_state, fx.save_fetch_state, dict(fx.DAILY_FETCHERS))
+        STATE_DIR = td
         SIGNALS, LEDGER = os.path.join(td, "signals.json"), os.path.join(td, "ledger.json")
+        LEDGER_POSITION = os.path.join(td, "ledger.position.json")
         fx.STATE_DIR, fx.FETCH_STATE = td, os.path.join(td, "fetch_state.json")
         fx.load_fetch_state = lambda: {"breakers": {}, "cooldowns": {}}
         fx.save_fetch_state = lambda st: None
@@ -438,6 +449,10 @@ def selftest():
                 "缺 code 记录须保持 pending 不动"
             assert "1" in sigs["c1"]["evaluated"] and "1" in sigs["c2"]["evaluated"]
             assert sigs["c1"]["status"] == "observed" and sigs["c2"]["status"] == "observed"
+            # 索引重建隔离钉：neutral-only 评估（changed=True）也触发重建，
+            # 产物必须落在隔离 STATE_DIR——写真实目录即覆盖用户总览（回归）
+            assert os.path.exists(os.path.join(td, "reports", "index.md")), \
+                "run() 索引重建必须落在隔离 STATE_DIR（不得写真实 ~/.vibe-stock）"
             # --stock 过滤：归一（sh600519→cn:600519）后只评该股；未入过滤集的坏记录不报
             calls.clear()
             _save(SIGNALS, _state())
@@ -486,16 +501,16 @@ def selftest():
                 pass
             assert calls == []
         finally:
-            SIGNALS, LEDGER = _old_paths[:2]
-            fx.STATE_DIR, fx.FETCH_STATE = _old_paths[2:]
+            STATE_DIR, SIGNALS, LEDGER, LEDGER_POSITION = _old_paths[:4]
+            fx.STATE_DIR, fx.FETCH_STATE = _old_paths[4:]
             (fx.load_fetch_state, fx.save_fetch_state) = _old_fns[:2]
             fx.DAILY_FETCHERS.clear()
             fx.DAILY_FETCHERS.update(_old_fns[2])
     print("  ok run() 守卫：未知市场跳过不阻塞 · --stock 过滤/归一/无匹配/识别失败")
     # 持仓契约漂移可观测（04「portfolio.json 契约」，与 diagnose report 同口径）：
     # 有新评估触发索引重建时，文件存在但与契约不符 → warn: 行、台账照常落盘；
-    # 缺失 / 合法 v2 / 合法空表静默。STATE_DIR 一并隔离（不读真实状态目录）
-    global STATE_DIR
+    # 缺失 / 合法 v2 / 合法空表静默。STATE_DIR 一并隔离（不读真实状态目录；
+    # global 声明已在前块——同名一处声明，此处复用）
     _old_pf = (STATE_DIR, SIGNALS, LEDGER, fx.STATE_DIR, fx.FETCH_STATE,
                fx.load_fetch_state, fx.save_fetch_state, dict(fx.DAILY_FETCHERS))
     good = {"code": "000001", "market": "cn", "quantity": 300, "cost_price": 12.5}

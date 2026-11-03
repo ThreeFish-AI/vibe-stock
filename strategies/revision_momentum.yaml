@@ -1,6 +1,7 @@
 # 预期修正动量 / Revision Momentum（中线 · profile=position）
-# 证据依据：A 股 SUE/修正动量 RankIC 3.99%/月、TOP 组合年化超额 9.55%，但公告前
-# 涨幅系统性侵蚀漂移；VW 口径 CH-4 α 仅 0.26——置信保守。调研报告第 2/6 章
+# 证据依据：A 股 SUE1 等权 1.13%/月（t=7.02）、CH-4 α 0.68%/月（HQZ 多重
+# 检验幸存者）；上调后 60 日超额约 4.0%，但公告前 20 日涨幅 >+20% 时显著
+# 变弱——置信保守。调研报告第 2/6 章
 name: revision_momentum
 display_name: 预期修正
 description: 分析师/EPS 预期上修与预告超预期的中线漂移，先扣抢跑。

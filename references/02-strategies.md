@@ -30,7 +30,10 @@ sell；strong sell / 清仓卖出 → strong_sell。
 - 内置三角色（技术 / 情报 / 风险）与策略意见走**同一道验票门**；差异在
   角色还能给 risk.json（veto / downgrade / severity 建议，供 RiskGuard 消费）。
 - 策略说明书 = 数据：`name/display_name/category/required_evidence/aliases/
-  default_priority/market_regimes` + `instructions`（自然语言交易逻辑）。
+  default_priority/market_regimes/profile` + `instructions`（自然语言交易逻辑）。
+  `profile` 缺省 = `default`（短线轨，读全部证据出意见进 opinions.json）；
+  `profile: position` 只进中线轨（opinions.position.json，置信帽 0.65——
+  期限轨见 [08](08-midterm.md) 与 [strategies/README](../strategies/README.md)）。
   required_evidence 的块缺失时策略须降置信并注明，不得假装看得到。
 - 量能类判据（vol_ratio_5 / vol_series_10）在 context-pack 头部出现盘中警示行
   时，以外推值 `vol_ratio_5_projected`（estimated）或收盘后复核为准——盘中末根

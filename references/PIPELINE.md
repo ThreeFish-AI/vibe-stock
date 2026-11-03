@@ -14,14 +14,16 @@ reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](0
 ① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；16 块=核心六块
               （计分）+扩展十块（资金流/公告/研报/预告/解禁/股东户数/大盘/
               行业/估值/汇率，零权重）；A 股全链实测 ~17s/17 次 HTTP）
-              技术节另含 mid_term 中线因子三行——1–6 个月口径，判据见 08）
+              技术节另含 mid_term 中线因子三行——1–6 个月口径，判据见 08
 ② 拼上下文    diagnose.py prepare → context-pack.md（有界证据包+哨兵+置信帽+
               盘中警示行；--cost 时另附基本面锚节——取数时段口径见
               [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)）
 ③ 能力自检    市场支持表与新鲜度体现在八态本身（not_supported/missing 即答案）
 ④ 多角色+策略  LLM 按 SKILL.md 读 context-pack 与 strategies/*.yaml 产意见
-              （opinions.json + risk.json）→ adjudicate.py 验票/聚合/分歧
-⑤ 裁决出报告   adjudicate.py RiskGuard → diagnose.py report → 报告+信号登记
+              （双轨：短线 opinions.json + 中线 opinions.position.json +
+              risk.json 两轨共用）→ adjudicate.py 验票/聚合/分歧
+⑤ 裁决出报告   adjudicate.py RiskGuard 双轨各跑一次 → diagnose.py report →
+              报告+双轨信号登记
 ```
 
 ## 命令速查

@@ -27,9 +27,9 @@
   无前视；样本不足退化 2%×√(h/10) 并在 evaluated entry 的 note 注记）——
   ±2% 固定带在 T+120 neutral 占比仅 ~7%、判定退化为大盘 beta 方向；
   default 轨判定带恒 ±2%（`NEUTRAL_BAND` 逐字不变，07 P3 import 兼容）。
-- **仅 T+60 记分**（position 轨）：T+20/120 只落 evaluated.observed 供展示，
-  不进台账——多期限记分是伪重复样本（T+60 与 T+120 收益相关约 0.71），
-  会使信号提前离开 <30 样本中性门、破坏 Beta(15,15) 收缩。
+- **仅 T+60 记分**（position 轨）：T+20/120 照落 evaluated 实判（hit/miss/
+  neutral）供展示、不进台账——多期限记分是伪重复样本（T+60 与 T+120 收益
+  相关约 0.71），会使信号提前离开 <30 样本中性门、破坏 Beta(15,15) 收缩。
 - **台账分文件**：default 增量写 `ledger.json`（裸键原样）、position 写
   `ledger.position.json`；裁决器经 `--ledger` 按轨查表（[03](03-synthesis.md)
   双跑制），绩效因子与画像升降档互不串轨。
