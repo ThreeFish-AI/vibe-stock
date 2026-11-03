@@ -4,7 +4,7 @@ description: 给一只 A 股或港股做全面诊股并产出专业决策报告�
 license: MIT
 compatibility: 联网模式需 uv 与 PyPI 可达（akshare/efinance/yfinance 经 uv run --with 临时依赖，绝不装全局）；快照模式零依赖零网络；宿主须能执行 Bash。
 metadata:
-  version: "0.0.15"
+  version: "0.0.16"
   author: "ThreeFish-AI"
   source: "机制蓝本 ZhuLinsen/daily_stock_analysis（MIT）+ negentropy 178 精读"
 allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
@@ -15,7 +15,8 @@ allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
 本 Skill 是**路由层**：证据规约在 [references/01](references/01-evidence.md)、
 策略规约 [02](references/02-strategies.md)、裁决规约 [03](references/03-synthesis.md)、
 报告规约 [04](references/04-report.md)、后验规约 [05](references/05-postmortem.md)、
-批量子技能规约 [06](references/06-batch-scan.md)、命令速查
+批量子技能规约 [06](references/06-batch-scan.md)、中线规约
+[08](references/08-midterm.md)、命令速查
 [PIPELINE.md](references/PIPELINE.md)；工具在 `scripts/`，批量参考实现在
 `batch/`，策略库在 `strategies/`。命令统一 `$T` = 本目录
 （`${CLAUDE_SKILL_DIR}`）。
@@ -33,6 +34,7 @@ allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
 | 升级后存量平铺报告 | `diagnose.py migrate-reports` 先 dry-run 再 `--apply`（[04] 存量迁移） |
 | 查某票历史/时间线 | `~/.vibe-stock/reports/<code>.<market>/index.md`（[04] 落盘与跟踪） |
 | 改策略/加策略 | 只动 `strategies/*.yaml`（策略即数据），不碰代码 |
+| 中线视角（1–6 个月） | mid_term 因子在 context-pack 技术节；利好出尽/主题拥挤/制度风险三族判据走风险角色 risk.json 只降不升（[08](references/08-midterm.md)） |
 | 本 Skill 自身缺陷 | 走 RSI 回路（[RSI.md](RSI.md)），不顺手改 |
 
 ## 工作流（诊一只票）
@@ -51,7 +53,9 @@ uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
 #      户数/大盘/行业/估值/汇率）零权重，缺失如实标注、不脑补；港股报告的
 #      汇率行（人民币敞口）只作背景情报，不得作为买卖依据；头部有盘中警示行
 #      时，量能判据以 vol_ratio_5_projected（外推）或收盘后复核为准
-#      （references/01「盘中口径」）；
+#      （references/01「盘中口径」）；技术节的 mid_term 三行是中线（1–6 个月）
+#      因子——风险角色按 references/08 判据族（利好出尽/主题拥挤/制度风险）
+#      消费它们出 veto/downgrade，只降不升、禁投方向票；
 #   2) 逐个读 $T/strategies/*.yaml，按各 instructions 与证据出意见；证据块缺失时降置信并注明；
 #   3) 以 技术角色、情报角色（新闻+公告+研报+预告+资金流+行业+估值）、
 #      风险角色 三身份各出一条意见；关键情报块 fetch_failed 时可用

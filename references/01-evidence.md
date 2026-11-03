@@ -25,7 +25,7 @@
 | --- | --- | --- | --- |
 | quote | 25 | 日 K 推导（或源实时） | 日 K 推导（无实时叠加） |
 | daily_bars | 25 | em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq，不含北交所)→yfinance | em_quote(akshare)→yfinance |
-| technical | 25 | 由日 K 纯标准库推导（MA/RSI/MACD/量比/52 周位置） | 同左 |
+| technical | 25 | 由日 K 纯标准库推导（MA/RSI/MACD/量比/52 周位置；mid_term 中线因子嵌套子块，口径见 [08](08-midterm.md)） | 同左 |
 | news | 10 | em_search→qq_news（腾讯资讯）→sina_flow（个股资讯页）；港股 qq_news 单源 | qq_news（腾讯资讯） |
 | fundamentals | 10 | em_datacenter(主指标全量)→sina(财务指标)→ths(财务摘要)；港股 em_datacenter(HKF10 主指标)→yfinance(info 兜底) | em_datacenter(HKF10)→yfinance |
 | chip | 5 | 本地自算 derive（日K+qt 流通股本，CYQ 同口径，标 estimated）→em_quote 复活位 | not_supported |
@@ -98,7 +98,7 @@
 
 | 块 | 源链（主→回退） | 簇 | 港股 |
 | --- | --- | --- | --- |
-| moneyflow | A：新浪直连 60 日四档净额（主力=r0_net+r1_net 自算）；HK：南向持股 RPT_MUTUAL_STOCK_HOLDRANKS 直连（T-1 披露） | sina_flow；HK=em_datacenter | 南向持股（港股通标的；非标的=not_supported） |
+| moneyflow | A：新浪直连 60 日四档净额（主力=r0_net+r1_net 自算，summary 另出 20/60 日累计——中线口径，不足 60 日如实缺省）；HK：南向持股 RPT_MUTUAL_STOCK_HOLDRANKS 直连（T-1 披露，单页 60 行另出持股比 20/60 日变化） | sina_flow；HK=em_datacenter | 南向持股（港股通标的；非标的=not_supported） |
 | notices | em_notice(8 类枚举)→cninfo(26 类，监管权威)；HK=em_notice(ann_type=H 单源，盈警/回购标题分型) | em_notice/cninfo | em-notice-h 单源（HKEXnews 回退在 backlog） |
 | research | em_report(逐篇)+datacenter 直连(评级共识+目标价+EPS1..4 前瞻回收)；HK=etnet(逐券商目标价/EPS/评级)→yf(analyst 互验+eps_trend 90 日修正) | em_report/em_datacenter；HK=etnet/yf | etnet+yf 双源（东财 reportapi 港股 0 覆盖不入链） |
 | forecast | datacenter 直连×2（预告+披露日历） | em_datacenter | not_supported（港股无预告制度，见制度差异句） |
@@ -149,6 +149,11 @@
   标 estimated；坑位：历史换手按当前流通股本回溯，增发/解禁期误差放大；
   volume 手/股单位按源判定（ak-em/ef-em=手，qq-tx/yf=股），判错方向会把换手率
   放大百倍。
+- **mid_term 中线因子与换手列回收**（条件：technical.mid_term 消费方——中线
+  （1–6 个月）视角；做法：换手列仅 ak-em/ef-em 链首回收（qq-tx/yf 无此列，
+  turnover_* 三键整体缺席、禁止跨源硬凑），因子语义与判据口径 SSOT 在
+  [08](08-midterm.md)；坑位：A 股涨停计数按代码段阈值（主板 10/创业·科创 20/
+  北交 30），ST 5% 特例依赖 quote.name 由 LLM 收严判读，勿据分段阈值漏计）。
 - **汇率仅情报面**（条件：港股标的的人民币敞口呈现；做法：fx 块取 HKD/CNY 当前
   值、近 20 日与年内变动入 pack 与 report 情报面，postmortem `--cny` 对 hk 信号
   附 cny_close/cny_chg_pct 展示字段，cn 标的以人民币计价恒 not_supported；坑位：

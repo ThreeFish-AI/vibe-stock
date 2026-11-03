@@ -7,6 +7,51 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.16] - 2026-11-03
+
+### Added
+
+- 中线（1–6 个月）视角接入 Phase 1——证据派生与只降不升风险判据族（用户
+  2026-11-03 裁定：完整中线轨分阶段引入、默认双轨、06/07 同步接入，版本按
+  用户裁定维持 0.0.x patch 序列；Phase 2/3 的 profile=position 独立裁决/
+  登记轨与五个中线策略见 [references/08](references/08-midterm.md) 预留）：
+  - `references/08-midterm.md`（新建 SSOT）：mid_term 因子口径表（条件/坑位
+    逐字段）、三族**只降不升**风险判据——利好出尽（隔夜/日内拆分、抢跑透支、
+    解禁分级、高送转×减持并发、软/硬事件分诊等八条）/ 主题拥挤与 AI 情绪
+    （异常换手、彩票效应、涨停注意力、估值-动量双热、题材真伪三问、两年翻倍
+    警戒）/ 制度与政策（壳/退市出清、监管敏感行业点名即降档、反内卷衰减窗）
+    ——全部经既有风险角色 risk.json 通道，adjudicate 零改动执法；四张静态表
+    （监管敏感行业/政策日历/强周期映射/A-HK 往返成本常量）与证据准入四问、
+    拒绝清单只增不删口径。
+  - `fetch.derive_technical` 新增 `mid_term` 嵌套派生（纯标准库）：跳月动量
+    ret_6_1/ret_12_1_approx（≈11 个月近似注记）、tsmom_250d、rv60/rv120、
+    max_ret_20d、按代码段涨停计数（主板 10/创业科创 20/北交 30、0.15pp 容差；
+    ST 5% 特例依赖 quote.name 交 LLM 收严判读）、mdd_250/cur_dd、ma150/ma200、
+    vr_63d 方差比（重叠窗口只作方向参考）、异常换手三键（换手列仅 ak-em/ef-em
+    链首回收，qq-tx/yf 回退时缺席不虚构）；`realized_vol` 由 lens 迁 fetch 共享
+    （SSOT 防双实现漂移，lens 留同名导出，调用方零改动）。
+  - moneyflow 中线扩行：A 股 summary 增 20/60 日主力累计（序列 60 日封顶、不足
+    缺省）；港股南向单页 65 行出持股比 20/60 日变化（同端点零增请求，按披露
+    行数回看、停牌缺行窗缩如实注记）。
+  - context-pack 渲染 mid_term 三行（动量/长均线 · 波动/回撤 · 情绪/拥挤，缺项
+    不落 None 字面量）与资金流 20/60 日行（A/HK 两态）。
+  - `docs/research/midterm-strategies.md`（新建）：22-agent 调研 Workflow
+    （8 维度文献调研 → 逐条对抗核验 → 3 方案比选）产出的中线策略调研报告，
+    15 章 + 拒绝引入清单（12 条）+ 证据块映射表（20 行）；92 条 IEEE 引文
+    （71 confirmed / 18 weakened / 3 unverifiable 均显式降权标注）——后续
+    中线判据的证据准入以本报告与 08 四问为准。
+  - 策略只收严补句：bull_trend 增反转警戒（A 股月度反转强于动量——近 20 日
+    涨幅 >+20% 且逼近 52 周高降档、换手分位 >95% 滞涨禁 strong_buy）；
+    dragon_head 增题材真伪三问（蹭热点不给题材溢价）与注意力过热禁 strong_buy。
+  - 回归：diagnose selftest 新增 mid_term 手算钉（250 根合成序列：跳月动量
+    10.0/回撤 −9.54/长均线/涨停分段计数/异常换手 1.852 与 (<=cur)/n 分位）、
+    VR 方向钉（季度级趋势摆动 >1 vs 日频交替 <1）、短窗缺项缺席钉、realized_vol
+    SSOT 钉、pack mid_term 与资金流 20/60 渲染钉；四件 selftest + 监盘两件全绿。
+  - 指针同步：SKILL.md（version/头部指针/判表「中线视角」行/工作流 ③ 风险
+    角色消费句）、README（「中线视角」节 + 八篇规约）、AGENTS.md 目录表、
+    knowledge-map、references/01（technical/moneyflow 行与换手列回收句）、
+    references/02（中线判据族分流句）；`.gitignore` 增 `.temp/`。
+
 ## [0.0.15] - 2026-11-02
 
 ### Added

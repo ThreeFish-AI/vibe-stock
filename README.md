@@ -51,6 +51,17 @@ uv run --no-project scripts/adjudicate.py --opinions .vs/opinions.json \
 uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 ```
 
+## 中线视角（08 规约）
+
+1–6 个月操作周期的证据面：`technical.mid_term` 纯函数派生中线因子（跳月动量、
+已实现波动、最大回撤、长均线、方差比 VR(63)、涨停计数、异常换手——A 股月度
+反转强于动量、换手是最强情绪信号等 A/HK 实证口径），随每份 context-pack 透出；
+利好出尽 / 主题拥挤与 AI 情绪 / 制度与政策风险三族判据走风险角色 risk.json
+**只降不升**（不提供中线买点，正向判断仍由既有策略按证据合流）。调研依据
+（IEEE 引文与效应量、拒绝引入清单）见
+[docs/research/midterm-strategies.md](docs/research/midterm-strategies.md) 与
+[references/08-midterm.md](references/08-midterm.md)。
+
 ## 盘中盯盘（07 子技能）
 
 对在册股票（实盘持仓 + 模拟配置 + 观察票）做盘中价格面轮询：确定性规则锚定
@@ -61,7 +72,7 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 [references/07-monitor.md](references/07-monitor.md) 与
 [batch/monitor/](batch/monitor/)。
 
-文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（七篇规约 +
+文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（八篇规约 +
 PIPELINE）→ [batch/](batch/)（批量子技能参考实现）→
 [batch/monitor/](batch/monitor/)（盯盘参考实现）→ [strategies/](strategies/)
 （策略库）。回归：`scripts/*.py --selftest` 四件全绿（硬门禁）+
