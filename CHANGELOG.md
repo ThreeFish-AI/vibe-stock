@@ -35,6 +35,109 @@
   卸载作业；已装单槽旧模板升级
   须 bootout 后按新模板重装（盘中执行会杀掉在跑进程，建议收盘后操作）。
 
+## [0.0.16] - 2026-11-03
+
+### Added
+
+- 中线（1–6 个月）视角一次性完整落地（用户 2026-11-03 裁定：完整中线轨、
+  版本 0.0.x patch、默认双轨、06/07 同步接入、Phase 2/3 与 Phase 1 同 PR 同
+  版本落实——[references/08](references/08-midterm.md)）：
+  - `references/08-midterm.md`（新建 SSOT）：mid_term 因子口径表（条件/坑位
+    逐字段）、三族**只降不升**风险判据——利好出尽（隔夜/日内拆分、抢跑透支、
+    解禁分级、高送转×减持并发、软/硬事件分诊等八条）/ 主题拥挤与 AI 情绪
+    （异常换手、彩票效应、涨停注意力、估值-动量双热、题材真伪三问、两年翻倍
+    警戒）/ 制度与政策（壳/退市出清、监管敏感行业点名即降档、反内卷衰减窗）
+    ——全部经既有风险角色 risk.json 通道，adjudicate 零改动执法；四张静态表
+    （监管敏感行业/政策日历/强周期映射/A-HK 往返成本常量）与证据准入四问、
+    拒绝清单只增不删口径。
+  - `fetch.derive_technical` 新增 `mid_term` 嵌套派生（纯标准库）：跳月动量
+    ret_6_1/ret_12_1_approx（≈11 个月近似注记）、tsmom_250d、rv60/rv120、
+    max_ret_20d、按代码段涨停计数（主板 10/创业科创 20/北交 30、0.15pp 容差；
+    ST 5% 特例依赖 quote.name 交 LLM 收严判读）、mdd_250/cur_dd、ma150/ma200、
+    vr_63d 方差比（重叠窗口只作方向参考）、异常换手三键（换手列仅 ak-em/ef-em
+    链首回收，qq-tx/yf 回退时缺席不虚构）；`realized_vol` 由 lens 迁 fetch 共享
+    （SSOT 防双实现漂移，lens 留同名导出，调用方零改动）。
+  - moneyflow 中线扩行：A 股 summary 增 20/60 日主力累计（序列 60 日封顶、不足
+    缺省）；港股南向单页 65 行出持股比 20/60 日变化（同端点零增请求，按披露
+    行数回看、停牌缺行时跨度比名义窗更长如实注记）。
+  - context-pack 渲染 mid_term 三行（动量/长均线 · 波动/回撤 · 情绪/拥挤，缺项
+    不落 None 字面量）与资金流 20/60 日行（A/HK 两态）。
+  - `docs/research/midterm-strategies.md`（新建）：22-agent 调研 Workflow
+    （8 维度文献调研 → 逐条对抗核验 → 3 方案比选）产出的中线策略调研报告，
+    15 章 + 拒绝引入清单（13 条）+ 证据块映射表（20 行）；调研共 124 条
+    findings（100 confirmed / 20 weakened / 4 unverifiable，逐条经引文存在
+    性/效应量转述/发表后衰减对抗核验），正文以 IEEE 引文显式引用其中关键
+    条目、weakened/unverifiable 均带显式降权标注——后续中线判据的证据准入
+    以本报告与 08 四问为准。
+  - 策略只收严补句：bull_trend 增反转警戒（A 股月度反转强于动量——近 20 日
+    涨幅 >+20% 且逼近 52 周高降档、换手分位 >95% 滞涨禁 strong_buy）；
+    dragon_head 增题材真伪三问（蹭热点不给题材溢价）与注意力过热禁 strong_buy。
+  - 回归：diagnose selftest 新增 mid_term 手算钉（250 根合成序列：跳月动量
+    10.0/回撤 −9.54/长均线/涨停分段计数/异常换手 1.852 与 (<=cur)/n 分位）、
+    VR 方向钉（季度级趋势摆动 >1 vs 日频交替 <1）、短窗缺项缺席钉、realized_vol
+    SSOT 钉、pack mid_term 与资金流 20/60 渲染钉；四件 selftest + 监盘两件全绿。
+  - **Phase 2 双轨管道**：`archive.HORIZONS_OF` 期限轨 SSOT（default=
+    [1,3,5,10]、position=[20,60,120]）；`register_signal` 参数化 profile/
+    horizons——对立失效与同 report_id 旧版 superseded（I-004 落地）均按
+    profile 隔离（存量无 profile 键按 default 兜底，向 05 规约看齐）；
+    `_mid_key_levels` 波段带三键（band_lo/band_hi/trail_ref=MA60，带宽
+    g=max(2σ_d×√21, 3×往返成本)，`fetch.ROUNDTRIP_COST` 常量）；报告新增
+    「中线裁决」节（verdict.position.json 存在才出，单轨形态逐字节兼容）；
+    cmd_report 可选二登记；postmortem：σ√h 判定带（σ_d=信号日前 60 日已实现
+    日波动无前视，不足退化 2%×√(h/10) 注记）、仅 T+60 记分（T+20/120 照落
+    实判供展示、不进台账——伪重复治理）、台账分文件 ledger.position.json、
+    **复权基准修复
+    两轨同修**（判定与展示基准改同复权 closes[i]，evaluated 落 base——修
+    qt 未复权价 vs 前复权日 K 的系统性低估；±2%/σ√h 阈值不动）、超窗信号
+    warn 诊断（不再静默永久 pending）、索引重建条件改「evaluated 有落笔」；
+    archive 单股双表（短线 T+1/3/5/10 + 中线 T+20/60/120）与总览中线两列
+    （短线列只算 default 轨）；batch/monitor/watch.py 价位锚按 profile 过滤
+    （position 波段带不覆盖短线止损/目标锚）。
+  - **Phase 3 中线策略与编排**：五个 `profile: position` 策略 YAML（quality_
+    value 质量价值 / revision_momentum 预期修正 / policy_staged 国策四级分层 /
+    turnaround_catalyst 翻身催化 / swing_band regime 门控波段带，置信帽
+    0.65、缺证据弃权、风险向一律走 risk.json）；references/06 中线档（三价
+    参数化 60/120 日窗+σ 带+箱体下沿−5% 总回撤门、波动倒数权重、卫星仓硬帽
+    ≤30%、20 交易日复核）；references/07 价位锚分轨句与 P2 波段带带内状态
+    规约；strategies/README profile 字段说明。
+  - 指针同步：SKILL.md（version/头部指针/判表「中线视角」行/工作流 ③④ 双轨
+    意见与双跑命令/后验段）、README（「中线双轨」节 + 十五策略）、PIPELINE.md
+    （双跑命令与后验口径）、AGENTS.md 目录表、knowledge-map、references/
+    01/02/03/04/05/06/07 各期限轨指针；`.gitignore` 增 `.temp/`。
+  - 回归补钉（Phase 2/3）：diagnose——跨轨对立不失效/同 profile 照常失效/
+    同 report_id superseded/无 profile 键兜底/波段带数学钉/中线裁决节要素/
+    索引双表与总览两列；postmortem——σ√h 手算钉/仅 T+60 记分/台账分桶/
+    复权基准钉（登记价≠closes[i] 形态）/超窗诊断钉/退化带注记钉/损坏
+    signals.json 严格加载中止钉（I-005）；watch（23 checks）——position
+    波段带不覆盖短线锚。
+  - 对抗评审修复（4 维度 24-agent Review，20 条确认项全修）：创业板 302
+    号段涨停阈值；mid_term.rv 改喂原始序列（坏点断链与 lens 透镜同输入同
+    输出）；ret_12_1_approx 短窗（<127 根）缺席不虚构（次新股虚假动量）；
+    rets20 坏点断链配对；换手三键末根门；efinance 换手列坏值防护（_tor 模块
+    级共用）；快照 meta 回填 market/code（涨停计数不再缺席，推不出维持 '?'
+    契约）；pack 渲染次新股涨跌幅如实口径；南向单页 65 行口径对齐（01/08/
+    代码注释）；带宽 σ_d 语义注记（月窗 2σ_d×√21）；调研报告引文补全与
+    计数口径澄清；拒绝清单计数对齐（13 条）；PIPELINE 08 指针补齐。
+  - 评审二轮修复（5 镜头独立 finder + 3 视轴多数决对抗复核，24 条确认项
+    全修，均附回归钉或指针同步）：postmortem selftest 未隔离 STATE_DIR——
+    neutral-only 索引重建会把合成 index 写进真实 ~/.vibe-stock/reports/
+    （P1，补隔离与钉）；_mid_term 新增 ret_20d/ret_60d 累计涨幅——判据族
+    「近 20 日涨幅 >+20%」「60 日涨幅 >+40%」此前在证据包无数值锚（P1）；
+    pack fundamentals 渲染 2 期→4 期（quality_value/turnaround 的 4 期
+    门槛可得，P1）；pack 意见产出要求双轨化（短线轨只读 default 策略，
+    防混轨）；rets20 改喂原始末 21 根真断链（预过滤序列会跨坏点拼「单日」
+    涨幅、虚计涨停）；换手三键双层 A 股门控（ak-em 港股列不回收 + 因子层
+    market 门，港股南向代理口径）；trail_ref 不足 60 根省键（数值锚不落
+    「—」哨兵）；「中线裁决」节 −5%% 文案修复；verdict.position.json 损坏
+    显式中止（不再静默单轨）；总览表去掉 position 顶替短线列的 or g 兜底
+    （04 分轨规约）；_tor 并入 _fnum（坏值清洗单一实现）；02 schema 补
+    profile、PIPELINE 五段图双轨、SKILL description 十五策略、06 中线档
+    「规约先行」限定、08 教培量级 −54%~−70% 与 P4/Phase 5 分标、
+    policy_staged 十五五清单指针改逐案核对、dragon_head 题材三问改「全否
+    +不确定不降」、revision_momentum 表头效应量对齐调研报告实数、
+    issue.md I-004 ✅/I-005 🔄 状态同步、台账宽松加载注释如实化（I-005②
+    在册）、调研报告翻身阈值 30 亿→10 亿对齐 08。
+
 ## [0.0.15] - 2026-11-02
 
 ### Added

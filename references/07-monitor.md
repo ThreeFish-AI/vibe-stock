@@ -34,6 +34,10 @@
 - 价位锚 SSOT：优先 signals.json 组内最新 `key_levels`；模拟股无信号时回退
   allocation 三价常量并标 `levels_source`；两者皆缺 → 该股降级为仅 ±%/触板
   监控并显式告警（不静默失效）。
+- 价位锚分轨（0.0.16 起）：锚只取 **default 轨**信号的 key_levels
+  （`latest_signals` 按 profile 过滤）——position 轨的波段带三键
+  （band_lo/band_hi/trail_ref）语义不同，混入会覆盖短线止损/目标锚；
+  波段带锚的带内状态规则见下「升级链」P2 补充。
 - 触板限幅（已知简化）：创业/科创 20%、北交 30%、主板 10%、主板 ST 减半；
   创业/科创 ST 不减半。涨停价精确计算有四舍五入坑，判定一律用近触板
   （限幅 − 0.3pp）。
@@ -204,6 +208,11 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
   告警）：ma20_break（price < ma20×0.98 → 注入 downgrade=medium）、trailing
   （high_since_entry ≥ 成本×1.15 武装、武装后破 ma20 → trailing_exit 收盘终判）、
   HS300/HSI 收盘破 MA60 → 全组合降档评估提示。
+- P2 波段带带内状态（0.0.16 规约先行，实施随 P2）：position 轨信号
+  `key_levels` 的 band_lo/band_hi/trail_ref 三键作监控锚——band_lo 触发
+  「低吸复核」提示、band_hi 触发「高抛复核」提示、收盘破 trail_ref 提示
+  「波段结束复核」；只发本地事实告警（尾注免责与既有事件同），不执行、
+  不写 signals.json；锚选取与 default 三价并行不互覆（上文「价位锚分轨」）。
 - **权重提示分桶不折算**（用户 2026-11-02 裁定）：条件——P2 单仓权重 >16%
   「次日减至 ≤14%」提示；做法——A 股桶（CNY）与港股桶（HKD）各自以本桶市值为
   分母算 16% 线，不做 HKD/CNY 折算，fx 不进判定（SKILL 红线 4）；坑位——跨币种
@@ -240,6 +249,6 @@ whipsaw 路径判据用日 K high/low（tick 缺口不影响判定）。
 ## 回归门禁
 
 `batch/monitor/rules.py --selftest`（36 checks）与 `watch.py --selftest`
-（30 checks，含 launchd 模板回归钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
+（31 checks，含 launchd 模板回归钉与 position 轨 profile 过滤钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
 scripts/ 四件硬门禁成员（AGENTS.md 测试段第五条非阻塞），P4 机械判据合流
 scripts/ 后归四件 selftest 接管。判据只许收严（门禁只收严红线）。

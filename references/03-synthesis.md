@@ -3,6 +3,19 @@
 执法在 [scripts/adjudicate.py](../scripts/adjudicate.py)（`aggregate` /
 `disagreement_summary` / `risk_guard` / `apply_confidence_cap`）；本文件是口径。
 
+## 双轨双跑（0.0.16 起，裁决器零改动）
+
+- **双跑制**（条件：诊股产出意见时；做法：adjudicate.py 对两条轨各跑一次——
+  default 轨照旧（`--ledger ~/.vibe-stock/ledger.json`）；position 轨
+  `--opinions .vs/opinions.position.json --risk .vs/risk.json --evidence
+  .vs/evidence.json --ledger ~/.vibe-stock/ledger.position.json --out
+  .vs/verdict.position.json`，经既有 `--ledger` 参数天然按轨查表，绩效因子
+  不串轨、聚合公式与验票门逐字相同；坑位：workdir 无 verdict.position.json
+  时单轨运行，行为与历史逐字节一致——两轨裁决互不替代、不互相改写）。
+- **风险是期限无关单向闸**：risk.json 两轨共用（利好出尽/拥挤/制度判据族
+  对两轨同时生效，[08](08-midterm.md)）；RiskGuard 只降不升语义对两轨
+  分别施加。
+
 ## 聚合（纯确定性）
 
 - **绩效因子**（该 source 历史后验战绩：Beta(15,15) 收缩、钳制 0.83–1.2、

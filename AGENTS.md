@@ -40,6 +40,7 @@
 | references/05-postmortem.md | 信号后验自校准 |
 | references/06-batch-scan.md | 批量子技能：指数成分精选与资金配置（编排层） |
 | references/07-monitor.md | 盯盘子技能：在册股票盘中监控与收盘复核（监控编排层） |
+| references/08-midterm.md | 中线（1–6 个月）规约：mid_term 因子口径与只降不升风险判据族 |
 | references/PIPELINE.md | 五段流水线与命令速查 |
 | strategies/ | 策略 YAML 库 |
 | scripts/ | fetch / adjudicate / diagnose / postmortem / lens / archive（裁决 · 诊断 · 基本面锚透镜 · 报告归档与索引） |

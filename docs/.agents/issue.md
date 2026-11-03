@@ -8,8 +8,8 @@
 | I-001 | 同日重跑覆盖报告致信号→报告指针失真：改单日多版本文件 | ✅ 已完成 | 2026-10-30 | [详情](#I-001) |
 | I-002 | 港股代码归一不一致致同一标的身份分裂：统一补 5 位 | ✅ 已完成 | 2026-10-30 | [详情](#I-002) |
 | I-003 | signals.json 解析失败被静默当空、下次 report 覆盖历史：严格加载 + 原子写 | ✅ 已完成 | 2026-10-30 | [详情](#I-003) |
-| I-004 | 05 规约「八元组去重」未实现，同日重跑重复登记信号与归因 | ⏸ 暂不处理 | — | [详情](#I-004) |
-| I-005 | 状态文件健壮性缺口：signals 无锁、ledger 损坏被清空、market="?" 信号使 postmortem 崩溃 | ⏸ 暂不处理 | — | [详情](#I-005) |
+| I-004 | 同日重跑重复登记信号（八元组去重缺失）——0.0.16 以同 report_id superseded 落地 | ✅ 已完成 | 2026-11-03 | [详情](#I-004) |
+| I-005 | 状态文件健壮性缺口：signals 无锁、ledger 损坏被清空、market="?" 信号使 postmortem 崩溃 | 🔄 进行中 | — | [详情](#I-005) |
 | I-006 | 总览持仓合并契约与真实 portfolio.json v2 结构脱节：loader 归一 holdings 列表 | ✅ 已完成 | 2026-11-02 | [详情](#I-006) |
 | I-007 | 盯盘 P1 selftest fixture 写入真实持仓（公开仓）：换合成标的 + 零重合负断言 | ✅ 已完成 | 2026-11-02 | [详情](#I-007) |
 | I-008 | 盯盘 launchd 模板拉不起、异常不自愈、跨日 close_done 残留：绝对路径 + SIGABRT + 按日归零 | ✅ 已完成 | 2026-11-02 | [详情](#I-008) |
@@ -49,11 +49,11 @@
 
 ## I-004：八元组去重未实现
 
-- **问题描述**：[05-postmortem](../../references/05-postmortem.md) 声明信号按 (report_id, source_type, market, code, profile, action, horizon, regime) 去重，实现只追加；同日重跑会登记多条同向信号，buy/sell 族后验时同一意见源被重复归因，绩效因子失真。
+- **问题描述**：[05-postmortem](../../references/05-postmortem.md) 曾声明信号按 (report_id, source_type, market, code, profile, action, horizon, regime) 去重，实现只追加；同日重跑会登记多条同向信号，buy/sell 族后验时同一意见源被重复归因，绩效因子失真。
 - **表因根因**：`register_signal` 未实现去重；0.2.2 前 diagnose.py docstring 还写着「八元组去重」，已改为如实描述。
-- **处理方式**：暂不处理。0.2.2 保留日级 `report_id` 作为后续去重或 superseded 语义的挂点，[05](../../references/05-postmortem.md) 已改口为「去重未实现」如实描述。
-- **后续防范**：实现时须同步 05 规约与 selftest，且只许收严（不得让重复样本抬高绩效因子）。
-- **注意事项**：当前现网同日多信号均为 watch（只观察不记分），尚未污染 ledger。
+- **处理方式**：2026-11-03 已落地（0.0.16）：`register_signal` 对同股、同 profile、同 `report_id` 的旧 pending 信号标 `superseded`（同日重跑以最新版为准，不再双计样本），对立失效一并按 profile 隔离；05 规约「superseded（I-004 落地）」与 diagnose selftest 已同步。
+- **后续防范**：实现时须同步 05 规约与 selftest，且只许收严（不得让重复样本抬高绩效因子）——已按此执行。
+- **注意事项**：superseded 保持未评估形态（区别于 invalidated/evaluated）；当前现网同日多信号均为 watch（只观察不记分）。
 
 <a id="I-005"></a>
 
@@ -61,9 +61,9 @@
 
 - **问题描述**：① signals.json 读改写无文件锁，report 与 postmortem 并发可能丢更新；② postmortem `_load(LEDGER, {})` 吞解析异常，损坏时会用本次增量覆盖整本台账；③ 快照模式登记的 market="?" 信号进入 postmortem 后，`fetch_daily_bars` 取 `CHAINS["?"]` 抛 KeyError。
 - **表因根因**：状态层没有统一的加载/写入/锁约定，各脚本各自读写 JSON。
-- **处理方式**：暂不处理。迁移侧用 CAS 发现并发改动，report 侧已改严格加载。
+- **处理方式**：部分落地（0.0.16，2026-11-03）：③ market 守卫跳过（非 cn/hk 保持 pending）此前已生效；signals.json 严格加载（损坏中止退出、不覆盖）与全状态文件原子写（`ar.write_json_atomic`）已落地。①并发文件锁与②台账损坏被增量覆盖仍未修——台账仍宽松加载，损坏当空后下次有增量会整体覆盖写回（postmortem.run 注释已如实标注清零风险）。
 - **后续防范**：统一到 [archive.py](../../scripts/archive.py) 的严格加载 + 原子写；postmortem 跳过非 cn/hk 信号。
-- **注意事项**：迁移期间勿并发跑 report / postmortem。
+- **注意事项**：迁移期间勿并发跑 report / postmortem；②修复前勿在台账损坏状态下跑可记分 postmortem。
 
 <a id="I-006"></a>
 
