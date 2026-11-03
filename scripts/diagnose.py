@@ -94,12 +94,19 @@ def render_ext_blocks(lines, b):
                             _nd(s.get("net_buy_shares_1d")),
                             _yi(s.get("net_buy_amount_1d_hkd")),
                             _yi(s.get("net_mv_chg_10d_hkd"))))
+            if s.get("hold_pct_chg_20d") is not None \
+                    or s.get("hold_pct_chg_60d") is not None:
+                lines.append("持股比变化（百分点，中线口径）：20 日 %s · 60 日 %s"
+                             % (_nd(s.get("hold_pct_chg_20d")),
+                                _nd(s.get("hold_pct_chg_60d"))))
         else:
             lines.append("## 资金流（%s，%s；%s）" % (
                 mf.get("state"), mf.get("source"), mf.get("note", "主力净额")))
-            lines.append("主力净额(亿)：今日 %s · 3日 %s · 5日 %s · 10日 %s · 连续%s %s 日"
+            lines.append("主力净额(亿)：今日 %s · 3日 %s · 5日 %s · 10日 %s · "
+                         "20日 %s · 60日 %s · 连续%s %s 日"
                          % (_nd(s.get("main_net_yi")), _nd(s.get("main_net_3d_yi")),
                             _nd(s.get("main_net_5d_yi")), _nd(s.get("main_net_10d_yi")),
+                            _nd(s.get("main_net_20d_yi")), _nd(s.get("main_net_60d_yi")),
                             "流入" if s.get("streak_direction") == "inflow" else "流出",
                             _nd(s.get("main_streak_days"))))
             for d in (mf.get("days") or [])[:EXT_PACK_BUDGET["moneyflow"]]:  # 最新在前，取头部
@@ -437,6 +444,31 @@ def render_context_pack(evidence, workdir):
         if tech.get("last_bar_pattern"):
             lines.append("last_bar_pattern: %s（yang=收阳 body=实体占比%% "
                          "lower/upper_shadow=下上影线占比%%）" % tech["last_bar_pattern"])
+        mt = tech.get("mid_term") or {}
+        if any(v is not None for v in mt.values()):
+            lines.append("mid_term（1–6 个月中线因子，判据口径见 references/08；"
+                         "缺项=数据不足，勿臆测）")
+            pairs = " ".join("%s=%s" % (k, mt[k]) for k in
+                             ("ret_6_1", "ret_12_1_approx", "tsmom_250d",
+                              "ma150", "ma200") if mt.get(k) is not None)
+            if pairs:
+                lines.append("  动量/长均线：%s（ret_12_1_approx 为 ≈11 个月近似、"
+                             "tsmom_250d 窗不足 250 根时为可用最大窗）" % pairs)
+            pairs = " ".join("%s=%s" % (k, mt[k]) for k in
+                             ("rv60", "rv120", "mdd_250", "cur_dd", "vr_63d")
+                             if mt.get(k) is not None)
+            if pairs:
+                lines.append("  波动/回撤：%s（rv 为年化已实现波动率小数，0.2=20%%；"
+                             "vr_63d<1 偏均值回复、>1 偏趋势——重叠窗口方向参考，"
+                             "不作硬阈值）" % pairs)
+            pairs = " ".join("%s=%s" % (k, mt[k]) for k in
+                             ("max_ret_20d", "limit_up_count_20d",
+                              "turnover_avg_20d", "turnover_abnormal",
+                              "turnover_pctile_250") if mt.get(k) is not None)
+            if pairs:
+                lines.append("  情绪/拥挤：%s（A 股 max_ret_20d 已按代码段涨停阈值"
+                             "饱和、ST 5%% 特例按 quote.name 收严判读；换手键仅 em 系"
+                             "源可得，缺席=回退链无换手列）" % pairs)
     if bars:
         lines.append("")
         lines.append("## 近 10 根日 K（日期 开 高 低 收 量 涨跌幅%）")
@@ -2469,6 +2501,81 @@ def selftest():
         for s_np in (None, fx.session_phase("cn", "2026-10-29", _at(10, 26)),
                      fx.session_phase("cn", "2026-10-30", _at(9, 30))):  # elapsed=0
             assert "vol_ratio_5_projected" not in fx.derive_technical(ib, s_np), s_np
+        # -- mid_term 中线派生（1–6 个月口径，references/08；250 根合成序列手算钉）--
+        mib = [{"date": "2026-%02d" % (d % 12 + 1), "open": 100.0, "high": 100.0,
+                "low": 100.0, "close": 100.0, "volume": 10000,
+                "turnover": 1.0} for d in range(250)]
+        for i, v in ((228, 110.0), (240, 105.0), (245, 110.55)):
+            mib[i]["close"] = v
+        for b in mib[230:]:  # 近 20 日换手抬升 → 异常比 2/1.08
+            b["turnover"] = 2.0
+        mt = fx.derive_technical(mib, None, "cn", "600519")["mid_term"]
+        assert mt["ret_6_1"] == 10.0 and mt["ret_12_1_approx"] == 10.0, \
+            "跳近月动量=closes[-22]/closes[-127] 与 /closes[0]（各仅一处抬升）"
+        assert mt["tsmom_250d"] == 0.0 and mt["ma150"] == 100.17 \
+            and mt["ma200"] == 100.128, "全窗动量与长均线（15025.55/150、20025.55/200）"
+        assert mt["max_ret_20d"] == 10.55, "近 20 日最大单日涨幅"
+        assert mt["mdd_250"] == -9.54 and mt["cur_dd"] == -9.54, \
+            "回撤锚 110.55（100/110.55−1）"
+        assert mt["turnover_avg_20d"] == 2.0 and mt["turnover_abnormal"] == 1.852 \
+            and mt["turnover_pctile_250"] == 100.0, \
+            "异常换手=近 20 日均/全窗均（2 ÷ 1.08），分位 (<=cur)/n"
+        # 涨停计数按代码段阈值（主板 10 含 0.15pp 容差 / 创业板 20 不计 / HK 无）
+        assert mt["limit_up_count_20d"] == 1, "+10.55% 计、+5.0% 不计"
+        mt_mb = fx.derive_technical(mib, None, "cn", "300750")["mid_term"]
+        assert mt_mb["limit_up_count_20d"] == 0, "创业板 20%% 阈值下不计"
+        for no_lim in (fx.derive_technical(mib, None, "hk", "00700")["mid_term"],
+                       fx.derive_technical(mib)["mid_term"]):
+            assert "limit_up_count_20d" not in no_lim, "HK/未给市场不判涨停"
+        # 方差比方向：季度级趋势摆动（+0.5%/日×100 → −0.5%/日×100）VR>>1 ·
+        # 日频反持续（+1%,−1% 交替，63 日窗口互相抵消）VR<<1
+        def _vr_series(factors):
+            c, closes = 100.0, []
+            for f in factors:
+                c *= f
+                closes.append(round(c, 6))
+            bars_ = [{"date": "d%d" % i, "open": x, "high": x, "low": x,
+                      "close": x, "volume": 1} for i, x in enumerate(closes)]
+            return fx.derive_technical(bars_)["mid_term"]["vr_63d"]
+        assert _vr_series([1.005] * 100 + [0.995] * 100) > 1, "趋势摆动 VR>1"
+        assert _vr_series([1.01, 0.99] * 100) < 1, "均值回复型 VR<1"
+        # 短窗/缺换手：不足门槛的字段缺席（不虚构），60 根 fixture 即此形态
+        mt_short = fx.derive_technical(ib, None, "cn", "600519")["mid_term"]
+        for k in ("ret_6_1", "ma150", "ma200", "turnover_abnormal", "vr_63d"):
+            assert k not in mt_short, "60 根无 %s（数据不足即缺席）" % k
+        # realized_vol SSOT：lens 与 fetch 同一实现（防双实现漂移）
+        import lens as _lens_mod
+        assert _lens_mod.realized_vol.__module__ == "fetch", \
+            "realized_vol SSOT 在 fetch.py，lens 只留同名导出"
+        assert fx.realized_vol([10.0] * 100, 60) == 0.0 \
+            and fx.realized_vol([10.0, 10.5], 60) is None, \
+            "共享实现保持 lens 原 selftest 语义（零收益 0.0 / 短窗 None）"
+        ev_mt = json.loads(json.dumps(evidence))
+        ev_mt["blocks"]["daily_bars"]["bars"] = mib
+        ev_mt["blocks"]["technical"] = {
+            "state": "available", **fx.derive_technical(mib, None, "cn", "600519")}
+        mt_txt = open(render_context_pack(ev_mt, td), encoding="utf-8").read()
+        assert "mid_term（1–6 个月中线因子" in mt_txt \
+            and "turnover_abnormal=1.852" in mt_txt \
+            and "ret_6_1=10.0" in mt_txt and "None" not in mt_txt, \
+            "pack 须渲染 mid_term 三行且缺项不落 None 字面量"
+        ev_mf20 = json.loads(json.dumps(evidence))
+        ev_mf20["blocks"]["moneyflow"]["summary"] = {
+            "main_net_yi": 0.5, "main_net_20d_yi": 3.2, "main_net_60d_yi": None,
+            "main_streak_days": 2, "streak_direction": "inflow"}
+        assert "20日 3.2 · 60日 —" in open(
+            render_context_pack(ev_mf20, td), encoding="utf-8").read(), \
+            "资金流 20/60 日累计渲染（缺省打「—」）"
+        ev_hk_mf = json.loads(json.dumps(evidence))
+        ev_hk_mf["blocks"]["moneyflow"] = {
+            "state": "available", "source": "dc-hsgt",
+            "summary": {"hold_date": "2026-10-29", "hold_pct": 19.44,
+                        "hold_pct_chg_20d": 1.23, "currency": "HKD"},
+            "note": "南向 T-1 披露口径"}
+        assert "持股比变化（百分点，中线口径）：20 日 1.23 · 60 日 —" in open(
+            render_context_pack(ev_hk_mf, td), encoding="utf-8").read(), \
+            "港股南向持股比 20/60 日变化渲染（缺省打「—」）"
+        print("  ok mid_term 中线派生：跳月动量/回撤/长均线/涨停分段/异常换手手算钉 · VR 方向 · 缺项不虚构 · realized_vol SSOT · pack 渲染")
         ev_i = json.loads(json.dumps(evidence))
         ev_i["meta"]["session"] = ss_in
         ev_i["blocks"]["quote"] = {"state": "available", "price": 9.7}

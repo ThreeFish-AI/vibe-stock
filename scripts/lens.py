@@ -35,6 +35,9 @@ import math
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fetch as _fetch  # noqa: E402  仅为共享 realized_vol（SSOT 在 fetch.py）
+
 HORIZON_DAYS = 252  # 年化基数（A 股；港股实际 ~247，口径注记而非换算）
 
 
@@ -84,29 +87,11 @@ def band_percentile(value, quants):
     return None, ""
 
 
-def realized_vol(closes, window):
-    """年化已实现波动率：近 window 日 ln 收益 std × √252。
-    条件：有效收益 ≥ window/2 且 ≥10（不足返回 None，不虚构 0.0）；
-    坑位：①序列短于 window 时不得自配对（旧实现 zip 两切片重叠、ln(c/c)=0
-    恒零收益骗过门槛、虚构 σ=0.0 入报告）；②收盘为 None/0/负的坏点断链——
-    只与相邻有效收盘配对，不跨坏点拼收益；③末根未完成 K 线的收盘为盘中价
-    （session 口径在 evidence.meta，透镜不擅自修值，波动率量级影响可忽略）。"""
-    rets = []
-    prev = None
-    for x in closes or []:
-        v = _f(x)
-        if v is None or v <= 0:
-            prev = None  # 坏点断链
-            continue
-        if prev is not None:
-            rets.append(math.log(v / prev))
-        prev = v
-    rets = rets[-window:]
-    if len(rets) < max(10, window // 2):
-        return None
-    mean = sum(rets) / len(rets)
-    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
-    return round(math.sqrt(var) * math.sqrt(HORIZON_DAYS), 4)
+# realized_vol 的实现已迁 fetch.py（mid_term.rv60/rv120 与透镜 σ 共享同一
+# SSOT，防双实现漂移）；此处保留同名导出，调用方（diagnose 懒加载、selftest）
+# 零改动。坑位：末根未完成 K 线的收盘为盘中价（session 口径在
+# evidence.meta，透镜不擅自修值，波动率量级影响可忽略）。
+realized_vol = _fetch.realized_vol
 
 
 def touch_probability(price, ref, sigma, horizon_years=1.0):

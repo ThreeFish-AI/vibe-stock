@@ -31,6 +31,7 @@
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import re
 import statistics
@@ -327,16 +328,27 @@ def _daily_via_akshare(market, code):
     df = (ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
           if market == "cn" else
           ak.stock_hk_hist(symbol=code.zfill(5), period="daily", adjust="qfq"))
+    # 换手率列仅 em 系源提供（qq-tx/yf 回退链无此列，mid_term 换手键缺席
+    # 如实为 None，禁止跨源硬凑——references/08 换手口径句）；"--" 占位/NaN
+    # 归 None，坏点不得让整链崩到回退源
+    def _tor(v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return f if f == f else None
     return [{"date": str(r["日期"]), "open": float(r["开盘"]), "high": float(r["最高"]),
              "low": float(r["最低"]), "close": float(r["收盘"]),
-             "volume": float(r["成交量"])} for _, r in df.tail(BARS_WINDOW).iterrows()]
+             "volume": float(r["成交量"]),
+             **({"turnover": t} if (t := _tor(r["换手率"])) is not None else {})}
+            for _, r in df.tail(BARS_WINDOW).iterrows()]
 
 
 def _daily_via_efinance(market, code):
     import efinance as ef
     df = ef.stock.get_quote_history(code)
     key = {"日期": "date", "开盘": "open", "最高": "high", "最低": "low",
-           "收盘": "close", "成交量": "volume"}
+           "收盘": "close", "成交量": "volume", "换手率": "turnover"}
     rows = []
     for _, r in df.tail(BARS_WINDOW).iterrows():
         row = {}
@@ -501,7 +513,114 @@ def _bar_pattern(bar):
             "upper_shadow_pct": round((hi - max(o, c)) / span * 100, 1)}
 
 
-def derive_technical(bars, session=None):
+def realized_vol(closes, window, ann_factor=252):
+    """年化已实现波动率（lens 透镜同款实现，SSOT 在本层）：近 window 日
+    ln 收益 std × √ann_factor。条件：有效收益 ≥ window/2 且 ≥10（不足返回
+    None，不虚构 0.0）；坑位：①序列短于 window 时不得自配对（zip 两切片
+    重叠会造出 ln(c/c)=0 恒零收益骗过门槛、虚构 σ=0.0 入报告）；②收盘为
+    None/0/负的坏点断链——只与相邻有效收盘配对，不跨坏点拼收益。"""
+    rets = []
+    prev = None
+    for x in closes or []:
+        v = _fnum(x)
+        if v is None or v <= 0:
+            prev = None  # 坏点断链
+            continue
+        if prev is not None:
+            rets.append(math.log(v / prev))
+        prev = v
+    rets = rets[-window:]
+    if len(rets) < max(10, window // 2):
+        return None
+    mean = sum(rets) / len(rets)
+    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+    return round(var ** 0.5 * ann_factor ** 0.5, 4)
+
+
+def _limit_up_pct(market, code):
+    """A 股按代码段涨停阈值（%）：主板 10、创业板/科创板 20、北交所 30。
+    条件：market=cn 且 code 形态可判；做法：前缀分段查表；坑位：ST 5% 特例
+    依赖证券简称（quote.name，本函数不可见）——由 references/08 交 LLM 按
+    名称收严判读，勿据 10% 阈值漏计 ST 涨停。港股无涨跌停，返回 None。"""
+    if market != "cn" or not code:
+        return None
+    c = str(code)
+    if c.startswith(("300", "301", "688", "689")):
+        return 20.0
+    if c.startswith(("43", "83", "87", "92")):
+        return 30.0
+    return 10.0
+
+
+def _mid_term(bars, market=None, code=None):
+    """中线（1–6 个月口径）派生因子：纯标准库、由日 K（含可选换手列）推导，
+    语义与判据口径见 references/08-midterm.md。条件：字段各自独立判数据
+    足量，不足落 None（不虚构）；坑位：①BARS_WINDOW=250 只覆约 1 年——
+    ret_12_1_approx 为 ≈11 个月近似、tsmom_250d 窗口不足时为可用最大窗；
+    ②换手列仅 em 系链首提供（qq-tx/yf 回退时缺席）——turnover_* 三键为
+    None，禁止跨源硬凑；③vr_63d 用重叠窗口（自相关有偏，方向参考），
+    不作硬阈值结论。"""
+    closes = [b["close"] for b in bars
+              if isinstance(b.get("close"), (int, float)) and b["close"] > 0]
+    n = len(closes)
+    mt = {}
+    if n >= 127:  # 跳近月（≈21 交易日）的 6 个月动量
+        mt["ret_6_1"] = round((closes[-22] / closes[-127] - 1) * 100, 2)
+    if n >= 22:   # 12-1 动量的 ≈11 个月近似（250 根窗物理上限，08 注记）
+        mt["ret_12_1_approx"] = round((closes[-22] / closes[0] - 1) * 100, 2)
+    if n >= 2:    # 全窗时序动量（窗口不足 250 时为可用最大窗）
+        mt["tsmom_250d"] = round((closes[-1] / closes[0] - 1) * 100, 2)
+    mt["rv60"] = realized_vol(closes, 60)
+    mt["rv120"] = realized_vol(closes, 120)
+    rets20 = [(closes[i] / closes[i - 1] - 1) * 100
+              for i in range(max(1, n - 20), n)]
+    if rets20:
+        mt["max_ret_20d"] = round(max(rets20), 2)  # MAX/彩票效应（08 只降不升）
+        lim = _limit_up_pct(market, code)
+        if lim is not None:
+            # 四舍五入容差 0.15pp：行情端涨幅按前收四舍五入两位披露
+            mt["limit_up_count_20d"] = sum(
+                1 for r in rets20 if r >= lim - 0.15)
+    if n >= 2:
+        run_peak, mdd = closes[0], 0.0
+        for c in closes:
+            run_peak = max(run_peak, c)
+            mdd = min(mdd, c / run_peak - 1)
+        mt["mdd_250"] = round(mdd * 100, 2)
+        mt["cur_dd"] = round((closes[-1] / run_peak - 1) * 100, 2)
+    for k, w in (("ma150", 150), ("ma200", 200)):  # Weinstein/Minervini 长均线
+        v = _ma(closes, w)
+        if v is not None:
+            mt[k] = v
+    if n >= 126:  # Lo–MacKinlay 方差比 VR(63)：重叠窗口，方向参考
+        q = 63
+        r1 = [closes[i] / closes[i - 1] - 1 for i in range(1, n)]
+        rq = [closes[i] / closes[i - q] - 1 for i in range(q, n)]
+
+        def _var(xs):
+            m = sum(xs) / len(xs)
+            return sum((x - m) ** 2 for x in xs) / (len(xs) - 1)
+        v1 = _var(r1)
+        if v1 > 0:
+            mt["vr_63d"] = round(_var(rq) / (q * v1), 3)  # <1 偏均值回复、>1 偏趋势
+    tos = [b["turnover"] for b in bars
+           if isinstance(b.get("turnover"), (int, float)) and b["turnover"] > 0]
+    tos = tos[-BARS_WINDOW:]
+    if len(tos) >= 40:
+        avg20 = sum(tos[-20:]) / min(20, len(tos))
+        avg_all = sum(tos) / len(tos)
+        if avg_all > 0:
+            mt["turnover_avg_20d"] = round(avg20, 3)
+            # 异常换手比（A 股最强情绪信号之一，LSY PMO 口径的个股版；08 只降不升）
+            mt["turnover_abnormal"] = round(avg20 / avg_all, 3)
+            rolls = [sum(tos[i:i + 20]) / 20 for i in range(len(tos) - 19)]
+            if len(rolls) >= 20:  # 分位公式 (<=cur)/n，与 pe_quantiles 同口径
+                mt["turnover_pctile_250"] = round(
+                    100 * sum(1 for x in rolls if x <= avg20) / len(rolls), 1)
+    return mt
+
+
+def derive_technical(bars, session=None, market=None, code=None):
     closes = [b["close"] for b in bars]
     vols = [b["volume"] for b in bars]
     hi52 = max(b["high"] for b in bars)
@@ -539,6 +658,7 @@ def derive_technical(bars, session=None):
         "consecutive_up_days": up_days,
         "box_60d": box, "vol_series_10": vol_series,
         "last_bar_pattern": _bar_pattern(bars[-1]),
+        "mid_term": _mid_term(bars, market, code),
     }
     # 末根未完成（session_phase 判定）：原 vol_ratio_5 如实保留，另出按交易分钟
     # 线性外推的量比（estimated；elapsed=0 不出）
@@ -960,14 +1080,14 @@ def _ext_fail(name, e):
 def fetch_moneyflow_hk(code, st, now):
     """扩展块·资金流（港股）：南向（港股通）持股是港股唯一日更的个股级公开
     资金面信号（港股无 A 股四档资金流数据）。RPT_MUTUAL_STOCK_HOLDRANKS 直连
-    pageSize=10 取最新一日（akshare 封装会翻完全部 ~472 页历史，禁用）。
+    pageSize=65 取最新约 3 个月（akshare 封装会翻完全部 ~472 页历史，禁用）。
     口径（无条件全局规则：披露制度≠数据陈旧）：南向持股为 T-1 披露（收盘后
     傍晚更新），最新日=available+note 注明披露日；仅披露日距今超过
     STALE_DAYS["moneyflow"]（10 自然日，停牌/断更形态）才标 stale——勿把制度性
     T-1 当陈旧降级。坑位：HOLD_SHARES_RATIO 是占总股本比（H 股公司口径），
     TOTAL_SHARES_RATIO 字段语义不明勿消费。"""
     rows = _dc_rows("RPT_MUTUAL_STOCK_HOLDRANKS", code, st, now, "dc-hsgt",
-                    page_size=10,
+                    page_size=65,  # 60 日变化需第 61 行锚点，留停牌缺行余量
                     sort='&sortColumns=TRADE_DATE&sortTypes=-1',
                     filter_str='(SECUCODE="%s.HK")(MUTUAL_TYPE="002")' % hk5(code))
     if not rows:
@@ -993,6 +1113,12 @@ def fetch_moneyflow_hk(code, st, now):
                "net_mv_chg_10d_hkd": r.get("HOLD_MARKETCAP_CHG10"),
                "close_price": r.get("CLOSE_PRICE"),
                "currency": "HKD"}
+    # 中线口径：持股比 20/60 日变化（百分点）——同端点单页 60 行零增请求；
+    # 行数不足或比值为 "--" 占位时如实缺省，不虚构（references/08 资金面句）
+    hp = [_fnum(x.get("HOLD_SHARES_RATIO")) for x in rows]
+    for w in (20, 60):
+        if len(hp) >= w + 1 and hp[0] is not None and hp[w] is not None:
+            summary["hold_pct_chg_%dd" % w] = round(hp[0] - hp[w], 3)
     return {"state": state, "source": "dc-hsgt", "summary": summary, "note": note}
 
 
@@ -1075,6 +1201,12 @@ def fetch_moneyflow(market, code, st, now):
                    "main_net_3d_yi": round(sum(nets[:3]), 4),
                    "main_net_5d_yi": round(sum(nets[:5]), 4),
                    "main_net_10d_yi": round(sum(nets[:10]), 4),
+                   # 中线口径（1/3 个月累计，序列 60 日封顶——不足 60 日如实
+                   # 缺省 None，不按可用窗外推；references/08 资金面句）
+                   "main_net_20d_yi": (round(sum(nets[:20]), 4)
+                                       if len(nets) >= 20 else None),
+                   "main_net_60d_yi": (round(sum(nets[:60]), 4)
+                                       if len(nets) >= 60 else None),
                    "main_streak_days": streak,
                    "streak_direction": ("inflow" if nets[0] > 0 else "outflow")}
         return {"state": "available", "source": "sina-flow", "days": days,
@@ -1982,7 +2114,7 @@ def fetch(symbol, snapshot_dir=None):
             blocks["technical"] = {"state": ("available" if bars_state == "available"
                                              else bars_state),
                                    "source": "derived",
-                                   **derive_technical(bars, session)}
+                                   **derive_technical(bars, session, market, code)}
         else:
             blocks["quote"] = {"state": "missing", "source": "",
                                "note": "日 K 缺失，报价无从而来"}
@@ -2014,9 +2146,12 @@ def fetch(symbol, snapshot_dir=None):
         for name in ("technical",):
             if blocks.get(name, {}).get("state") in (None, "missing"):
                 blocks[name] = {"state": bars_state, "source": "derived",
-                                **derive_technical(bars, meta.get("session"))}
+                                **derive_technical(bars, meta.get("session"),
+                                                   meta.get("market"),
+                                                   meta.get("code"))}
             else:
-                derived = derive_technical(bars, meta.get("session"))
+                derived = derive_technical(bars, meta.get("session"),
+                                           meta.get("market"), meta.get("code"))
                 merged = {**blocks.get(name, {}), **derived}
                 # session 门控键门关即不留旧值：快照残留的外推量比不得孤儿穿透
                 if "vol_ratio_5_projected" not in derived:
