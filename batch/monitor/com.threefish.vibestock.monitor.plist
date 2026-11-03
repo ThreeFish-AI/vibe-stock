@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- vibe-stock 盯盘 LaunchAgent 模板（P1；0.0.16 补拉槽，I-009）。安装步骤见
+<!-- vibe-stock 盯盘 LaunchAgent 模板（P1；补拉槽，I-009）。安装步骤见
      batch/monitor/README.md：
      1) 替换三类占位：__UV_PATH__ = `command -v uv` 的绝对路径（launchd 不继承
         shell PATH，默认只有 /usr/bin:/bin:/usr/sbin:/sbin）；__SK_PATH__ = 本仓

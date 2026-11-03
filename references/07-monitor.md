@@ -126,7 +126,7 @@
 
 - LaunchAgent 模板随仓交付（`batch/monitor/com.threefish.vibestock.monitor.plist`，
   安装命令见 [batch/monitor/README](../batch/monitor/README.md)）：
-  StartCalendarInterval 周一至周五 09:15 主槽拉起 `--loop`（0.0.16 起叠加
+  StartCalendarInterval 周一至周五 09:15 主槽拉起 `--loop`（叠加
   交易时段补拉槽与 16:15 盘后兜底槽，语义见下条，I-009）；`KeepAlive.Crashed`
   只认信号级崩溃（launchd.plist(5)），故 watch.py 把 `--loop` 的 Python 未捕获
   异常转为通知 + SIGABRT 才能自愈；正常收口 exit 0、重复实例 exit 3、P2 会话
@@ -135,7 +135,7 @@
   launchd 不继承 shell PATH（默认 /usr/bin:/bin:/usr/sbin:/sbin），模板用
   `__UV_PATH__` 绝对路径占位；launchd 不建日志父目录（安装命令先 mkdir，
   watch.py 入口亦自建）。
-- **补拉槽语义（0.0.16，I-009）**：条件——工作日 09:15 主槽之后系统重启/开机/
+- **补拉槽语义（I-009）**：条件——工作日 09:15 主槽之后系统重启/开机/
   重新登录/进程被非崩溃信号杀死时，launchd 对关机/重启期间错过的日历触发
   **不补发**（launchd.plist(5) 只承诺睡眠期间错过的触发在唤醒时合并补发一次），
   仅 09:15 单槽的旧模板当日不再拉起、直至手动 kickstart；做法——模板保留
