@@ -38,7 +38,8 @@ LEDGER_POSITION = os.path.join(STATE_DIR, "ledger.position.json")
 
 NEUTRAL_BAND = 0.02
 PROMOTE_RATE, DEMOTE_RATE, MIN_SAMPLES = 0.60, 0.40, 10
-SCORABLE = {"buy": "bull", "reduce": "bear", "sell": "bear"}
+SCORABLE = {"buy": "bull", "reduce": "bear", "sell": "bear",
+            "add_on": "bull"}  # add_on=加仓轨建议（09）：按 bull 记分进 ledger
 # position 轨唯一记分期限：T+60 与 T+20/T+120 收益强相关（约 0.58/0.71），
 # 多期限记分是伪重复样本——会使信号提前离开 <30 样本中性门、破坏 Beta(15,15)
 # 收缩；20/120 照落 evaluated 实判（hit/miss/neutral）供展示、不进台账
@@ -98,7 +99,7 @@ def evaluate_signals(signals, bars_by_code, cny_by_date=None):
     cny_by_date（--cny 时传入 fx.hkd_cny_daily 产物）：hk 信号的 evaluated 附
     cny_close / cny_chg_pct 展示字段（人民币口径收益，含汇兑项）——仅展示，
     outcome 判定与台账归因仍按标的币种收盘（默认口径不变）。"""
-    delta_map = {"default": {}, "position": {}}
+    delta_map = {"default": {}, "position": {}, "addon": {}}
     changed, notes = False, []
     fx_keys = sorted(cny_by_date) if cny_by_date else []
     for s in signals:
@@ -264,14 +265,15 @@ def run(args):
     _save(SIGNALS, signals)
     ledger = _load(LEDGER, {})
     wrote = []
-    for profile, path in (("default", LEDGER), ("position", LEDGER_POSITION)):
+    for profile, path in (("default", LEDGER), ("addon", LEDGER),
+                          ("position", LEDGER_POSITION)):
         delta = delta_map.get(profile) or {}
         if not delta:
             continue
         led = merge_ledger(_load(path, {}), delta)
         _save(path, led)
         wrote.append((path, led, delta))
-        if profile == "default":
+        if path == LEDGER:  # default 与 addon 同账本（09）：末次合并态作画像输入
             ledger = led
     if wrote:
         for path, led, delta in wrote:
@@ -322,9 +324,19 @@ def selftest():
     sig_watch = {**sig_buy, "id": "w1", "action": "watch", "family": "neutral",
                  "sources": ["role:技术"], "horizons": [1, 3, 5, 10],
                  "evaluated": {}}
-    delta_map, changed, notes = evaluate_signals([sig_buy, sig_watch],
+    # addon 轨（09）：action=add_on 按 bull 记分（建议也要被市场打分），
+    # 归因进 delta_map["addon"]（台账合并归 ledger.json，与 default 同账本）
+    sig_addon = {**sig_buy, "id": "a1", "profile": "addon", "action": "add_on",
+                 "key_levels": {"add_ref": 100.0, "confirm_lo": 97.0},
+                 "evaluated": {}}
+    delta_map, changed, notes = evaluate_signals([sig_buy, sig_watch, sig_addon],
                                                  {"000001": bars})
     delta = delta_map["default"]
+    assert sig_addon["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral"), \
+        "add_on 须按 bull 记分（SCORABLE），不得落 observed"
+    assert delta_map["addon"]["strategy:bull_trend"]["wins"] + \
+        delta_map["addon"]["strategy:bull_trend"]["losses"] >= 1, \
+        "addon 建议的胜负须进 addon 归因（同源 sources）"
     assert sig_buy["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral")
     assert sig_watch["evaluated"]["1"]["outcome"] == "observed", "watch 只观察"
     assert sig_buy["status"] in ("evaluated", "observed"), "全部 horizon 到期应收口"
@@ -349,7 +361,7 @@ def selftest():
                "status": "pending", "evaluated": {}, "close_at_signal": 100.0}
     pm, pchg, pnotes = evaluate_signals([dict(sig_pos)],
                                         {"000001": bars})
-    assert set(pm) == {"default", "position"} and not pm["default"], pm
+    assert set(pm) == {"default", "position", "addon"} and not pm["default"], pm
     # 30 根合成日 K：T+20 落 evaluated、T+60/120 未到期（不虚构）
     assert "20" in sig_pos["evaluated"] and "60" not in sig_pos["evaluated"]
     assert sig_pos["evaluated"]["20"].get("base") == 102.0

@@ -8,7 +8,8 @@ reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](0
 [06-batch-scan](06-batch-scan.md) 子技能（`batch/` 参考实现，命令序见
 [batch/README](../batch/README.md)）；在册股票盘中盯盘/收盘复核走
 [07-monitor](07-monitor.md) 盯盘子技能（`batch/monitor/` 参考实现）；
-中线（1–6 个月）因子口径与只降不升风险判据族见 [08-midterm](08-midterm.md)。
+中线（1–6 个月）因子口径与只降不升风险判据族见 [08-midterm](08-midterm.md)；
+持仓股加仓决策轨（三道门 + 三段确认制）见 [09-add-on](09-add-on.md)。
 
 ```text
 ① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；16 块=核心六块
@@ -69,6 +70,7 @@ uv run --no-project $T/scripts/adjudicate.py --selftest
 uv run --no-project $T/scripts/diagnose.py --selftest
 uv run --no-project $T/scripts/postmortem.py --selftest
 uv run --no-project $T/scripts/lens.py --selftest
+uv run --no-project $T/scripts/addon.py --selftest
 ```
 
 ## akshare 版本纪律

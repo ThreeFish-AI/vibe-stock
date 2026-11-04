@@ -25,8 +25,9 @@
 - `uv run --no-project scripts/diagnose.py --selftest`：端到端合成流水线全绿。
 - `uv run --no-project scripts/postmortem.py --selftest`：后验自校准回归全绿。
 - `uv run --no-project scripts/lens.py --selftest`：基本面锚纯函数回归全绿。
-- 任何 `scripts/` 改动，上述 scripts/ 四件全绿后才算完成（与 evals/README.md 口径一致，只收严）。
-- `uv run --no-project batch/monitor/rules.py --selftest` 与 `uv run --no-project batch/monitor/watch.py --selftest`：盯盘件离线回归（非阻塞第五条，不卡 scripts/ 提交；改 `batch/monitor/` 后必须全绿，判据只收严）。
+- `uv run --no-project scripts/addon.py --selftest`：加仓轨判据回归全绿（冻结族/触发族/三段状态机/破坏性实验）。
+- 任何 `scripts/` 改动，上述 scripts/ 五件全绿后才算完成（与 evals/README.md 口径一致，只收严）。
+- `uv run --no-project batch/monitor/rules.py --selftest` 与 `uv run --no-project batch/monitor/watch.py --selftest`：盯盘件离线回归（非阻塞第六条，不卡 scripts/ 提交；改 `batch/monitor/` 后必须全绿，判据只收严）。
 
 ## 目录速查
 
@@ -41,10 +42,11 @@
 | references/06-batch-scan.md | 批量子技能：指数成分精选与资金配置（编排层） |
 | references/07-monitor.md | 盯盘子技能：在册股票盘中监控与收盘复核（监控编排层） |
 | references/08-midterm.md | 中线（1–6 个月）规约：mid_term 因子口径与只降不升风险判据族 |
+| references/09-add-on.md | 持仓加仓决策轨：三道门（资格冻结/策略买点触发/三段确认制）与 addon 信号登记 |
 | references/PIPELINE.md | 五段流水线与命令速查 |
 | strategies/ | 策略 YAML 库 |
-| scripts/ | fetch / adjudicate / diagnose / postmortem / lens / archive（裁决 · 诊断 · 基本面锚透镜 · 报告归档与索引） |
-| batch/ | 批量子技能参考实现（口径以 references/06 为准；除 monitor/ 外不设 selftest 门禁——以 scripts/ 四件全绿 + 06 口径复核为准） |
+| scripts/ | fetch / adjudicate / diagnose / postmortem / lens / addon / archive（裁决 · 诊断 · 基本面锚透镜 · 加仓轨 · 报告归档与索引） |
+| batch/ | 批量子技能参考实现（口径以 references/06 为准；除 monitor/ 外不设 selftest 门禁——以 scripts/ 五件全绿 + 06 口径复核为准） |
 | batch/monitor/ | 盯盘参考实现 watch/rules（口径以 references/07 为准，自带 --selftest 非阻塞第五条门禁） |
 | evals/ | 合成 Fixture 与黄金样本 |
 | docs/.agents/ | [Issue 记录](docs/.agents/issue.md) 与 [知识索引](docs/.agents/knowledge-map.md) |

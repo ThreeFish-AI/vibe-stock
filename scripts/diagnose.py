@@ -20,6 +20,7 @@
 """
 import argparse
 import datetime as dt
+import glob
 import json
 import os
 import math
@@ -30,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import archive as ar  # noqa: E402
 import fetch as fx  # noqa: E402
 import adjudicate as aj  # noqa: E402
+import addon as ad  # noqa: E402
 
 STATE_DIR = os.path.expanduser("~/.vibe-stock")
 SIGNALS = os.path.join(STATE_DIR, "signals.json")
@@ -655,7 +657,7 @@ def _price_kind(evidence):
 
 def register_signal(evidence, verdict, opinions, report_id, report_path,
                     report_version=None, now=None, profile="default",
-                    horizons=None):
+                    horizons=None, action_override=None, extra_levels=None):
     """信号登记（双轨）：profile=default 短线 / position 中线——horizons 缺省
     取 archive.HORIZONS_OF[profile]（期限轨 SSOT）。返回 (action, invalidated,
     superseded)。条件：同股同 profile 同 report_id 的旧 pending 信号标
@@ -677,7 +679,7 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
         except SystemExit:
             pass
     final = verdict["risk_guard"]["final"]
-    action = ACTION_OF[final]
+    action = action_override or ACTION_OF[final]
     conf = verdict["aggregate"]["confidence"]
     if action == "buy" and not verdict.get("executable"):
         action, note = "watch", "置信低于 0.5，按观察登记（置信门）"
@@ -685,7 +687,8 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
         note = ""
     signals = ar.load_signals(SIGNALS)  # 严格加载：损坏即抛错，不覆盖历史
     families = {"buy": "bull", "strong_buy": "bull", "watch": "neutral",
-                "hold": "neutral", "reduce": "bear", "sell": "bear", "avoid": "bear"}
+                "hold": "neutral", "reduce": "bear", "sell": "bear",
+                "avoid": "bear", "add_on": "bull"}
     fam = families[action]
     invalidated = 0
 
@@ -761,7 +764,7 @@ def register_signal(evidence, verdict, opinions, report_id, report_path,
     if quote.get("name"):  # 名称列数据源（索引侧消费）；取数失败如实缺省不落 null
         sig["stock_name"] = quote["name"]
     if kl:  # 关键价位三价（总览价位列数据源，06 三价纪律）；price 缺失不落
-        sig["key_levels"] = kl
+        sig["key_levels"] = {**kl, **(extra_levels or {})}
     if evidence["meta"].get("snapshot"):
         # 快照登记标记（稀疏键，实盘信号不落）：市场推导后身份是 (cn/hk, 归一码)，
         # 索引侧据此排除——报告仍在 _snapshot/，不得进实盘 index/总览
@@ -974,7 +977,7 @@ def _report_lens_section(lens):
 
 
 def render_report(evidence, verdict, opinions, stock, risk=None, lens=None,
-                  position=None):
+                  position=None, addon=None):
     risk = risk if isinstance(risk, dict) else {}
     q = evidence["quality"]
     agg = verdict["aggregate"]
@@ -1090,12 +1093,43 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None,
     final = rg["final"]
     if final in ("buy", "strong_buy"):
         L.append("- 空仓者：等待回踩参考买点，不追高。")
-        L.append("- 持仓者：可持有或逢高减仓，跌破止损位离场。")
     elif final in ("sell", "strong_sell"):
-        L.append("- 空仓者：不参与。持仓者：减仓或离场。")
+        L.append("- 空仓者：不参与。")
     else:
-        L.append("- 空仓者：观望，等待方向明确。持仓者：控制仓位，按止损纪律执行。")
+        L.append("- 空仓者：观望，等待方向明确。")
+    # 持仓者分支五档（04 §6）：信号档为基础，addon 轨（09）只在其上给「加仓」
+    # 与「等回踩」两档加法建议——冻结/冷却时维持信号档并附冻结原因
+    hold_line = None
+    if final in ("buy", "strong_buy"):
+        hold_line = "可持有或逢高减仓，跌破止损位离场。"
+    elif final in ("sell", "strong_sell"):
+        hold_line = "减仓或离场。"
+    else:
+        hold_line = "控制仓位，按止损纪律执行。"
+    if addon and addon.get("advice") == "first_add":
+        L.append("- 持仓者：**可加仓**（%s）——%s"
+                 % ("顺势轨" if addon["track"] == "trend" else "逆势窄门",
+                    addon["rationale"]))
+    elif addon and addon.get("advice") == "wait_pullback":
+        L.append("- 持仓者：%s 加仓：%s" % (hold_line.rstrip("。"), addon["rationale"]))
+    else:
+        L.append("- 持仓者：%s" % hold_line)
+        if addon and addon.get("advice") == "frozen":
+            L.append("  - 加仓资格冻结（09）：%s" % "；".join(addon["frozen_reasons"]))
+        elif addon and addon.get("advice") in ("confirm_add", "abort", "hold"):
+            L.append("  - 加仓轨：%s" % addon["rationale"])
     L.append("")
+    if addon and addon.get("held"):  # 加仓评估节（09）：三道门逐项可溯源
+        L.append("### 加仓评估（addon）")
+        gd = addon.get("gate_detail") or {}
+        if gd:
+            detail = " · ".join("%s=%s" % (k, v) for k, v in sorted(gd.items()))
+            L.append("- 门1 资格：%s" % detail)
+        L.append("- 阶段/建议：stage=%s · advice=%s%s" % (
+            addon.get("stage"), addon.get("advice"),
+            " · track=%s" % addon["track"] if addon.get("track") != "none" else ""))
+        L.append("- %s" % addon.get("rationale") or "")
+        L.append("")
     L.append("## 检查清单")
     checks = [
         ("核心证据齐备（报价/日K/指标）", q["confidence_cap"] == "high"),
@@ -1181,9 +1215,28 @@ def cmd_report(args, now=None):
                   "未写报告" % (pverdict.get("stock_code"), code))
             return 2
         position = (pverdict, popinions)
+    # 加仓轨（09）：持仓股才有意义——portfolio SSOT 归一取本票持仓，执行事实
+    # 从 operations 流水推导（三段确认制状态机）；建议为 first_add 才登记
+    # addon 信号（profile=addon，进 T+1/3/5/10 后验按 bull 记分，05/09）
+    pf_warn = []
+    portfolio = ar.load_portfolio(STATE_DIR, pf_warn)
+    holding = (portfolio or {}).get("%s.%s" % (code, market))
+    sig_all = ar.load_signals(SIGNALS)
+    stock_sigs = [s for s in sig_all
+                  if str(s.get("code", "")).zfill(5) == code.zfill(5)
+                  and s.get("market") == market]
+    addon_eval = None
+    if holding:
+        try:
+            addon_eval = ad.evaluate_addon(
+                code, market, holding, verdict, pverdict, risk, evidence, lens,
+                stock_sigs, ad.load_operations(STATE_DIR), now.date())
+        except (KeyError, TypeError, ValueError) as e:  # 判据异常不拦报告主链
+            print("warn: 加仓轨评估失败（%s：%s），报告按无 addon 节渲染" % (
+                type(e).__name__, e))
     sections, footer = ar.split_report(
         render_report(evidence, verdict, opinions, args.stock, risk=risk,
-                      lens=lens, position=position))
+                      lens=lens, position=position, addon=addon_eval))
     path = os.path.join(sdir, date + ".md")
     try:
         version = ar.append_version(path, ar.day_title(os.path.basename(sdir), date),
@@ -1200,16 +1253,26 @@ def cmd_report(args, now=None):
             report_version=version, now=now, profile="position")
         print("signal(position): action=%s（对立失效 %d · 同日旧版 superseded "
               "%d）" % (paction, pinv, psup))
+    if addon_eval and addon_eval.get("advice") == "first_add":
+        # addon 登记（09）：仅首加建议登记（confirm/abort 为同段在途复核，
+        # 不重复采样）；key_levels 附 add_ref/confirm_lo 供状态机与后验消费
+        aaction, ainv, asup = register_signal(
+            evidence, verdict, opinions, "%s-%s" % (code, date), path,
+            report_version=version, now=now, profile="addon",
+            action_override="add_on",
+            extra_levels={"add_ref": addon_eval.get("add_ref"),
+                          "confirm_lo": addon_eval.get("confirm_lo")})
+        print("signal(addon): action=%s（对立失效 %d · 同日旧版 superseded %d）"
+              % (aaction, ainv, asup))
     quote_name = (evidence["blocks"].get("quote", {}) or {}).get("name")
     try:  # 显示名写穿（存量信号经 names.json 缓存显名）；失败只降级为不缓存
         names = (ar.update_names(STATE_DIR, market, code, quote_name)
                  if quote_name else ar.load_names(STATE_DIR))
     except (OSError, ValueError):
         names = ar.load_names(STATE_DIR)
-    pf_warn = []
     try:
         ar.rebuild_indexes(reports_dir, ar.load_signals(SIGNALS), names,
-                           ar.load_portfolio(STATE_DIR, pf_warn))
+                           portfolio)
     except (OSError, ValueError) as e:  # 索引是派生视图：挂了不回滚已写的报告与信号
         print("warn: 时间线索引重建失败（下次 report/postmortem 会重建）：%s" % e)
     for w in pf_warn:  # 持仓契约漂移可观测：只告警，不中断、不改降级渲染
@@ -3475,6 +3538,82 @@ def _selftest_archive(evidence, verdict, opinions):
                 assert "持仓数量" in root and ("| — | 12.50 |" in row if code == "000001"
                                               else "| — | — |" in row), row
             p = []
+            # T11e 加仓轨集成钉（09）：顺势首加（报告五档 + addon 登记 + 三价附
+            # add_ref）与资格冻结（卖族无 addon 信号、报告出冻结原因）两形态
+            ev_ad = json.loads(json.dumps(evidence))
+            ev_ad["meta"]["market"] = "cn"
+            ev_ad["blocks"]["quote"] = {"state": "available", "price": 9.8}
+            ev_ad["blocks"]["technical"] = {
+                "state": "available", "ma5": 10.5, "ma10": 10.0, "ma20": 9.5,
+                "rsi14": 55.0, "mid_term": {"tsmom_250d": 20.0}}
+            ev_ad["blocks"]["daily_bars"]["bars"] = [
+                {"date": "2026-10-%02d" % (7 + i), "close": c} for i, c in
+                enumerate([9.5] * 18 + [10.2, 10.0, 9.9, 9.8])]
+            for k, v in (("unlock", {"upcoming": []}),
+                         ("valuation", {"pe_percentile_5y": 40,
+                                        "pb_percentile_5y": 30}),
+                         ("research", {"consensus": {}}),
+                         ("fundamentals", {"归母净利润(亿元)": 5.0})):
+                ev_ad["blocks"][k] = {"state": "available", **v}
+            v_hold = {"stock_code": "000001",
+                      "risk_guard": {"initial": "hold", "final": "hold",
+                                     "final_before_cap": "hold", "log": []},
+                      "executable": False,
+                      "aggregate": {"final_signal": "hold", "confidence": 0.55,
+                                    "conflicts": [], "consensus_level": "high"},
+                      "disagreement": {"buckets": {"bullish": [], "bearish": [],
+                                                   "neutral": []},
+                                       "conflicts": []},
+                      "evidence_quality": {"score": 86, "tier": "good",
+                                           "confidence_cap": "high"},
+                      "diagnostics": [],
+                      "valid_opinions": [{"source": "strategy:bull_trend",
+                                          "signal": "buy", "confidence": 0.65,
+                                          "weight": 1.0}]}
+
+            def report_addon(verdict_obj, minute):
+                wd2 = os.path.join(td, "w%s" % minute)
+                for name, obj in (("evidence", ev_ad), ("verdict", verdict_obj),
+                                  ("opinions", [])):
+                    write(os.path.join(wd2, name + ".json"),
+                          json.dumps(obj, ensure_ascii=False))
+                write(pf, json.dumps({"version": 2, "operations": [], "holdings": [
+                    {"code": "000001", "market": "cn", "quantity": 600,
+                     "cost_price": 9.0, "currency": "CNY"}]},
+                    ensure_ascii=False))
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = cmd_report(ns(workdir=wd2, evidence=None, stock="000001"),
+                                    now=d1.replace(minute=minute))
+                assert rc == 0, buf.getvalue()
+                sigs_now = json.load(open(SIGNALS, encoding="utf-8"))
+                md_files = sorted(f for f in glob.glob(os.path.join(
+                    td, "reports", "000001.cn", "*.md"))
+                    if not f.endswith("index.md"))
+                return (buf.getvalue(), sigs_now,
+                        read(md_files[-1]) if md_files else "")
+
+            out, sigs_now, md = report_addon(v_hold, 40)
+            assert "signal(addon): action=add_on" in out, out
+            assert "**可加仓**（顺势轨）" in md and "### 加仓评估（addon）" in md, \
+                md[-800:]
+            sig_ad = [s for s in sigs_now if s.get("profile") == "addon"]
+            assert len(sig_ad) == 1 and sig_ad[0]["action"] == "add_on" \
+                and sig_ad[0]["horizons"] == [1, 3, 5, 10], sig_ad
+            assert sig_ad[0]["key_levels"].get("add_ref") == 10.0 \
+                and "confirm_lo" in sig_ad[0]["key_levels"], sig_ad[0]["key_levels"]
+            v_sell = dict(v_hold, aggregate={**v_hold["aggregate"],
+                                             "final_signal": "sell"},
+                          risk_guard={"initial": "hold", "final": "sell",
+                                      "final_before_cap": "sell",
+                                      "log": ["downgrade hold->sell"]})
+            out2, sigs_now2, md2 = report_addon(v_sell, 41)
+            assert "signal(addon)" not in out2, out2
+            assert not [s for s in sigs_now2 if s.get("profile") == "addon"
+                        and s["status"] == "pending" and s["id"] != sig_ad[0]["id"]]
+            assert "加仓资格冻结" in md2 and "短线终判 sell" in md2, md2[-800:]
+            print("  ok 加仓轨集成：顺势首加五档/登记/add_ref · 卖族冻结无登记")
+
             assert ar.load_portfolio(os.path.join(td, "无此目录"), p) == {} and p == [], \
                 "文件不存在：problems 不追加"
             with tempfile.TemporaryDirectory() as td3:

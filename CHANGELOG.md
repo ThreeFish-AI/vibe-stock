@@ -7,6 +7,48 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.18] - 2026-11-04
+
+### Added
+
+- 持仓股加仓决策轨（add-on track，[references/09-add-on.md](references/09-add-on.md)）：
+  在册持仓的日诊不再只有持有/卖出两态——report 段自动跑 `scripts/addon.py`
+  确定性加仓门，回答「该不该加、加多少、什么价位、加错怎么撤销」。
+  - **门 1 资格冻结/解冻**（只冻不升格，与 RiskGuard 只降不升对称）：短线/中线
+    卖族、风险角色 veto/downgrade、A-1~A-5 风险链确定性判据（临近解禁→08 ①-3、
+    估值极端分位→08 ②-4、EPS 90 日下修、两年翻倍警戒→08 ②-7 收严实现、
+    当期亏损）；缺证据口径：not_supported/字段未接入 skip 不冻结（A-3 接入后
+    收严为缺席即冻结、A-5 在 fetch 暴露多期后收严为连续 3 期——收严路径预留）。
+  - **门 2 触发**（策略买点在场）：顺势轨（多头排列 + bull_trend/shrink_pullback
+    买点 + 回踩在场 ≥3% 或 ≤ma10×1.02 + rsi<78 + 不超 ma20+10%）与逆势窄门
+    （quality_value 买点 + lens「有支撑」置信 ≥medium + 现价<ma20 + 零风险链）；
+    「摊薄成本/跌多了/回本」列为禁用理由。
+  - **门 3 三段确认制**：首加 1/2 批（顺势 ≤现仓 1/3、逆势 ≤1/6，100 股取整）
+    → T+3 确认窗（守住 add_ref×0.97 且不创新低确认加剩余，破线撤销）→ 同票
+    60 日 ≤2 次；包络：加仓后浮亏 ≥15% 禁再加（汇率红线内，跨币种权重线 P2）。
+    执行态从 portfolio.json operations + signals 推导，不新增状态文件。
+  - 报告持仓者分支扩**五档**（可加仓/持有·含等回踩变体/持有观察/减仓/离场）
+    +「### 加仓评估（addon）」节逐门可溯源；首加建议登记 addon 信号
+    （profile=addon、action=add_on、family=bull、T+1/3/5/10 ±2% 带按 bull 记分
+    进 ledger.json——加仓建议也要被市场打分；个股时间线索引收 addon 行，
+    总览最新/计数仍只算 default 轨）。
+  - 新增 `scripts/addon.py --selftest`（冻结族/缺证据 skip/触发族/手数取整/
+    三段状态机/包络/破坏性实验），纳入 scripts/ 提交前置（四件扩五件，
+    门禁只收严）；diagnose 增加仓轨集成钉、postmortem 增 add_on 记分钉。
+- 用户裁定记录：加仓哲学=顺势+逆势窄门；节奏=三段确认制（2026-11-04）。
+
+### Changed
+
+- **红线显式修订（minor 级语义面）**：[03]「透镜不进裁决」增显式例外——
+  lens「有支撑（置信 ≥medium）」可作 09 门 2 逆势窄门的资格输入（裁决链外
+  确定性资格门不属「裁决环节」），其余场景透镜输出仍不进任何判定。
+- `postmortem.py`：SCORABLE 增 `add_on→bull`；delta_map 增 addon 轨（台账
+  归 ledger.json 与 default 同账本）；`archive.HORIZONS_OF` 增 `addon:(1,3,5,10)`；
+  个股时间线索引表收 addon 行（default+addon 同表，T+1/3/5/10 同列）。
+- SKILL.md（description/version 0.0.18/判表加行）、PIPELINE.md（回归清单五件）、
+  README（能力节+文档指针）、AGENTS.md（目录表/测试节）、evals/README.md
+  同步指针，无第二事实源。
+
 ## [0.0.17] - 2026-11-03
 
 ### Fixed

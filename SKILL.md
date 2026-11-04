@@ -1,10 +1,10 @@
 ---
 name: vibe-stock
-description: 给一只 A 股或港股做全面诊股并产出专业决策报告的五段流水线：多源取证据（八态标注+回退链+熔断）、有界证据包（质量分+置信帽+不可信哨兵）、三角色+十五策略双轨出意见（十短线 default + 五中线 position）、十扩展情报块（资金流/公告/研报/预告/解禁/股东户数/大盘/行业/估值/汇率，零权重纯情报面）、确定性裁决（信号资格分选、分歧显式化、RiskGuard 只降不升）、决策报告与信号登记，并支持双轨后验自校准（短线 T+1/3/5/10 ±2% 带、中线 profile=position T+20/60/120 σ√h 带仅 T+60 记分，绩效因子按轨分台账；港股可附人民币口径展示）。Use when 用户说「诊断/诊股/分析一下 600519 / 看看hk00700 / 给我出这只票的报告 / 复盘上次建议对不对」等个股分析诉求——即使未点名 vibe-stock；多股批量扫描/指数成分精选/组合资金配置（如「对沪深300 成分股批量诊断、筛选 N 只配置资金」）走 references/06-batch-scan.md 批量子技能；在册股票盘中盯盘/本地告警/收盘复核走 references/07-monitor.md 盯盘子技能（仅本地事实告警，禁止第三方推送通道，不执行任何交易）。不用于回测引擎、自动交易。
+description: 给一只 A 股或港股做全面诊股并产出专业决策报告的五段流水线：多源取证据（八态标注+回退链+熔断）、有界证据包（质量分+置信帽+不可信哨兵）、三角色+十五策略双轨出意见（十短线 default + 五中线 position）、十扩展情报块（资金流/公告/研报/预告/解禁/股东户数/大盘/行业/估值/汇率，零权重纯情报面）、确定性裁决（信号资格分选、分歧显式化、RiskGuard 只降不升）、决策报告与信号登记，并支持双轨后验自校准（短线 T+1/3/5/10 ±2% 带、中线 profile=position T+20/60/120 σ√h 带仅 T+60 记分，绩效因子按轨分台账；港股可附人民币口径展示）；持仓股另有加仓决策轨（09：三道门资格冻结/策略买点触发/三段确认制手数，报告持仓者五档 + addon 信号进后验记分）。Use when 用户说「诊断/诊股/分析一下 600519 / 看看hk00700 / 给我出这只票的报告 / 复盘上次建议对不对 / 这只持仓该不该加仓」等个股分析诉求——即使未点名 vibe-stock；多股批量扫描/指数成分精选/组合资金配置（如「对沪深300 成分股批量诊断、筛选 N 只配置资金」）走 references/06-batch-scan.md 批量子技能；在册股票盘中盯盘/本地告警/收盘复核走 references/07-monitor.md 盯盘子技能（仅本地事实告警，禁止第三方推送通道，不执行任何交易）。不用于回测引擎、自动交易。
 license: MIT
 compatibility: 联网模式需 uv 与 PyPI 可达（akshare/efinance/yfinance 经 uv run --with 临时依赖，绝不装全局）；快照模式零依赖零网络；宿主须能执行 Bash。
 metadata:
-  version: "0.0.17"
+  version: "0.0.18"
   author: "ThreeFish-AI"
   source: "机制蓝本 ZhuLinsen/daily_stock_analysis（MIT）+ negentropy 178 精读"
 allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
@@ -16,7 +16,8 @@ allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
 策略规约 [02](references/02-strategies.md)、裁决规约 [03](references/03-synthesis.md)、
 报告规约 [04](references/04-report.md)、后验规约 [05](references/05-postmortem.md)、
 批量子技能规约 [06](references/06-batch-scan.md)、中线规约
-[08](references/08-midterm.md)、命令速查
+[08](references/08-midterm.md)、加仓轨规约
+[09](references/09-add-on.md)、命令速查
 [PIPELINE.md](references/PIPELINE.md)；工具在 `scripts/`，批量参考实现在
 `batch/`，策略库在 `strategies/`。命令统一 `$T` = 本目录
 （`${CLAUDE_SKILL_DIR}`）。
@@ -35,6 +36,7 @@ allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
 | 查某票历史/时间线 | `~/.vibe-stock/reports/<code>.<market>/index.md`（[04] 落盘与跟踪） |
 | 改策略/加策略 | 只动 `strategies/*.yaml`（策略即数据），不碰代码 |
 | 中线视角（1–6 个月，默认双轨） | position 轨：五个中线策略出 opinions.position.json → 第二次 adjudicate → 报告「中线裁决」节 + T+20/60/120 后验；三族只降不升判据走风险角色 risk.json（[08](references/08-midterm.md)） |
+| 持仓股该不该加仓 | report 段自动跑 addon 门（`scripts/addon.py`，三道门+三段确认制），报告持仓者五档 + 「加仓评估」节；规约 [09](references/09-add-on.md) |
 | 本 Skill 自身缺陷 | 走 RSI 回路（[RSI.md](RSI.md)），不顺手改 |
 
 ## 工作流（诊一只票）

@@ -70,6 +70,17 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
   [docs/research/midterm-strategies.md](docs/research/midterm-strategies.md) 与
   [references/08-midterm.md](references/08-midterm.md)。
 
+## 持仓加仓决策轨（09）
+
+对 portfolio.json 在册持仓，report 段自动跑 `scripts/addon.py` 确定性加仓门：
+**三道门**（资格只冻不升格：短线/中线卖族、风险角色降档、A-1~A-5 风险链
+确定性判据 → 策略买点触发：顺势回踩主轨 + 逆势窄门「quality_value+基本面锚
+支撑+零风险链」→ 三段确认制手数：首加 1/2 批 → T+3 确认/撤销 → 60 日限频
+与浮亏包络）。报告持仓者分支五档（可加仓/持有/等回踩/减仓/离场）+「加仓
+评估」节逐门可溯源；首加建议登记 addon 信号（T+1/3/5/10 后验按 bull 记
+分——加仓建议也要被市场打分）。规约见
+[references/09-add-on.md](references/09-add-on.md)。
+
 ## 盘中盯盘（07 子技能）
 
 对在册股票（实盘持仓 + 模拟配置 + 观察票）做盘中价格面轮询：确定性规则锚定
@@ -82,11 +93,11 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 [references/07-monitor.md](references/07-monitor.md) 与
 [batch/monitor/](batch/monitor/)。
 
-文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（八篇规约 +
+文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（九篇规约 +
 PIPELINE）→ [batch/](batch/)（批量子技能参考实现）→
 [batch/monitor/](batch/monitor/)（盯盘参考实现）→ [strategies/](strategies/)
-（策略库）。回归：`scripts/*.py --selftest` 四件全绿（硬门禁）+
-`batch/monitor/*.py --selftest` 两件全绿（非阻塞第五条）。
+（策略库）。回归：`scripts/*.py --selftest` 五件全绿（硬门禁）+
+`batch/monitor/*.py --selftest` 两件全绿（非阻塞第六条）。
 
 ## 免责
 
