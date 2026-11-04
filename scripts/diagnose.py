@@ -1689,7 +1689,8 @@ def selftest():
         mg_blk = fx.fetch_margin("cn", "600519", st_m, t0)
         assert mg_blk["state"] == "fetch_failed", \
             "主源行数不足须走回退（旧代码 available·source=None 是缺陷）"
-        assert mg_blk.get("source") != "None", mg_blk
+        assert isinstance(mg_blk.get("source"), str) and mg_blk["source"], \
+            "fetch_failed 须带硬编码 source 串（不得渗透 None）：%s" % mg_blk
         assert st_m["breakers"].get("em_datacenter", {}).get("fails", 0) == 0, \
             "行数不足不得记簇假败（HTTP 实际成功）"
     finally:
