@@ -7,6 +7,23 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.20] - 2026-11-04
+
+### Added
+
+- 走势参考 P2 两件（[09](references/09-outlook.md) 分期表）：
+  ① day-summary 附件：close_pass 渲染「走势参考（上一张收盘卡 · <date>）」
+  指针节——由 close_pass 自身消费 outlook jsonl 重算（幂等；外挂追加会被
+  重渲冲掉的问题形态不存在）；全文指针 + 市场级摘要行 + 零权重尾注；当日
+  卡 17:35 才出、收盘复核只见 <today 卡（语义钉）；watch selftest 新增 5
+  checks（31→36：无目录不出节/有卡出节/市场级行/零权重尾注/当日卡不进
+  附件）。
+  ② launchd 17:35 独立槽模板 `batch/outlook/com.threefish.vibestock.outlook.plist`
+  （周一至五单槽每日批量、与 16:15 兜底槽错峰 80min、一次性命令无
+  KeepAlive 失败次日自愈、RunAtLoad=false、节假日误拉一次无害——无交易日
+  历取舍同 07 P4；plistlib 解析钉含 --daily 参数与五槽 17:35 形态）。
+- 版本依据：编排面与模板新增（脚本核心件零改动），按 0.0.x patch 升版。
+
 ## [0.0.19] - 2026-11-04
 
 ### Added

@@ -115,8 +115,8 @@
 | :--- | :--- | :--- |
 | v1（0.0.18） | 卡片三面 + prepare/pack/4c 注入 + 收盘批量与日表 + 市场级节 abstain 占位 | ✅ |
 | v2（0.0.19） | 市场级五块 + 指数日 K 链共享件一次全落（裁定 5）：fetch margin/index/turnover_pctile/erp/margin_accounts 块全套（簇 16→20：jin10/sina_idx/legulegu/csindex 新增）+ 01 表行与 backlog 状态 + 08 Phase 5 预留节指针化 + 07 P3 指数链就绪句 + 卡片市场级节出实数。源实测后用户 2026-11-04 补充裁定：① 新开户上游停更 → 改接两融账户参与度（margin_accounts，户口径）；② ERP → 月频（乐咕×10Y）立即可用 + 中证官网 P/E2 日频增量落盘 `erp_pe_daily.jsonl`，满 250 日接管 | ✅ |
-| P2 | day-summary 附件（须由 close_pass 渲染才幂等——外挂追加会被重渲冲掉；形态：次日渲染昨日参考节） | 预留 |
-| P2 | launchd 17:35 独立槽（与 16:15 兜底槽错峰 ≥80min；复制 monitor 模板形态、不触碰其 selftest 钉住的属性） | 预留 |
+| P2 | **day-summary 附件（0.0.20 已落地）**：close_pass 渲染「走势参考（上一张收盘卡 · <date>）」节——由 close_pass 自身消费 outlook jsonl 重算（幂等，外挂追加会被重渲冲掉的问题不存在）；当日卡 17:35 才出、收盘复核只见 <today 卡（语义钉）；无卡/无目录不出节 | ✅ |
+| P2 | **launchd 17:35 独立槽（0.0.20 已落地）**：模板 `batch/outlook/com.threefish.vibestock.outlook.plist`（周一至五 17:35 单槽每日批量；与 16:15 兜底槽错峰 80min；一次性命令无 KeepAlive、失败次日自愈；节假日误拉一次无害——无交易日历取舍同 07 P4；RunAtLoad=false 不投机拉起）。安装三步见模板注释（占位替换/建日志目录/bootstrap） | ✅ |
 | P3 | RiskGuard/机械降档接入评审（裁定 4 预留；判据只收严方向） | 预留 |
 | P3 | 预测带自校准后验（预测带触及概率 vs 实际触及频率的校准曲线；独立于信号后验、不进 ledger） | 预留 |
 | 再评审 | bars 台账（按日持久化 OHLCV）：**已显式否决**——全部现行因子在 250 根在线窗内，台账引入 qfq 重基准/无锁双写/未完成 K 线三重新风险；出现 >250 根窗真实消费方再评审（01 backlog「长周期 theses 台账」条目同源） | 否决 |

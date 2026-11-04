@@ -648,6 +648,53 @@ def coverage_gaps(ticks, market, interval_s):
     return ts, gaps
 
 
+def _outlook_digest(state_dir, today):
+    """day-summary 附件：收盘复核时刻可得的最新一张收盘卡（<today，通常是
+    昨日——当日卡 17:35 批量才出）。零权重指针节：全文指 outlook/<date>.md
+    + 市场级摘要行；无卡/无目录不出节（幂等：close_pass 重渲由本函数重算，
+    不存在外挂追加被冲掉的问题——09 分期表 P2 形态）。"""
+    try:
+        import outlook as vol
+    except ImportError:
+        return []
+    d = vol.outlook_dir(state_dir)
+    if not os.path.isdir(d):
+        return []
+    days = sorted(f[:-6] for f in os.listdir(d)
+                  if f.endswith(".jsonl") and f[:-6] < today)
+    if not days:
+        return []
+    day = days[-1]
+    cards = vol.load_cards(state_dir, day)
+    if not cards:
+        return []
+    lines = ["## 走势参考（上一张收盘卡 · %s）" % day, ""]
+    lines.append("- 全文（21 只全集日表 + 预测带/经验计数）：~/.vibe-stock/"
+                 "outlook/%s.md" % day)
+    for c in cards:  # 市场维度共享：任取一张卡的市场级投影
+        mk = (c.get("emotion") or {}).get("market") or {}
+        if mk.get("state") != "estimated":
+            continue
+        mg = mk.get("margin") or {}
+        if mg:
+            lines.append("- 两融余额 %s 亿（%s，Δ5d %s%%，70 日分位 %s%%）"
+                         % (mg.get("balance_yi"), mg.get("as_of"),
+                            mg.get("chg_5d_pct"), mg.get("pctile_70d")))
+        tp = mk.get("turnover_pctile") or {}
+        if tp:
+            lines.append("- 全A换手分位 %s%%（%s）" % (tp.get("pctile"),
+                                                      tp.get("as_of")))
+        ep = mk.get("erp") or {}
+        if ep:
+            lines.append("- ERP %s%%（%s，5 年月频分位 %s%%）" % (
+                ep.get("erp_pct"), ep.get("as_of"),
+                ep.get("pctile_5y_monthly")))
+        break
+    lines.append("- 当日收盘卡由 17:35 批量产出（outlook_daily --daily）；零权重"
+                 "参考，非投资建议")
+    return lines + [""]
+
+
 def close_pass(state_dir, uni, st, cfg, no_notify, no_bars=False):
     """收盘复核：全局取数锁下重拉事件股 + 全部港股（抽检）日 K → 终判 →
     day-summary 派生重渲（幂等：events/ticks 台账是事实源，日报是派生视图）。
@@ -751,7 +798,9 @@ def close_pass(state_dir, uni, st, cfg, no_notify, no_bars=False):
         lines.append("- %s：止损线击穿确认（机械降档事实待全诊消费）" % code)
     if not unresolved:
         lines.append("- 无未处理机械降档事件")
-    lines += ["", "*%s*" % DISCLAIMER, ""]
+    lines += [""]
+    lines += _outlook_digest(state_dir, today)  # 09 P2：上一张收盘卡指针节
+    lines += ["*%s*" % DISCLAIMER, ""]
     os.makedirs(p["summary"], exist_ok=True)
     with open(os.path.join(p["summary"], today + ".md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -1045,6 +1094,25 @@ def selftest():
                          {"600001": [{"date": "2026-11-01", "close": 9.7}]},
                          uni_rows, today)
     check("末根非当日挂起", out[0]["verdicts"] == ["末根日 K 未出或非当日，次日补判"])
+
+    # 6b) 走势参考附件（09 P2）：close_pass 重渲消费上一张收盘卡（<today——
+    #     当日卡 17:35 批量才出）；无目录/当日卡不出节
+    check("附件-无目录不出节", _outlook_digest(tempfile.mkdtemp(), today) == [])
+    import outlook as _vol
+    _card = {"schema": "outlook/1", "state": "estimated", "market": "cn",
+             "code": "600001", "date": "2026-11-03", "price": 10.0,
+             "price_kind": "close",
+             "emotion": {"market": {"state": "estimated", "margin": {
+                 "balance_yi": 22988.6, "as_of": "2026-11-03",
+                 "chg_5d_pct": -4.6, "pctile_70d": 1.4}}}}
+    with tempfile.TemporaryDirectory() as td_ol:
+        _vol.persist_card(td_ol, _card, "2026-11-03T18:00:00+08:00")
+        dig = _outlook_digest(td_ol, "2026-11-04")
+        check("附件-有卡出节", any("上一张收盘卡 · 2026-11-03" in s for s in dig))
+        check("附件-市场级行", any("两融余额 22988.6" in s for s in dig))
+        check("附件-零权重尾注",
+              any("零权重" in s and "非投资建议" in s for s in dig))
+        check("附件-当日卡不进附件", _outlook_digest(td_ol, "2026-11-03") == [])
 
     # 7) launchd 模板回归钉（I-009：仅 09:15 单槽时重启/开机后当日盲窗——钉住
     #    补拉槽语义；模板与 selftest 同目录，plistlib 解析兼钉标准 XML 合法）
