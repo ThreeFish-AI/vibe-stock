@@ -655,16 +655,21 @@ def _mid_term(bars, market=None, code=None):
 
 
 def derive_technical(bars, session=None, market=None, code=None):
+    """日 K 纯标准库派生技术指标（MA/RSI/MACD/量比/52 周位置/20 日新高低/
+    量比序列/K 线形态/嵌套 mid_term）。箱体口径（I-012）：box_60d 取**不含
+    当日**的前 60 根高低点——含当日会让任何新低日 box.lo==当日最低，「触箱底」
+    成同义反复；pos_pct 按现价对该前窗口 hi/lo 计算且不截断（跌破前箱底为负、
+    突破上沿 >100，越界即信息）；前窗口不足 20 根不出。"""
     closes = [b["close"] for b in bars]
     vols = [b["volume"] for b in bars]
     hi52 = max(b["high"] for b in bars)
     lo52 = min(b["low"] for b in bars)
     prev19 = closes[-20:-1] if len(closes) >= 20 else closes[:-1]
-    # 60 日箱体（不足 20 根不出，pos_pct=现价在箱体区间位置 0~100）
+    # 60 日箱体：前窗口（不含当日）——当日新低不再是箱底本身；不足 20 根不出
     box = None
-    if len(bars) >= 20:
-        w = bars[-60:]
-        bhi, blo = max(b["high"] for b in w), min(b["low"] for b in w)
+    prev60 = bars[:-1][-60:]
+    if len(prev60) >= 20:
+        bhi, blo = max(b["high"] for b in prev60), min(b["low"] for b in prev60)
         if bhi > blo:
             box = {"hi": round(bhi, 3), "lo": round(blo, 3),
                    "width_pct": round((bhi / blo - 1) * 100, 2),
@@ -1138,7 +1143,11 @@ def fetch_moneyflow_hk(code, st, now):
     口径（无条件全局规则：披露制度≠数据陈旧）：南向持股为 T-1 披露（收盘后
     傍晚更新），最新日=available+note 注明披露日；仅披露日距今超过
     STALE_DAYS["moneyflow"]（10 自然日，停牌/断更形态）才标 stale——勿把制度性
-    T-1 当陈旧降级。坑位：HOLD_SHARES_RATIO 是占总股本比（H 股公司口径），
+    T-1 当陈旧降级。口径二（I-011）：HOLD_SHARES_CHANGE/ADD_MARKET_CAP 是披露
+    日 D 的持仓差、对应 D-2 日南向成交（港股 T+2 交收，港交所日成交 6 组样本
+    验证）——字段名 net_buy_shares_1d/net_buy_amount_1d_hkd 沿用（下游渲染在
+    用勿改名），summary.chg_trade_lag_note 与 note 写明，勿当当日净买入解读
+    「当日背离」。坑位：HOLD_SHARES_RATIO 是占总股本比（H 股公司口径），
     TOTAL_SHARES_RATIO 字段语义不明勿消费。"""
     rows = _dc_rows("RPT_MUTUAL_STOCK_HOLDRANKS", code, st, now, "dc-hsgt",
                     page_size=65,  # 60 日变化需第 61 行锚点，留停牌缺行余量
@@ -1155,7 +1164,8 @@ def fetch_moneyflow_hk(code, st, now):
     except ValueError:
         age = None
     state = "available"
-    note = "南向 T-1 披露口径（披露日 %s）" % hold_date
+    note = ("南向两层口径：披露 T-1（披露日 %s）；持股变动对应成交 D-2"
+            "（T+2 交收，非当日净买入）" % hold_date)
     if age is None or age > STALE_DAYS["moneyflow"]:
         state, note = "stale", ("南向持股止于 %s（距今 %s 天），不按最新事实采信"
                                 % (hold_date, "未知" if age is None else age))
@@ -1166,7 +1176,9 @@ def fetch_moneyflow_hk(code, st, now):
                "net_buy_amount_1d_hkd": r.get("ADD_MARKET_CAP"),
                "net_mv_chg_10d_hkd": r.get("HOLD_MARKETCAP_CHG10"),
                "close_price": r.get("CLOSE_PRICE"),
-               "currency": "HKD"}
+               "currency": "HKD",
+               "chg_trade_lag_note": "持股变动日 D 对应成交日 D-2"
+                                      "（T+2 交收），非当日净买入"}
     # 中线口径：持股比 20/60 日变化（百分点）——同端点单页 65 行零增请求
     summary.update(_hk_hold_chg(rows))
     return {"state": state, "source": "dc-hsgt", "summary": summary, "note": note}

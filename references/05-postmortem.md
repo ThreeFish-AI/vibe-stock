@@ -76,8 +76,10 @@
   取最新非空、回落缓存；坑位——名称是行情面数据，取数失败如实缺省 `—`，
   不做本地映射回退；缓存是可再生的派生文件，损坏自愈为空。
 - **价格口径**：盘中取数登记时 close_at_signal 是盘中价而非收盘价——
-  price_kind（intraday/close/unknown）如实标注，后验基准沿用登记价原样、
-  不回改（时段判定见 [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)）。
+  price_kind（intraday/close/unknown）如实标注；close_at_signal 仅作登记与
+  索引展示兜底，判定与展示基准=同复权信号日收盘（盘中登记的信号，基准即其
+  信号日收盘——与「复权基准」节同一口径，存量旧 entry 无 base 键时回落
+  登记价）（时段判定见 [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)）。
 - **市场推导**：适用条件——evidence.meta 无 market 字段（快照模式的真实路径：
   `fetch.py` 快照分支不判市场，meta 只有 symbol）；做法——经 `fetch.detect_market`
   从 meta 的 code/symbol 推导 (market, 归一 code) 成对落账（market 与 code 必须同源，
@@ -109,6 +111,12 @@
 - 回看各 horizon 实际收盘：买入族 ≥+band hit / ≤−band miss / 其间 neutral；
   卖出族对称；watch/hold 只观察不记分——band 见上文「期限轨」（default 恒
   ±2%、position=σ_d×√h）。
+- **到期收盘门（I-010）**（条件：到期 horizon 落在日 K 序列末根、末根日期==
+  当日（UTC+8）且该市场盘中——`fetch.session_phase` 的 `last_bar_partial`
+  判据，时钟可注入）；做法——视为未到期：不评估、保持 pending，待收盘后
+  下一次运行补评（周末/节假日自然收盘态、正常评估）；坑位——盘中价不是
+  收盘事实，误评即伪命中且已落盘 evaluated 不回改（守卫修复前的存量伪命中
+  是否回改需人工评审）。
 - 归因：hit/miss 计入信号登记时的每个 source 的台账——default 轨
   ledger.json、position 轨 ledger.position.json（分文件不串轨；position 仅
   T+60 记分）。

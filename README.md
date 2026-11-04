@@ -24,7 +24,8 @@
 
 财务（东财 HKF10→yfinance）、估值（具名列快照+百度 5 年分位+分位表）、研报
 共识（ETNet→yfinance 双源：逐券商目标价/EPS/评级、90 日 EPS 修正方向）、公告
-（东财 ann_type=H，盈警/回购分型）、南向持股（T-1 披露口径）均已接入免 key
+（东财 ann_type=H，盈警/回购分型）、南向持股（披露 T-1、持股变动对应成交
+D-2 口径）均已接入免 key
 公开源；chip/forecast/unlock/holder/industry 为港股能力边界（无对应披露形态），
 如实标 not_supported。
 

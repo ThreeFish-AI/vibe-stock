@@ -86,13 +86,16 @@ def render_ext_blocks(lines, b):
         s = mf["summary"]
         lines.append("")
         if "hold_date" in s:
-            # 港股：南向持股是唯一日更个股资金面信号（T-1 披露口径见 note）
+            # 港股：南向持股是唯一日更个股资金面信号。I-011：持股变动是披露日
+            # 持仓差、对应 D-2 南向成交（T+2 交收）——渲染不得写「当日净买入」，
+            # 否则下跌日会把两天前的买入读成当日背离（两层口径见 note）
             def _yi(v):  # HKD 元 → 亿（NaN 同归 —，契约对齐 _nd）
                 return "—" if v is None or v != v else round(v / 1e8, 2)
             lines.append("## 资金流·南向持股（%s，%s；%s）" % (
                 mf.get("state"), mf.get("source"), mf.get("note", "")))
-            lines.append("持股 %s 股（占总股本 %s%%）· 当日净增持 %s 股"
-                         "（净买 %s 亿 HKD）· 10 日持股市值变化 %s 亿 HKD"
+            lines.append("持股 %s 股（占总股本 %s%%）· 持股日净增持 %s 股"
+                         "（对应 D-2 成交，净额 %s 亿 HKD）· "
+                         "10 日持股市值变化 %s 亿 HKD"
                          % (_nd(s.get("hold_shares")), _nd(s.get("hold_pct")),
                             _nd(s.get("net_buy_shares_1d")),
                             _yi(s.get("net_buy_amount_1d_hkd")),
@@ -412,8 +415,9 @@ def render_context_pack(evidence, workdir):
         for n in fx.EXT_BLOCKS))
     if evidence["meta"].get("market") == "hk":
         lines.append("- 港股口径：无业绩预告制度——无预告≠无雷（盈警走公告块"
-                     "「盈利警告」分型）；南向持股为 T-1 披露；财务报表币种与"
-                     "行情币种（HKD）可能不同（见 fundamentals 报表币种行）")
+                     "「盈利警告」分型）；南向持股披露 T-1、持股变动对应 D-2 "
+                     "成交（T+2 交收，非当日净买入）；财务报表币种与行情币种"
+                     "（HKD）可能不同（见 fundamentals 报表币种行）")
     lines.append("")
     quote = b.get("quote", {})
     if quote:
@@ -439,7 +443,10 @@ def render_context_pack(evidence, workdir):
         if tech.get("macd"):
             lines.append("macd: %s" % tech["macd"])
         if tech.get("box_60d"):
-            lines.append("box_60d: %s（hi/lo=箱体上下沿 width=宽度%% pos=现价位置%%）"
+            # I-012：箱体取不含当日的前 60 根——当日新低日 lo 不再等于当日
+            # 最低（「触箱底」才是真验证）；pos 不截断，越界（负/>100）即信息
+            lines.append("box_60d: %s（hi/lo=箱体上下沿·前窗口不含当日；"
+                         "width=宽度%% pos=现价位置%%不截断，越界即信息）"
                          % tech["box_60d"])
         if tech.get("vol_series_10"):
             lines.append("vol_series_10: %s（近 10 日逐日量比=当日量/前 5 日均量）"
@@ -779,11 +786,13 @@ def _mid_key_levels(price, bars, market):
     """中线波段带三键（profile=position）：band_lo/band_hi/trail_ref——报告
     「中线裁决」节与 position 信号 key_levels 的同一事实源。带宽
     g=max(2σ_d×√21, 3×往返成本)（σ_d=rv60 年化/√252，与 mid_term 同源实现；
-    成本常量 fetch.ROUNDTRIP_COST，口径 references/08 静态表）；
-    band_lo=max(lo60, price−g)、band_hi=min(hi60, price+g)、trail_ref=MA60。
-    三层下行门（箱体下沿−5% 总回撤/regime 失效/基本面证伪走 risk.json）在
-    报告文字化——本函数只出价位带，不是止损指令。price/bars 缺失返回 None
-    （无现价锚不落 key_levels，与 _key_levels 同口径）。"""
+    成本常量 fetch.ROUNDTRIP_COST，口径 references/08 静态表）。g 是收益率
+    （I-013：σ_d 1% 时 g≈9%）——band_lo=max(lo60, price×(1−g))、band_hi=
+    min(hi60, price×(1+g))、trail_ref=MA60，按 price×(1∓g) 取价差后钳制在
+    60 日高低点内；σ_d 大时 g≫箱宽、整带被 lo60/hi60 钳住属预期（成本下限
+    仅极低波动票生效）。三层下行门（箱体下沿−5% 总回撤/regime 失效/基本面
+    证伪走 risk.json）在报告文字化——本函数只出价位带，不是止损指令。
+    price/bars 缺失返回 None（无现价锚不落 key_levels，与 _key_levels 同口径）。"""
     closes = [b["close"] for b in bars[-60:]] or [price or 0]
     lo60, hi60 = min(closes), max(closes)
     if not price:
@@ -793,8 +802,10 @@ def _mid_key_levels(price, bars, market):
     g = max(2 * sigma_d * math.sqrt(21),
             3 * fx.ROUNDTRIP_COST.get(market, 0.0015))
     ma60 = round(sum(closes) / len(closes), 3) if len(closes) == 60 else None
-    kl = {"band_lo": _fmt_price(max(lo60, price - g)),
-          "band_hi": _fmt_price(min(hi60, price + g))}
+    # g 是收益率（I-013）：按 price×(1∓g) 取价差再与 60 日高低点钳制——
+    # 直接 price∓g 会把 ~9% 的带宽塌缩成不足 1 元的价差
+    kl = {"band_lo": _fmt_price(max(lo60, price * (1 - g))),
+          "band_hi": _fmt_price(min(hi60, price * (1 + g)))}
     if ma60 is not None:  # MA60 不足 60 根省键（缺项即缺席）——数值锚不落「—」哨兵
         kl["trail_ref"] = _fmt_price(ma60)
     return kl
@@ -1878,7 +1889,7 @@ def selftest():
         fx._dc_rows, fx._http_text = real_dc, real_http
     print("  ok dc 空结果=事实非失败 · 预告取最新/披露取最近未来 · 解禁升序")
     # -- 港股数据面（零网络）：CAPS 守卫钉 · HKF10 空表/形态 · etnet/yf 共识 ·
-    #    南向 T-1 口径 · A 股 eps_by_year 回收 --
+    #    南向两层口径（披露 T-1 / 成交 D-2，I-011）· A 股 eps_by_year 回收 --
     # CAPS 破坏性钉：未配源块守卫必须先于任何网络调用短路——只删守卫不换源
     # 会把 _dc_rows 的 9201 空结果伪造成 available·无研报（失败形态入册）
     hk_unsupported = [n for n in fx.ALL_BLOCKS
@@ -2164,7 +2175,8 @@ def selftest():
         sb = fx.fetch_moneyflow("hk", "01810", {"breakers": {}, "cooldowns": {}},
                                 t0)
         assert sb["state"] == "available" and \
-            sb["note"] == "南向 T-1 披露口径（披露日 %s）" % yesterday, sb
+            sb["note"] == ("南向两层口径：披露 T-1（披露日 %s）；持股变动对应"
+                           "成交 D-2（T+2 交收，非当日净买入）" % yesterday), sb
         assert sb["summary"]["hold_pct"] == 19.44 and \
             sb["summary"]["currency"] == "HKD", sb["summary"]
         _SB_ROWS[0]["TRADE_DATE"] = (dt.date.today()
@@ -2231,7 +2243,9 @@ def selftest():
                                            "net_buy_amount_1d_hkd": 542679646,
                                            "net_mv_chg_10d_hkd": -5814623552.76,
                                            "currency": "HKD"},
-                               "note": "南向 T-1 披露口径（披露日 2026-10-29）"},
+                               "note": "南向两层口径：披露 T-1（披露日 "
+                                       "2026-10-29）；持股变动对应成交 D-2"
+                                       "（T+2 交收，非当日净买入）"},
                  "research": {"state": "available", "source": "etnet+yf-analyst",
                               "reports": [
                                   {"date": "2026-05-27", "org": "中银国际",
@@ -2270,6 +2284,9 @@ def selftest():
         text = open(p, encoding="utf-8").read()
         assert "资金流·南向持股" in text and "19.44" in text and \
             "T-1" in text, "南向节须渲染持股占比与披露口径 note"
+        # I-011 渲染钉：持股变动按 D-2 成交口径措辞，旧「当日净增持/净买」必红
+        assert "持股日净增持 21020000 股（对应 D-2 成交，净额 5.43 亿 HKD）" \
+            in text and "当日净增持" not in text, text
         # rating_dist 分桶直出（港股形态），A 股四槽键缺位不得硬渲染「减持 0」
         assert "评级共识(近六月)：17 家 = 买入 12 / 增持 3 / 中性 2" in text
         assert "减持 0" not in text
@@ -2279,7 +2296,7 @@ def selftest():
         assert "报表币种：人民币" in text, "混币可见红线"
         assert "港股口径：无业绩预告制度" in text
         assert "None" not in text.replace("None匹配", ""), "pack 不落 None 字面量"
-    print("  ok 港股数据面：CAPS 守卫钉 · HKF10 形态/空表 · etnet+yf 共识与互验 · 南向 T-1 · eps_by_year 回收 · pack 渲染")
+    print("  ok 港股数据面：CAPS 守卫钉 · HKF10 形态/空表 · etnet+yf 共识与互验 · 南向两层口径（T-1/D-2）· eps_by_year 回收 · pack 渲染")
     # -- 基本面锚：lens 渲染钉（estimated 出节 · abstained 弃权行 · 无 cost 不出节） --
     import lens as lens_mod
     # 触及概率锚需要足量波动序列：换 200 根高波动合成 K（selftest 顶部 60 根
@@ -2394,7 +2411,18 @@ def selftest():
         # quote 键位修复 + 技术派生扩容 + 近 10 根 K OHLCV 渲染
         t = evidence["blocks"]["technical"]
         assert t["new_high_20d"] is True, "递增序列末根须判 20 日新高"
-        assert t["box_60d"] and t["box_60d"]["pos_pct"] >= 90, t["box_60d"]
+        # I-012 前窗口（不含当日）箱体钉——期望值独立手算：44 根递增 fixture
+        # 前窗=前 43 根，hi=10.5+43×0.1=14.8、lo=9.8+0.1=9.9，末根收 14.6 →
+        # pos=(14.6−9.9)/(14.8−9.9)=95.9（旧含当日口径 hi=14.9/pos=94.0，必红）
+        assert t["box_60d"] == {"hi": 14.8, "lo": 9.9, "width_pct": 49.49,
+                                "pos_pct": 95.9}, t["box_60d"]
+        # 越界即信息：末根收 15.5 突破前窗上沿 → pos=(15.5−9.9)/(14.9−9.9)=
+        # 112>100 不截断（含当日口径会把当日高点并进箱体算出 100，必红）
+        brk = fx.derive_technical(
+            bars + [{"date": "2026-11-01", "open": 14.7, "high": 15.6,
+                     "low": 14.5, "close": 15.5, "volume": 2000}])
+        assert brk["box_60d"]["hi"] == 14.9 \
+            and brk["box_60d"]["pos_pct"] > 100, brk["box_60d"]
         assert t["vol_series_10"] and len(t["vol_series_10"]) == 10
         assert t["last_bar_pattern"]["yang"] is True
         assert "hist_rising" in t["macd"], "MACD 须含柱体放大判据"
@@ -2805,7 +2833,7 @@ def selftest():
             "state": "available", "source": "dc-hsgt",
             "summary": {"hold_date": "2026-10-29", "hold_pct": 19.44,
                         "hold_pct_chg_20d": 1.23, "currency": "HKD"},
-            "note": "南向 T-1 披露口径"}
+            "note": "南向两层口径：披露 T-1；持股变动对应成交 D-2"}
         assert "持股比变化（百分点，中线口径）：20 日 1.23 · 60 日 —" in open(
             render_context_pack(ev_hk_mf, td), encoding="utf-8").read(), \
             "港股南向持股比 20/60 日变化渲染（缺省打「—」）"
@@ -2943,22 +2971,34 @@ def selftest():
         _, inv_old, _ = register_signal(evidence, verdict_sell, opinions,
                                         "r9", "p9")
         assert inv_old == 1, "无 profile 键存量信号按 default 参与失效（兜底）"
-        # 波段带数学钉：60 根 100/101 交替——g=max(2σ_d×√21, 3×往返成本)、
-        # band_lo=max(lo60, price−g)、band_hi=min(hi60, price+g)、trail_ref=MA60
+        # 波段带数学钉（I-013 重写：期望值独立手算钉死，不再复用被测公式）：
+        # g=max(2σ_d×√21, 3×往返成本) 是收益率，价位按 price×(1∓g) 取后再与
+        # 60 日高低点钳制。场景 A 高波动：60 根 100/101 交替，σ_d≈ln(1.01)≈1%
+        # → 2σ_d×√21≈9.2% ≫ 箱宽 1% → 100×(1∓g)≈90.8/109.2 越出 [100,101]，
+        # 整带被 60 日高低点钳制（修复后预期形态）；MA60=(30×101+30×100)/60=100.5
         band_bars = [{"date": "d%d" % i, "open": 100.0, "high": 101.0,
                       "low": 100.0, "close": 100.0 if i % 2 else 101.0,
                       "volume": 1} for i in range(60)]
-        price = band_bars[-1]["close"]
-        sig_d = (fx.realized_vol([b["close"] for b in band_bars], 60) or 0.0) \
-            / math.sqrt(252)
-        g = max(2 * sig_d * math.sqrt(21), 3 * fx.ROUNDTRIP_COST["cn"])
-        want = {"band_lo": _fmt_price(max(100.0, price - g)),
-                "band_hi": _fmt_price(min(101.0, price + g)),
-                "trail_ref": _fmt_price(
-                    round(sum(b["close"] for b in band_bars) / 60, 3))}
-        got = _mid_key_levels(price, band_bars, "cn")
-        assert got == want, (got, want)
-        assert got["trail_ref"] == 100.5, got
+        got = _mid_key_levels(band_bars[-1]["close"], band_bars, "cn")
+        assert got == {"band_lo": 100.0, "band_hi": 101.0,
+                       "trail_ref": 100.5}, got
+        # 场景 B 极低波动：95→105 线性缓坡，日收益 std≈0.005% → 2σ_d×√21≈
+        # 0.05% < 3×0.15%（cn 往返成本），g 取成本下限 0.0045；price=100 居中
+        # → 100×(1∓0.0045)=99.55/100.45 均在 [95,105] 箱内，双侧不钳——
+        # 钉死 price×(1∓g) 乘法口径本身；MA60=缓坡中点=100.0
+        ramp_bars = [{"date": "r%d" % i, "open": 95.0, "high": 95.0,
+                      "low": 95.0, "close": 95.0 + i * (10.0 / 59.0),
+                      "volume": 1} for i in range(60)]
+        got_b = _mid_key_levels(100.0, ramp_bars, "cn")
+        assert got_b == {"band_lo": 99.55, "band_hi": 100.45,
+                         "trail_ref": 100.0}, got_b
+        # 破坏性实验（改回 price∓g 价差口径必红）：反事实值手算——A 场景
+        # band_hi=min(101, 100+0.092)=100.09、B 场景 band_lo=max(95, 100−
+        # 0.0045)=100.0，均与上面钉值失配，公式回退时两处断言即刻红
+        assert round(min(101.0, 100 + 0.092), 2) == 100.09 \
+            and 100.09 != got["band_hi"], "A 场景价差口径反事实须失配"
+        assert round(max(95.0, 100 - 0.0045), 2) == 100.0 \
+            and 100.0 != got_b["band_lo"], "B 场景价差口径反事实须失配"
         # 不足 60 根：trail_ref 省键（缺项即缺席）——数值锚不落展示哨兵「—」
         kl_short = _mid_key_levels(100.0, band_bars[:40], "cn")
         assert set(kl_short) == {"band_lo", "band_hi"} \

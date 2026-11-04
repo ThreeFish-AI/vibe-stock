@@ -7,6 +7,36 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.19] - 2026-11-04
+
+### Fixed
+
+- **四项正确性缺陷修复（I-010~I-013，全部收严型，源自 02513 波段复盘取证）**：
+  - **I-010 后验到期收盘门**（[postmortem.py](scripts/postmortem.py)）：到期
+    horizon 落日 K 序列末根且末根=当日盘中未完成 K 线（`fetch.session_phase`
+    的 `last_bar_partial` 判据，`now` 可注入）时不再评估、保持 pending，
+    收盘后下一次运行补评——此前盘中跑 postmortem 会用盘中价把到期 horizon
+    误判成命中/未命中（伪命中已落盘不回改，存量回改需人工评审）；
+    [05](references/05-postmortem.md)「价格口径」删与「复权基准」矛盾的
+    「沿用登记价」句，基准统一为同复权信号日收盘。
+  - **I-011 南向两层口径**（[fetch.py](scripts/fetch.py) `fetch_moneyflow_hk`）：
+    东方财富持股变动日 D 对应成交日 D−2（港股 T+2 交收，港交所日成交 6 组
+    样本验证）——note 与 `summary.chg_trade_lag_note` 写明「披露 T-1、成交
+    D−2」，字段名沿用；[diagnose](scripts/diagnose.py) 渲染由「当日净增持」
+    改「持股日净增持（对应 D−2 成交）」，01/PIPELINE/README 指针同步——
+    此前下跌日会把两天前的净买入读成「当日南向逆势承接」。
+  - **I-012 box_60d 前窗口**（[fetch.py](scripts/fetch.py) `derive_technical`）：
+    箱体改取不含当日的前 60 根（不足 20 根不出），pos_pct 不截断（跌破前
+    箱底为负、突破上沿 >100，越界即信息）——含当日口径下任何新低日
+    box.lo==当日最低，「精确触箱底」成同义反复；存量报告 pos/width 不回改。
+  - **I-013 中线波段带单位**（[diagnose.py](scripts/diagnose.py)
+    `_mid_key_levels`）：g 为收益率却被当价差直接 `price∓g` 加减（带宽塌缩
+    不足 1 港元），改为 `price×(1∓g)` 后与 60 日高低点钳制；selftest 由
+    同公式断言重写为独立手算钉值 + 破坏性实验（回退价差口径必红）。
+  - 五件 selftest 全绿（adjudicate 60 / diagnose 20 / postmortem 5（新增
+    到期收盘门 g1–g4）/ lens / addon），Issue 档案见
+    [docs/.agents/issue.md](docs/.agents/issue.md) I-010~I-013。
+
 ## [0.0.18] - 2026-11-04
 
 ### Added

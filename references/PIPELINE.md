@@ -87,7 +87,7 @@ CHANGELOG 记录并同步本文件锁版本。
 fundamentals（东财 HKF10→yf，质量分 85 good）、valuation（em-hk-ind 具名列
 快照+baidu 5 年分位）、research（etnet→yf 双源：逐券商目标价/EPS/评级 +
 90 日 EPS 修正方向）、notices（em-notice ann_type=H 单源，盈警/回购分型）、
-moneyflow（南向持股 T-1 披露）、news（qq_news 单源）、market（港股指数）。
+moneyflow（南向持股：披露 T-1、持股变动对应成交 D-2，口径见 [01](01-evidence.md)）、news（qq_news 单源）、market（港股指数）。
 仍 not_supported：chip/forecast/unlock/holder/industry（港股无对应披露形态，
 见 01 backlog）。港股全链约 +12 次 HTTP（16 簇之 etnet 为港股唯一新簇）。
 fx 块取 HKD/CNY 入 pack 与 report 情报面（人民币敞口；汇率不进信号判定与
