@@ -82,11 +82,22 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 [references/07-monitor.md](references/07-monitor.md) 与
 [batch/monitor/](batch/monitor/)。
 
-文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（八篇规约 +
+文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（九篇规约 +
 PIPELINE）→ [batch/](batch/)（批量子技能参考实现）→
 [batch/monitor/](batch/monitor/)（盯盘参考实现）→ [strategies/](strategies/)
-（策略库）。回归：`scripts/*.py --selftest` 四件全绿（硬门禁）+
-`batch/monitor/*.py --selftest` 两件全绿（非阻塞第五条）。
+（策略库）。回归：`scripts/*.py --selftest` 五件全绿（硬门禁）+
+`batch/monitor/*.py --selftest` 两件全绿（非阻塞旁路门禁）。
+
+## 在册股走势参考（09 规约，0.0.18 起）
+
+每只在册股（盯盘 universe 口径：实盘+模拟+观察）的短/中期**零权重**走势参考卡：
+数学面（双轨 σ√h 预测带 + 锚位触及概率 + mid_term 投影 + 与前卡日差连向）、
+情绪面（个股级情绪键与资金流 + 市场级块 0.0.19 接入）、经验面（该股信号后验
+计数桶，小样本如实标不足）、实盘股用户锚（操作复盘与波段带距离，严格脱敏）。
+收盘后批量出全集日表（`batch/outlook_daily.py --daily`，FetchLock 单窗、幂等
+upsert），诊股 prepare 恒现算注入 context-pack 与报告 4c 节——**参考非信号**：
+不进裁决聚合/置信帽/后验记分/RiskGuard，预测带与后验判定带是两把尺。见
+[references/09-outlook.md](references/09-outlook.md)。
 
 ## 免责
 
