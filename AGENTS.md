@@ -25,7 +25,7 @@
 - `uv run --no-project scripts/diagnose.py --selftest`：端到端合成流水线全绿。
 - `uv run --no-project scripts/postmortem.py --selftest`：后验自校准回归全绿。
 - `uv run --no-project scripts/lens.py --selftest`：基本面锚纯函数回归全绿。
-- `uv run --no-project scripts/addon.py --selftest`：加仓轨判据回归全绿（冻结族/触发族/三段状态机/破坏性实验，0.0.19 起）。
+- `uv run --no-project scripts/addon.py --selftest`：加仓轨判据回归全绿（冻结族/触发族/三段状态机/破坏性实验，0.0.22 起）。
 - `uv run --no-project scripts/outlook.py --selftest`：走势参考卡纯函数回归全绿（0.0.18 起）。
 - 任何 `scripts/` 改动，上述 scripts/ 六件全绿后才算完成（与 evals/README.md 口径一致，只收严）。
 - `uv run --no-project batch/monitor/rules.py --selftest` 与 `uv run --no-project batch/monitor/watch.py --selftest`：盯盘件离线回归（非阻塞旁路门禁，不卡 scripts/ 提交；改 `batch/monitor/` 后必须全绿，判据只收严）。
@@ -43,7 +43,7 @@
 | references/07-monitor.md | 盯盘子技能：在册股票盘中监控与收盘复核（监控编排层） |
 | references/08-midterm.md | 中线（1–6 个月）规约：mid_term 因子口径与只降不升风险判据族 |
 | references/09-outlook.md | 在册股短/中期走势参考：零权重卡三面口径、写拓扑与收盘批量（0.0.18 起） |
-| references/10-add-on.md | 持仓加仓决策轨：三道门（资格冻结/策略买点触发/三段确认制）与 addon 信号登记（0.0.19 起） |
+| references/10-add-on.md | 持仓加仓决策轨：三道门（资格冻结/策略买点触发/三段确认制）与 addon 信号登记（0.0.22 起） |
 | references/PIPELINE.md | 五段流水线与命令速查 |
 | strategies/ | 策略 YAML 库 |
 | scripts/ | fetch / adjudicate / diagnose / postmortem / lens / addon / outlook / archive（裁决 · 诊断 · 基本面锚透镜 · 加仓轨 · 走势参考卡 · 报告归档与索引） |

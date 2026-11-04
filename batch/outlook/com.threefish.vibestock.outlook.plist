@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- vibe-stock 走势参考收盘批量 LaunchAgent 模板（references/09-outlook.md
+     分期表 P2；形态复制 monitor 模板、绝不触碰其属性钉）。安装：
+     1) 替换三类占位：__UV_PATH__ = `command -v uv` 绝对路径（launchd 不继承
+        shell PATH）；__SK_PATH__ = 本仓 clone 绝对路径；__HOME__ = 家目录；
+     2) mkdir -p __HOME__/.vibe-stock/outlook/logs（launchd 不建日志父目录）；
+     3) 复制到 ~/Library/LaunchAgents/ 后 launchctl bootstrap gui/$(id -u) <路径>。
+     语义：周一至周五 17:35 单槽跑 outlook_daily 每日批量（幂等：当日已卡
+     跳过；墙钟门 <17:10 拒跑由脚本自担——槽位即门后）；与 monitor 16:15
+     盘后兜底槽错峰 80 分钟（FetchLock 无重叠窗）。一次性命令：跑完即退、
+     无 KeepAlive（失败不重拉——次日槽位自愈，日志见 outlook/logs/）；
+     节假日误拉一次无害（末根=上一交易日，卡片如实带交易日，浪费一次
+     ~45 HTTP 取数——无交易日历的诚实取舍，同 07 P4）。RunAtLoad=false：
+     只靠日历槽不做投机拉起；注释内不写连续连字符（标准 XML 可解析）。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+        "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.threefish.vibestock.outlook</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__UV_PATH__</string>
+        <string>run</string>
+        <string>--no-project</string>
+        <string>--with</string>
+        <string>akshare==1.20.*</string>
+        <string>--with</string>
+        <string>efinance</string>
+        <string>--with</string>
+        <string>yfinance</string>
+        <string>__SK_PATH__/batch/outlook_daily.py</string>
+        <string>--daily</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>17</integer><key>Minute</key><integer>35</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>17</integer><key>Minute</key><integer>35</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>17</integer><key>Minute</key><integer>35</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>17</integer><key>Minute</key><integer>35</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>17</integer><key>Minute</key><integer>35</integer></dict>
+    </array>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>ThrottleInterval</key>
+    <integer>600</integer>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.vibe-stock/outlook/logs/outlook.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.vibe-stock/outlook/logs/outlook.err.log</string>
+</dict>
+</plist>

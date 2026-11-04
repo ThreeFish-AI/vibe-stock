@@ -3,7 +3,8 @@
 定位：从每日跟踪积累的数据经验，为每只在册股产出**零权重**走势参考卡
 （数学 × 情绪 × 经验三面），供每次操作决策作参考——用户 2026-11-04 五项
 裁定（生成时机=收盘批量+决策现算混合、覆盖=全在册 universe 21 只、情绪面
-含市场级块、权限=零权重纯参考、市场级四块一次全落）是本机制的边界依据。
+含市场级块、权限=零权重纯参考、市场级四块一次全落——裁定 6 增补两融账户
+参与度替代口径后为五块）是本机制的边界依据。
 实现：[scripts/outlook.py](../scripts/outlook.py)（六件硬门禁之一，纯函数件）+
 [batch/outlook_daily.py](../batch/outlook_daily.py)（非门禁编排）；注入点在
 [diagnose.py](../scripts/diagnose.py)（prepare 现算 / context-pack / 报告 4c）。
@@ -40,9 +41,13 @@
   不造 regime 标签（策略语义在 YAML，代码复制即第二事实源）。
 - **情绪面**：个股级零新增取数（mid_term 情绪键 + moneyflow summary 扩行；
   港股降级南向+量能代理「力度弱一档」按 [08](08-midterm.md) 原文）；市场级
-  四块（margin 两融/index 指数链/全A换手分位/ERP/新开户）为唯一新增网络面，
-  0.0.19 落地（源实测探查结论见 PR 描述与 01 表行），落地前卡片市场级节
-  abstain 占位。
+  五块（0.0.19 已落地，[01](01-evidence.md) 扩展块表）：margin 两融余额、
+  index 指数基准（HS300/ALLA/HSI 快照+MA60）、turnover_pctile 全A换手分位
+  （成交活跃度代理）、erp（月频主口径+日频增量台账
+  `~/.vibe-stock/erp_pe_daily.jsonl`——裁定 7 的经验积累载体，满 250 日出
+  日频分位）、margin_accounts 两融账户参与度（裁定 6：原新开户上游停更的
+  替代口径，不冒充新开户）。市场维度共享数据经 fetch 层 `_MKT_CACHE` 同进程
+  一次取数；卡片市场级节全缺时 abstained。
 - **经验面**：signals.json evaluated 的 per code×profile×horizon 计数桶
   {n, hit, miss, neutral}（只数 postmortem 落账的 outcome，observed 不入桶
   ——05 口径）；n < `postmortem.MIN_SAMPLES`(10) 标 sample_insufficient——
@@ -75,7 +80,13 @@
 - **并发与预算**：FetchLock 单窗（close_pass 同款，120s 超时挂起+告警重跑，
   锁竞争独立计数不入「盘中拒写」）；股间退避 8–12s（random.uniform，[06]
   (06-batch-scan.md) 串行+抖动纪律；退避在锁窗内串行执行，锁持有约 4–7
-  分钟——错峰 ≥17:10 与 close_pass 无重叠窗）；预算
+  分钟——错峰 ≥17:10 与 close_pass 无重叠窗）；**市场级五块缓存语义**：
+  `_MKT_CACHE` 同进程只缓存成功数据（fetch_failed 不固化，熔断器
+  「连续 3 败」阈值不被绕过）；**跨进程无缓存**（06 批量 subprocess 形态
+  下每股全价、N 股付 N×五块 HTTP——已知取舍，后续按当日 jsonl 缓存收口）；
+  **ERP 日频台账 last-writer-wins**（诊股不持 FetchLock，双终端并发后写者
+  覆盖前写者当日增量——增量窗 20 日高度重叠、次日自愈，接受为既定取舍）；
+  预算
   ≈21 条日 K 链（回退全触发上界 ~84 HTTP）+ moneyflow 每股 1 条——正经
   消耗诊股额度（写熔断账本，不走盯盘本地退避）；**时点 ≥17:10**（避开
   16:15 盘后兜底槽）；「盯盘期间不跑 outlook 批次」（[07](07-monitor.md)
@@ -104,11 +115,11 @@
 | 期 | 内容 | 状态 |
 | :--- | :--- | :--- |
 | v1（0.0.18） | 卡片三面 + prepare/pack/4c 注入 + 收盘批量与日表 + 市场级节 abstain 占位 | ✅ |
-| v2（0.0.19） | 市场级四块 + 指数日 K 链共享件一次全落（裁定 5）：fetch margin/index/换手分位/erp/margin_accounts 块全套 + 01 表行与 backlog 状态 + 08 Phase 5 预留节指针化 + 卡片市场级节出实数。源实测后用户 2026-11-04 补充裁定：① 新开户上游停更（中国结算 2023-09 起不再月度发布，唯一源冻结于 2023-08）→ 改接**两融账户参与度**（日频 T+1，块名 margin_accounts 如实标口径不同，不冒充新开户）；② ERP 指数 PE 无一次可回填的日频 5 年源 → **月频 ERP（乐咕沪深300 PE × 10Y 国债）立即可用 + 中证官网日频 PE 每日增量落盘积累**，满窗后日频分位接管 | 预留 |
-| P2 | day-summary 附件（须由 close_pass 渲染才幂等——外挂追加会被重渲冲掉；形态：次日渲染昨日参考节） | 预留 |
-| P2 | launchd 17:35 独立槽（与 16:15 兜底槽错峰 ≥80min；复制 monitor 模板形态、不触碰其 selftest 钉住的属性） | 预留 |
-| P3 | RiskGuard/机械降档接入评审（裁定 4 预留；判据只收严方向） | 预留 |
-| P3 | 预测带自校准后验（预测带触及概率 vs 实际触及频率的校准曲线；独立于信号后验、不进 ledger） | 预留 |
+| v2（0.0.19） | 市场级五块 + 指数日 K 链共享件一次全落（裁定 5）：fetch margin/index/turnover_pctile/erp/margin_accounts 块全套（簇 16→20：jin10/sina_idx/legulegu/csindex 新增）+ 01 表行与 backlog 状态 + 08 Phase 5 预留节指针化 + 07 P3 指数链就绪句 + 卡片市场级节出实数。源实测后用户 2026-11-04 补充裁定：① 新开户上游停更 → 改接两融账户参与度（margin_accounts，户口径）；② ERP → 月频（乐咕×10Y）立即可用 + 中证官网 P/E2 日频增量落盘 `erp_pe_daily.jsonl`，满 250 日接管 | ✅ |
+| P2 | **day-summary 附件（0.0.20 已落地）**：close_pass 渲染「走势参考（上一张收盘卡 · <date>）」节——由 close_pass 自身消费 outlook jsonl 重算（幂等，外挂追加会被重渲冲掉的问题不存在）；当日卡 17:35 才出、收盘复核只见 <today 卡（语义钉）；无卡/无目录不出节 | ✅ |
+| P2 | **launchd 17:35 独立槽（0.0.20 已落地）**：模板 `batch/outlook/com.threefish.vibestock.outlook.plist`（周一至五 17:35 单槽每日批量；与 16:15 兜底槽错峰 80min；一次性命令无 KeepAlive、失败次日自愈；节假日误拉一次无害——无交易日历取舍同 07 P4；RunAtLoad=false 不投机拉起）。安装三步见模板注释（占位替换/建日志目录/bootstrap） | ✅ |
+| P3 | **RiskGuard 接入（0.0.21 已评审落地）**：形态=08 ②族新增判据②-8「市场级杠杆拥挤」（margin 块 70 日分位 >90 且 Δ5d >+2% **且**个股级拥挤键并发 → 风险角色 downgrade·medium）——走既有 risk.json 通道、只降不升、LLM 判据非机械布尔（机械布尔合并仍随 07 P2/RSI 合流）；阈值属首版防御性设定，放宽须评审 | ✅ |
+| P3 | **预测带自校准后验（0.0.21 已落地）**：`--calibrate` 子命令——历史卡 × 锚 × horizon 的触及概率 vs 实际触及（方向按卡日收盘定、不满窗不记右删防护），样本幂等台账 `outlook-calibration.jsonl`、渲染 `outlook/calibration.md` 分桶校准表（桶 n<30 标不足）；信息面披露——不进裁决/台账/不改预测带公式 | ✅ |
 | 再评审 | bars 台账（按日持久化 OHLCV）：**已显式否决**——全部现行因子在 250 根在线窗内，台账引入 qfq 重基准/无锁双写/未完成 K 线三重新风险；出现 >250 根窗真实消费方再评审（01 backlog「长周期 theses 台账」条目同源） | 否决 |
 
 ## 回归门禁

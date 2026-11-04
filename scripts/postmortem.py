@@ -7,7 +7,7 @@
     仅 T+60 记分（T+20/120 照落实判供展示、不进台账）。
     买入族越过带上/下沿记 hit/miss、带内记 neutral；卖出族对称。
     watch/hold/avoid/alert 只观察不记分。
-  - 到期判定排除当日盘中未完成日 K（I-011）：horizon 落末根且末根=当日盘中
+  - 到期判定排除当日盘中未完成日 K（I-016）：horizon 落末根且末根=当日盘中
     （fetch.session_phase 判据）时不评估、保持 pending，收盘后下一次运行补评。
   - 每个判定结果按信号记录时的 sources 归因，累计进各自台账（default=
     ledger.json、position=ledger.position.json，wins/losses）。
@@ -103,7 +103,7 @@ def evaluate_signals(signals, bars_by_code, cny_by_date=None, now=None):
     cny_by_date（--cny 时传入 fx.hkd_cny_daily 产物）：hk 信号的 evaluated 附
     cny_close / cny_chg_pct 展示字段（人民币口径收益，含汇兑项）——仅展示，
     outcome 判定与台账归因仍按标的币种收盘（默认口径不变）。
-    到期收盘门（I-011）：horizon 落在序列末根且末根=当日盘中未完成 K 线
+    到期收盘门（I-016）：horizon 落在序列末根且末根=当日盘中未完成 K 线
     （fetch.session_phase 的 last_bar_partial 判据；now 可注入、None 即真实
     时钟）→ 视为未到期（跳过、保持 pending），待收盘后下一次运行补评。"""
     delta_map = {"default": {}, "position": {}, "addon": {}}
@@ -138,7 +138,7 @@ def evaluate_signals(signals, bars_by_code, cny_by_date=None, now=None):
                 continue
             i = j
         base_close = closes[i]  # 同复权基准（判定与展示百分比的 SSOT）
-        # I-011 到期收盘门：末根=当日盘中未完成 K 线（session_phase 的
+        # I-016 到期收盘门：末根=当日盘中未完成 K 线（session_phase 的
         # last_bar_partial 判据）时，落在末根的到期 horizon 不评估——盘中价
         # 非收盘事实，误评即伪命中且已落盘不回改；周末/节假日自然收盘态放行
         last_partial = fx.session_phase(
@@ -155,7 +155,7 @@ def evaluate_signals(signals, bars_by_code, cny_by_date=None, now=None):
             if j >= len(closes):
                 continue  # 未到期
             if j == len(closes) - 1 and last_partial:
-                continue  # I-011：到期日 K 线未收盘 → 视为未到期保持 pending，收盘后补评
+                continue  # I-016：到期日 K 线未收盘 → 视为未到期保持 pending，收盘后补评
             if profile == "position":
                 if sigma_d > 0:
                     band = sigma_d * math.sqrt(h)
@@ -593,7 +593,7 @@ def selftest():
     evaluate_signals([s4], {"000001": bars_g})
     assert s4["evaluated"] == {} and s4["status"] == "pending", \
         "信号日新于最新 bar 属未到期，不得提前评估"
-    # I-011 到期收盘门：horizon 落末根且末根=当日盘中未完成 K 线（T+3 盘中
+    # I-016 到期收盘门：horizon 落末根且末根=当日盘中未完成 K 线（T+3 盘中
     # 跑 postmortem 被盘中价记伪命中的根因）→ 视为未到期保持 pending；
     # 同数据收盘后/周末跑 → 正常评估（session_phase 口径，now 注入钉两态）
     bars_p = bars + [{"date": "2026-11-02", "open": 90.0, "high": 90.0,
@@ -603,7 +603,7 @@ def selftest():
     evaluate_signals([s_g1], {"000001": bars_p},
                      now=dt.datetime(2026, 11, 2, 10, 58, tzinfo=fx.TZ_CN))
     assert s_g1["evaluated"] == {} and s_g1["status"] == "pending", \
-        "末根为当日盘中未完成 K 线：到期 horizon 不评估、保持 pending（I-011）"
+        "末根为当日盘中未完成 K 线：到期 horizon 不评估、保持 pending（I-016）"
     s_g2 = {**s_g1, "id": "g2", "evaluated": {}}
     evaluate_signals([s_g2], {"000001": bars_p},
                      now=dt.datetime(2026, 11, 2, 15, 5, tzinfo=fx.TZ_CN))
@@ -668,7 +668,7 @@ def selftest():
         and "cny_close" in s6["evaluated"]["1"], \
         "复权基准修复后 null 登记价不再降级：outcome 与 cny 展示均以 closes[i] 为基"
     print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动 · 非交易日回退 · 索引后验格")
-    print("  ok I-011 到期收盘门：末根盘中不评保持 pending · 收盘后/周末补评 · 旁路必误评（破坏性）")
+    print("  ok I-016 到期收盘门：末根盘中不评保持 pending · 收盘后/周末补评 · 旁路必误评（破坏性）")
     print("  ok 人民币口径展示：hk 附 cny 字段 · outcome/归因仍港币 · 缺根如实缺省")
     print("SELFTEST PASSED ✔")
 

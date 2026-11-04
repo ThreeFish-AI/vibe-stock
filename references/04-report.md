@@ -158,7 +158,7 @@ Fixture 与 [I-006](../docs/.agents/issue.md#I-006) 以本节为准，不另立�
 | 元素 | `market` | 字符串 | `cn` / `hk` |
 | 元素 | `quantity` | 数值 | 持仓数量 |
 | 元素 | `cost_price` | 数值 | 成本价，按登记币种原样（`currency` 等其余元素键仓内不消费） |
-| 顶层 | `operations` | 列表 | 实际成交流水（到秒时间戳）；缺失/非列表/元素非对象一律折空列表静默降级（脏数据不开门也不崩栈）。消费方两处：0.0.19 起 [10](10-add-on.md) 加仓轨三段状态机（首加/确认加成交判定），与 [09](09-outlook.md) 用户锚脱敏投影（只读 `time/market/code/action/price` 五键、market 仅归一匹配；quantity/cost_price/成本派生涨幅绝不消费绝不落盘） |
+| 顶层 | `operations` | 列表 | 实际成交流水（到秒时间戳）；缺失/非列表/元素非对象一律折空列表静默降级（脏数据不开门也不崩栈）。消费方两处：0.0.22 起 [10](10-add-on.md) 加仓轨三段状态机（首加/确认加成交判定），与 [09](09-outlook.md) 用户锚脱敏投影（只读 `time/market/code/action/price` 五键、market 仅归一匹配；quantity/cost_price/成本派生涨幅绝不消费绝不落盘） |
 | 元素（operations） | `code` | 字符串 | 同 holdings 元素 code 形态（状态机按 zfill(5) 归一比对） |
 | 元素（operations） | `action` | 字符串 | `buy` / `sell`（状态机消费 `buy`；outlook 锚同读） |
 | 元素（operations） | `time` | 字符串 | ISO 8601 日期时间（到秒；取前 10 位为成交日期，如 `2026-11-04T14:00:00+08:00`） |
