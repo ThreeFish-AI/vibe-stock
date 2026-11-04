@@ -26,6 +26,7 @@ import os
 import math
 import re
 import sys
+import types
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import archive as ar  # noqa: E402
@@ -50,7 +51,13 @@ CONFIDENCE_GATE = 0.5
 # 扩展块渲染预算（pack 有界性护栏）：每块条数/行数上限；全局护栏 16k 字符
 EXT_PACK_BUDGET = {"moneyflow": 12, "notices": 12, "research": 10,
                    "forecast": 6, "unlock": 6, "holder": 8, "market": 8,
-                   "industry": 8, "valuation": 6, "fx": 2}
+                   "industry": 8, "valuation": 6,
+                   # 市场级情绪五块（0.0.19，references/09）：市场维度共享数据，
+                   # 有界 2–4 行。margin/turnover_pctile/erp/margin_accounts 四键
+                   # 仅为口径陈列——各块硬编码单行渲染、无条目维度可切，真正被
+                   # 消费的切片键是 index（indices 条目）与 market（快照行）
+                   "margin": 3, "index": 5, "turnover_pctile": 2, "erp": 4,
+                   "margin_accounts": 2, "fx": 2}
 PACK_CHAR_CAP = 16000
 
 
@@ -263,6 +270,56 @@ def render_ext_blocks(lines, b):
         lines.append(" · ".join("%s %s（%+.2f%%）" % (
             i.get("name"), _nd(i.get("price")), _nz(i.get("change_pct")))
             for i in mk["indices"][:EXT_PACK_BUDGET["market"]]))
+    # —— 市场级情绪五块（0.0.19，references/09；市场维度共享数据、有界）——
+    mg = b.get("margin", {})
+    if mg.get("state") == "available":
+        lines.append("")
+        lines.append("## 两融（%s，%s）" % (mg.get("state"), mg.get("source")))
+        lines.append("两融余额 %s 亿（%s）· Δ1d %s%% / Δ5d %s%% / Δ20d %s%% · "
+                     "70 日分位 %s%%——T+1 披露；杠杆资金情绪只作情报面" % (
+                         _nd(mg.get("balance_yi")), mg.get("as_of"),
+                         _nz(mg.get("chg_1d_pct")), _nz(mg.get("chg_5d_pct")),
+                         _nz(mg.get("chg_20d_pct")),
+                         _nd(mg.get("pctile_70d"))))
+    ix = b.get("index", {})
+    if ix.get("indices"):
+        lines.append("")
+        lines.append("## 指数基准（%s，%s）" % (ix.get("state"), ix.get("source")))
+        for name, s in list(ix["indices"].items())[:EXT_PACK_BUDGET["index"]]:
+            lines.append("%s %s（%s，Δ1d %s%%，MA60 %s，距 MA60 %s%%，%s）" % (
+                name, _nd(s.get("close")), s.get("as_of"),
+                _nz(s.get("chg_1d_pct")), _nd(s.get("ma60")),
+                _nz(s.get("dist_ma60_pct")), s.get("source")))
+    tp = b.get("turnover_pctile", {})
+    if tp.get("state") == "available":
+        lines.append("")
+        lines.append("## 全A换手分位（%s，%s）" % (
+            tp.get("state"), tp.get("source")))
+        lines.append("000985 成交量 %d 日滚动分位 %s%%（%s）——%s" % (
+            tp.get("window") or 0, _nd(tp.get("pctile")), tp.get("as_of"),
+            tp.get("note", "")))
+    ep = b.get("erp", {})
+    if ep.get("state") in ("available", "partial") and ep.get("erp_pct") is not None:
+        lines.append("")
+        lines.append("## 风险溢价 ERP（%s，%s）" % (
+            ep.get("state"), ep.get("source")))
+        lines.append("月频 ERP %s%%（PE %s × 10Y %s%%，%s）· 5 年月频分位 %s%%"
+                     "· 日频积累 %s/%s" % (
+                         _nd(ep.get("erp_pct")), _nd(ep.get("monthly_pe")),
+                         _nd(ep.get("y10_pct")), ep.get("as_of"),
+                         _nd(ep.get("pctile_5y_monthly")),
+                         ep.get("daily_pe_accum") or 0,
+                         "就绪" if ep.get("daily_ready") else "250"))
+    ma = b.get("margin_accounts", {})
+    if ma.get("state") == "available":
+        lines.append("")
+        lines.append("## 两融账户参与度（%s，%s）" % (
+            ma.get("state"), ma.get("source")))
+        lines.append("参与交易投资者 %s 户（%s）· Δ5d %s%% / Δ20d %s%%——%s" % (
+            _nd(ma.get("traders")), ma.get("as_of"),
+            _nz(ma.get("traders_chg_5d_pct")),
+            _nz(ma.get("traders_chg_20d_pct")),
+            "原新开户上游停更的替代口径（不冒充新开户）"))
     fxb = b.get("fx", {})
     if fxb.get("state") == "available":
         lines.append("")
@@ -444,7 +501,7 @@ def render_context_pack(evidence, workdir):
         if tech.get("macd"):
             lines.append("macd: %s" % tech["macd"])
         if tech.get("box_60d"):
-            # I-013：箱体取不含当日的前 60 根——当日新低日 lo 不再等于当日
+            # I-018：箱体取不含当日的前 60 根——当日新低日 lo 不再等于当日
             # 最低（「触箱底」才是真验证）；pos 不截断，越界（负/>100）即信息
             lines.append("box_60d: %s（hi/lo=箱体上下沿·前窗口不含当日；"
                          "width=宽度%% pos=现价位置%%不截断，越界即信息）"
@@ -566,7 +623,9 @@ def render_context_pack(evidence, workdir):
     text = "\n".join(lines)
     if len(text) > PACK_CHAR_CAP:  # 全局护栏：超限整截扩展节（状态行仍可见）
         heads = ("## 资金流", "## 近期公告", "## 研报与评级", "## 业绩预告",
-                 "## 限售解禁", "## 股东户数", "## 大盘指数", "## 汇率", "## 行业板块",
+                 "## 限售解禁", "## 股东户数", "## 大盘指数", "## 两融",
+                 "## 指数基准", "## 全A换手分位", "## 风险溢价 ERP",
+                 "## 两融账户参与度", "## 汇率", "## 行业板块",
                  "## 估值", "## 基本面锚")
         cut = next((i for i, ln in enumerate(lines) if ln.startswith(heads)), None)
         if cut is not None:
@@ -816,7 +875,7 @@ def _mid_key_levels(price, bars, market):
     「中线裁决」节与 position 信号 key_levels 的同一事实源。带宽
     g=max(2σ_d×√21, 3×往返成本)（σ_d=rv60 年化/√252，与 mid_term 同源实现；
     成本常量 fetch.ROUNDTRIP_COST，口径 references/08 静态表）。g 是收益率
-    （I-014：σ_d 1% 时 g≈9%）——band_lo=max(lo60, price×(1−g))、band_hi=
+    （I-019：σ_d 1% 时 g≈9%）——band_lo=max(lo60, price×(1−g))、band_hi=
     min(hi60, price×(1+g))、trail_ref=MA60，按 price×(1∓g) 取价差后钳制在
     60 日高低点内；σ_d 大时 g≫箱宽、整带被 lo60/hi60 钳住属预期（成本下限
     仅极低波动票生效）。三层下行门（箱体下沿−5% 总回撤/regime 失效/基本面
@@ -831,7 +890,7 @@ def _mid_key_levels(price, bars, market):
     g = max(2 * sigma_d * math.sqrt(21),
             3 * fx.ROUNDTRIP_COST.get(market, 0.0015))
     ma60 = round(sum(closes) / len(closes), 3) if len(closes) == 60 else None
-    # g 是收益率（I-014）：按 price×(1∓g) 取价差再与 60 日高低点钳制——
+    # g 是收益率（I-019）：按 price×(1∓g) 取价差再与 60 日高低点钳制——
     # 直接 price∓g 会把 ~9% 的带宽塌缩成不足 1 元的价差
     kl = {"band_lo": _fmt_price(max(lo60, price * (1 - g))),
           "band_hi": _fmt_price(min(hi60, price * (1 + g)))}
@@ -1674,10 +1733,18 @@ def selftest():
             == fx.derive_chip(share, 1_000_000, "yf")["获利比例"]
             == fx.derive_chip(share, 1_000_000, "qq-tx")["获利比例"] == 1.0)  # qq-tx 亦为股
     # 簇绑定：datacenter 家族合簇且独立于行情簇；腾讯三主机互异；新浪流量三源合簇
-    assert len(set(fx.CLUSTERS.values())) == 16, set(fx.CLUSTERS.values())
+    # （0.0.19 市场级五块 +4 簇：jin10 金十转发 / sina_idx 新浪指数 /
+    #   legulegu 乐咕 / csindex 中证官网；dc-margin·dc-bond·em-mkt-account 归
+    #   em_datacenter、tx-idx 归 qq、指数 yf 复用——16→20）
+    assert len(set(fx.CLUSTERS.values())) == 20, set(fx.CLUSTERS.values())
     for k in ("em-fin", "dc-respredict", "dc-forecast", "dc-unlock",
-              "em-fin-hk", "em-hk-ind", "dc-hsgt"):
+              "em-fin-hk", "em-hk-ind", "dc-hsgt", "dc-margin", "dc-bond",
+              "em-mkt-account"):
         assert fx.CLUSTERS[k] == "em_datacenter", k
+    assert fx.CLUSTERS["tx-idx"] == fx.CLUSTERS["qq-tx"] == "qq"
+    assert fx.CLUSTERS["sina-idx"] == "sina_idx" and \
+        fx.CLUSTERS["sina-idx"] not in (fx.CLUSTERS["sina-fin"],
+                                        fx.CLUSTERS["sina-flow"])
     assert fx.CLUSTERS["etnet"] == "etnet" and fx.CLUSTERS["etnet"] not in {
         fx.CLUSTERS[k] for k in ("ak-em", "qt-snap", "yf")}
     assert "dc-holder" not in fx.CLUSTERS, \
@@ -1688,6 +1755,32 @@ def selftest():
             == fx.CLUSTERS["sina-industry"] == "sina_flow")
     assert fx.CLUSTERS["sina-flow"] != fx.CLUSTERS["sina-fin"]  # 子域分簇
     print("  ok qt/sina 解析罐体（双路校验两路径）· derive_chip 三态 · 簇绑定")
+    # -- 修复钉：margin 主源「行数不足」必须走回退（I-011）——不得 available·
+    #    source=None 渗透 pack 头、不得给 dc-margin 记假败（形状问题非源故障）--
+    st_m = {"breakers": {"jin10": {"fails": 3, "open_until": t0 + 3600}},
+            "cooldowns": {}}
+    _real_dcm = fx._dc_rows_market
+    _real_ak = sys.modules.get("akshare")
+    sys.modules["akshare"] = types.ModuleType("akshare")  # 防真装环境入网
+    try:
+        fx._dc_rows_market = lambda *a, **k: [  # 10 行有效——不足 21 触发回退
+            {"DIM_DATE": "2026-10-%02d" % (i + 1), "RZRQYE": 2.2e12 + i}
+            for i in range(10)]
+        mg_blk = fx.fetch_margin("cn", "600519", st_m, t0)
+        assert mg_blk["state"] == "fetch_failed", \
+            "主源行数不足须走回退（旧代码 available·source=None 是缺陷）"
+        assert isinstance(mg_blk.get("source"), str) and mg_blk["source"], \
+            "fetch_failed 须带硬编码 source 串（不得渗透 None）：%s" % mg_blk
+        assert st_m["breakers"].get("em_datacenter", {}).get("fails", 0) == 0, \
+            "行数不足不得记簇假败（HTTP 实际成功）"
+    finally:
+        fx._dc_rows_market = _real_dcm
+        fx._MKT_CACHE.pop("margin", None)
+        if _real_ak is None:
+            sys.modules.pop("akshare", None)
+        else:
+            sys.modules["akshare"] = _real_ak
+    print("  ok margin 行数不足→回退介入（不渗透 source=None·不记假败）")
     # -- 修复钉：dc 空结果=事实非失败 · forecast 取最新预告+最近披露 · unlock 升序 --
     st3 = {"breakers": {}, "cooldowns": {}}
     _today = dt.date.today()
@@ -1938,13 +2031,17 @@ def selftest():
         fx._dc_rows, fx._http_text = real_dc, real_http
     print("  ok dc 空结果=事实非失败 · 预告取最新/披露取最近未来 · 解禁升序")
     # -- 港股数据面（零网络）：CAPS 守卫钉 · HKF10 空表/形态 · etnet/yf 共识 ·
-    #    南向两层口径（披露 T-1 / 成交 D-2，I-012）· A 股 eps_by_year 回收 --
+    #    南向两层口径（披露 T-1 / 成交 D-2，I-017）· A 股 eps_by_year 回收 --
     # CAPS 破坏性钉：未配源块守卫必须先于任何网络调用短路——只删守卫不换源
     # 会把 _dc_rows 的 9201 空结果伪造成 available·无研报（失败形态入册）
     hk_unsupported = [n for n in fx.ALL_BLOCKS
                       if n not in fx.MARKET_CAPS["hk"]]
     assert set(hk_unsupported) == {"chip", "forecast", "unlock", "holder",
-                                   "industry"}, hk_unsupported
+                                   "industry",
+                                   # 市场级情绪五块（0.0.19）：A 股口径，
+                                   # hk 守卫 not_supported
+                                   "margin", "index", "turnover_pctile",
+                                   "erp", "margin_accounts"}, hk_unsupported
     st_hk = {"breakers": {}, "cooldowns": {}}
     for name in hk_unsupported:
         blk = (fx.fetch_valuation("hk", "00700", st_hk, t0, None)
@@ -2333,7 +2430,7 @@ def selftest():
         text = open(p, encoding="utf-8").read()
         assert "资金流·南向持股" in text and "19.44" in text and \
             "T-1" in text, "南向节须渲染持股占比与披露口径 note"
-        # I-012 渲染钉：持股变动按 D-2 成交口径措辞，旧「当日净增持/净买」必红
+        # I-017 渲染钉：持股变动按 D-2 成交口径措辞，旧「当日净增持/净买」必红
         assert "持股日净增持 21020000 股（对应 D-2 成交，净额 5.43 亿 HKD）" \
             in text and "当日净增持" not in text, text
         # rating_dist 分桶直出（港股形态），A 股四槽键缺位不得硬渲染「减持 0」
@@ -2582,7 +2679,7 @@ def selftest():
         # quote 键位修复 + 技术派生扩容 + 近 10 根 K OHLCV 渲染
         t = evidence["blocks"]["technical"]
         assert t["new_high_20d"] is True, "递增序列末根须判 20 日新高"
-        # I-013 前窗口（不含当日）箱体钉——期望值独立手算：44 根递增 fixture
+        # I-018 前窗口（不含当日）箱体钉——期望值独立手算：44 根递增 fixture
         # 前窗=前 43 根，hi=10.5+43×0.1=14.8、lo=9.8+0.1=9.9，末根收 14.6 →
         # pos=(14.6−9.9)/(14.8−9.9)=95.9（旧含当日口径 hi=14.9/pos=94.0，必红）
         assert t["box_60d"] == {"hi": 14.8, "lo": 9.9, "width_pct": 49.49,
@@ -3142,7 +3239,7 @@ def selftest():
         _, inv_old, _ = register_signal(evidence, verdict_sell, opinions,
                                         "r9", "p9")
         assert inv_old == 1, "无 profile 键存量信号按 default 参与失效（兜底）"
-        # 波段带数学钉（I-014 重写：期望值独立手算钉死，不再复用被测公式）：
+        # 波段带数学钉（I-019 重写：期望值独立手算钉死，不再复用被测公式）：
         # g=max(2σ_d×√21, 3×往返成本) 是收益率，价位按 price×(1∓g) 取后再与
         # 60 日高低点钳制。场景 A 高波动：60 根 100/101 交替，σ_d≈ln(1.01)≈1%
         # → 2σ_d×√21≈9.2% ≫ 箱宽 1% → 100×(1∓g)≈90.8/109.2 越出 [100,101]，
@@ -3845,7 +3942,7 @@ def _selftest_archive(evidence, verdict, opinions):
             write(SIGNALS, json.dumps(sigs3, ensure_ascii=False))
             out3, _, _ = report_addon(v_hold, 42)
             assert "signal(addon): action=add_on" in out3, out3
-            # T11e-逆势（P0 回归钉，I-015）：quality_value 买点在**中线轨**
+            # T11e-逆势（P0 回归钉，I-020）：quality_value 买点在**中线轨**
             # verdict.position.json + lens 有支撑 + 现价<ma20 → 逆势窄门
             # first_add、add_ref=触发时价；无 pverdict 逆势门不开（负钉）。
             # 每次运行前把既有 addon 信号标 snapshot，防在途态锁住状态机

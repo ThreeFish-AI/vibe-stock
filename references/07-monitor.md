@@ -121,8 +121,10 @@
 - `monitor/day-summary/<date>.md` 是派生视图（events/ticks 台账是事实源），
   幂等重渲（当日无事件也出，覆盖区间可审计），含盯盘覆盖区间（首末 tick +
   缺口：相邻 tick 间隔 >2×interval 且不在午休窗）、次日盯盘重点（未处理机械
-  降档事件）、固定免责尾注。`close_done` 按日归零（跨日继承会让次日起收盘
-  复核静默跳过）。
+  降档事件）、「走势参考（上一张收盘卡 · <date>）」附件节（09 P2：由
+  close_pass 自身消费 outlook jsonl 重算，当日卡 17:35 批量才出、收盘复核
+  只见 <today 卡）、固定免责尾注。`close_done` 按日归零（跨日继承会让次日
+  起收盘复核静默跳过）。
 - 港股源每日抽检随 --close 执行（见数据面）。锁竞争失败 → 显式告警挂起
   重跑，不静默跳过。
 
@@ -207,7 +209,8 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
 - P2 规则预钉（前置门：缓存 technical 数据日 == 今日，否则当日禁用 + data_stale
   告警）：ma20_break（price < ma20×0.98 → 注入 downgrade=medium）、trailing
   （high_since_entry ≥ 成本×1.15 武装、武装后破 ma20 → trailing_exit 收盘终判）、
-  HS300/HSI 收盘破 MA60 → 全组合降档评估提示。
+  HS300/HSI 收盘破 MA60 → 全组合降档评估提示（指数链已就绪：0.0.19 index 块
+  出 HS300/HSI 快照与 MA60，[01](01-evidence.md)——实施仍随 P2/P3 期别）。
 - P2 波段带带内状态（0.0.16 规约先行，实施随 P2）：position 轨信号
   `key_levels` 的 band_lo/band_hi/trail_ref 三键作监控锚——band_lo 触发
   「低吸复核」提示、band_hi 触发「高抛复核」提示、收盘破 trail_ref 提示
@@ -249,6 +252,7 @@ whipsaw 路径判据用日 K high/low（tick 缺口不影响判定）。
 ## 回归门禁
 
 `batch/monitor/rules.py --selftest`（36 checks）与 `watch.py --selftest`
-（31 checks，含 launchd 模板回归钉与 position 轨 profile 过滤钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
+（42 checks，含 launchd 模板回归钉、outlook 17:35 槽模板钉、走势参考附件钉
+与 position 轨 profile 过滤钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
 scripts/ 六件硬门禁成员（AGENTS.md 测试段非阻塞旁路门禁），P4 机械判据合流
 scripts/ 后归六件 selftest 接管。判据只许收严（门禁只收严红线）。

@@ -44,7 +44,8 @@ BAND_NOTE = ("预测带≠后验判定带：default 轨 ±2% 固定带、positio
              "T+60 记分（references/05）——本带只描述价格分布量级")
 ZERO_WEIGHT_NOTE = ("零权重参考：不进裁决聚合/置信帽/两轨后验记分/RiskGuard/"
                     "策略 YAML；机械降档接入待评审")
-BETA_NOTE = "预测带未剔除大盘 beta（指数链就绪前为裸个股口径，references/08 Phase 5）"
+BETA_NOTE = ("预测带未剔除大盘 beta（个股口径；指数链已就绪，剥离 beta 的"
+             "超额收益带随 references/08 Phase 5 实施）")
 EXP_NOTE = "描述性统计（该股信号后验计数），非绩效因子，不进聚合与台账"
 SIGMA_FLOOR = 0.02   # σ 退化链兜底日波动：宁宽勿窄（宽于 postmortem 退化带
 #                    # 2%×√(h/10) 的隐含 σ_d≈0.63%——预测带是参考量级不是判定带）
@@ -370,15 +371,40 @@ def derive_outlook(evidence, ctx):
     card["math"]["tracks"] = tracks
 
     mf = (b.get("moneyflow") or {}).get("summary") or {}
+    # 市场级情绪五块投影（0.0.19）：市场维度共享数据，取可用块关键字段；
+    # 全缺 → abstained（块状态行在 pack 证据面仍如实可见）
+    _mkt_keys = {
+        "margin": ("balance_yi", "chg_1d_pct", "chg_5d_pct", "chg_20d_pct",
+                   "pctile_70d", "as_of", "source"),
+        "index": ("indices", "source"),
+        "turnover_pctile": ("pctile", "window", "as_of", "source"),
+        "erp": ("erp_pct", "pctile_5y_monthly", "monthly_pe", "y10_pct",
+                "as_of", "daily_ready", "source"),
+        "margin_accounts": ("traders", "traders_chg_5d_pct",
+                            "traders_chg_20d_pct", "debt_holders",
+                            "as_of", "source"),
+    }
+    mkt = {}
+    for name, keys in _mkt_keys.items():
+        blk = b.get(name) or {}
+        if blk.get("state") not in ("available", "partial"):
+            continue
+        # C1 钉：erp 的 partial 可达形态是「仅日频积累、无数值键」（月频链
+        # 失败）——无数值键的块不入卡，防 "ERP None%" 字面量渗进 pack/日表
+        if name == "erp" and blk.get("erp_pct") is None:
+            continue
+        proj = {k: blk.get(k) for k in keys if blk.get(k) is not None}
+        if proj:
+            mkt[name] = proj
     card["emotion"] = {
         "stock": {k: card["math"]["mid_term"].get(k) for k in
                   ("max_ret_20d", "limit_up_count_20d", "turnover_avg_20d",
                    "turnover_abnormal", "turnover_pctile_250", "vr_63d")
                   if card["math"]["mid_term"].get(k) is not None},
         "moneyflow": mf or None,
-        "market": {"state": "abstained",
-                   "note": "市场级情绪块（两融/换手分位/ERP/新开户）待接入"
-                           "（references/09 分期表）"}}
+        "market": ({"state": "estimated", **mkt} if mkt else
+                   {"state": "abstained",
+                    "note": "市场级五块全部不可用（状态行见证据面）"})}
     card["experience"] = {"tracks": experience_tracks(signals, market, code),
                           "note": EXP_NOTE}
     card["deltas"] = derive_deltas((ctx or {}).get("recent_cards") or [], card)
@@ -487,6 +513,155 @@ def latest_cards(state_dir, max_days=10):
     return out
 
 
+# ---------------------------------------------------------------- 预测带自校准（P3）
+
+def touch_judgment(bars, card_date, anchor, h):
+    """触及判定（校准后验的判定器）：方向按卡日收盘定（first-passage 屏障
+    对称——上方锚只看上穿 high≥anchor、下方锚只看回落 low≤anchor；锚在
+    现价上方时 low≤anchor 恒真，双向或判是错的）。bars 升序全量日 K；
+    不足 h 根 → None（右删防护：不满整窗不记样本——新卡天然不足，等窗满
+    再记）；卡日收盘缺失 → None（无方向基准）。"""
+    if not bars or anchor is None or not h:
+        return None
+    base = None
+    after = []
+    for b in bars:
+        d = str(b.get("date", ""))[:10]
+        if d == str(card_date):
+            base = _f(b.get("close"))
+        elif d > str(card_date):
+            after.append(b)
+    if base is None or len(after) < h:
+        return None
+    win = after[:h]
+    if anchor > base:  # 上方锚：看上穿
+        return bool(any((_f(b.get("high")) or 0) >= anchor for b in win))
+    if anchor < base:  # 下方锚：看回落
+        return bool(any((_f(b.get("low")) or 1e18) <= anchor for b in win))
+    return None
+
+
+def calibration_samples(cards, bars_by_code):
+    """历史卡 × 锚 × horizon → (p, touched) 样本流（幂等键 card date+code+
+    track+anchor+h；touched=None 的不满窗样本丢弃）。纯函数。qfq 重基准
+    防御：bars 全链 adjust=qfq，除权除息后整条历史重定价——卡锚（卡时点
+    绝对价）vs 新序列会系统性偏（上方锚触及被压低/下方抬高），卡 price 与
+    序列在卡日收盘偏离 >0.5% 判重基准、整卡丢样本。"""
+    out = []
+    for c in cards or []:
+        if c.get("state") != "estimated":
+            continue
+        key = (c.get("market"), c.get("code"))
+        bars = bars_by_code.get(key) or []
+        cpx = _f(c.get("price"))
+        if cpx:
+            base_px = None
+            for b in bars:
+                if str(b.get("date", ""))[:10] == str(c.get("date", ""))[:10]:
+                    base_px = _f(b.get("close"))
+                    break
+            if base_px and abs(base_px / cpx - 1) > 0.005:
+                continue  # 重基准卡整卡丢弃（偏置样本比缺样本更坏）
+        for track, t in (c.get("math", {}).get("tracks") or {}).items():
+            horizons = ar.HORIZONS_OF.get(track, ())
+            for name, a in (t.get("anchors") or {}).items():
+                anchor = _f(a.get("value"))
+                for h_str, p in (a.get("touch") or {}).items():
+                    h = int(h_str)
+                    if h not in horizons or _f(p) is None:
+                        continue
+                    touched = touch_judgment(bars, c.get("date"), anchor, h)
+                    if touched is None:
+                        continue
+                    out.append({"date": c.get("date"), "market": c.get("market"),
+                                "code": c.get("code"), "track": track,
+                                "anchor": name, "h": h, "p": _f(p),
+                                "touched": bool(touched)})
+    return out
+
+
+def calibration_buckets(samples, min_n=30):
+    """分桶校准表：p 五桶 [0,.2/.2,.4/.4,.6/.6,.8/.8,1] 的预测均值 vs 实际
+    触及频率；n<min_n 标 insufficient（与台账 MIN_SAMPLES 哲学同源、独立
+    常量——校准是信息面披露不是绩效因子）。"""
+    edges = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+    out = []
+    for lo, hi in zip(edges, edges[1:]):
+        bucket = [s for s in samples
+                  if lo <= s["p"] < hi or (hi == 1.0 and s["p"] == 1.0)]
+        if not bucket:
+            continue
+        n = len(bucket)
+        out.append({"bucket": "%.1f–%.1f" % (lo, hi), "n": n,
+                    "mean_p": round(sum(s["p"] for s in bucket) / n, 3),
+                    "actual_rate": round(
+                        sum(1 for s in bucket if s["touched"]) / n, 3),
+                    "insufficient": n < min_n})
+    return out
+
+
+def _valid_cal_row(r):
+    """台账行 schema 校验（坏行自愈的宽度口径）：类型损坏行（合法 JSON 但
+    h 非整数/p 非数/touched 非布尔等）与缺键行一并跳过——此类行会让 sort/
+    buckets 抛异常且崩点在台账写回之后（写回自愈永不触发），必须载入即滤。"""
+    return (isinstance(r, dict)
+            and isinstance(r.get("date"), str) and r.get("date")
+            and isinstance(r.get("market"), str) and r.get("market")
+            and isinstance(r.get("code"), str) and r.get("code")
+            and isinstance(r.get("track"), str) and r.get("track")
+            and isinstance(r.get("anchor"), str) and r.get("anchor")
+            and isinstance(r.get("h"), int) and not isinstance(r.get("h"), bool)
+            and isinstance(r.get("p"), (int, float))
+            and not isinstance(r.get("p"), bool)
+            and isinstance(r.get("touched"), bool))
+
+
+def merge_calibration(state_dir, new_samples, now_iso=None):
+    """校准样本台账 append（幂等：键 date+market+code+track+anchor+h 去重；
+    坏行/类型损坏行载入即滤、重写时自愈清除；tmp+replace 原子写）。返回
+    合并后全量样本。取舍：幂等键不含锚值/p——同键 --force 重跑且锚值更新时
+    保留首判样本（台账以首次判定为准，judged_at 不刷新）。"""
+    path = os.path.join(state_dir, "outlook-calibration.jsonl")
+    seen, rows = set(), []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if not _valid_cal_row(r):
+                    continue
+                k = (r.get("date"), r.get("market"), str(r.get("code")),
+                     r.get("track"), r.get("anchor"), r.get("h"))
+                if k in seen:
+                    continue
+                seen.add(k)
+                rows.append(r)
+    for s in new_samples:
+        k = (s["date"], s["market"], str(s["code"]), s["track"], s["anchor"],
+             s["h"])
+        if k in seen:
+            continue
+        seen.add(k)
+        s = dict(s, judged_at=now_iso) if now_iso else dict(s)
+        rows.append(s)
+    rows.sort(key=lambda r: (str(r.get("date")), str(r.get("market")),
+                             str(r.get("code")), str(r.get("track")),
+                             str(r.get("anchor")), int(r.get("h") or 0)))
+    tmp = path + ".tmp"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(tmp, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    return rows
+
+
 # ---------------------------------------------------------------- 渲染（数字 SSOT 全在卡）
 
 def render_pack_block(card):
@@ -495,6 +670,10 @@ def render_pack_block(card):
     if not card or card.get("state") != "estimated":
         return ["弃权：%s（零权重参考，不影响裁决）" % (
             card.get("reason", "数据不足") if card else "无卡片")]
+
+    def _d(v):  # C1 收口：投影端滤 None 键后渲染端不得再渗 "None%" 字面量
+        return "—" if v is None else v
+
     L = []
     m = card.get("math", {})
     L.append("σ_d=%s（%s）· 预测带=零漂移 ±σ_d×√h（%s；触及概率为 "
@@ -526,6 +705,28 @@ def render_pack_block(card):
     mfs = " ".join("%s=%s" % (k, v) for k, v in mf.items() if v is not None)
     if mfs:
         L.append("资金面：%s（A 股主力净额亿元 / 港股南向持股比百分点变化）" % mfs)
+    mk = em.get("market") or {}
+    if mk.get("state") == "estimated":
+        parts = []
+        mg = mk.get("margin") or {}
+        if mg:
+            parts.append("两融 %s 亿（Δ5d %s%%·分位 %s%%）" % (
+                _d(mg.get("balance_yi")), _d(mg.get("chg_5d_pct")),
+                _d(mg.get("pctile_70d"))))
+        tp = mk.get("turnover_pctile") or {}
+        if tp:
+            parts.append("全A换手分位 %s%%" % _d(tp.get("pctile")))
+        ep = mk.get("erp") or {}
+        if ep:
+            parts.append("ERP %s%%（分位 %s%%）" % (
+                _d(ep.get("erp_pct")), _d(ep.get("pctile_5y_monthly"))))
+        ma = mk.get("margin_accounts") or {}
+        if ma:
+            parts.append("两融参与 %s 户（Δ5d %s%%）" % (
+                _d(ma.get("traders")), _d(ma.get("traders_chg_5d_pct"))))
+        if parts:
+            L.append("市场级情绪：%s（市场维度共享数据·T+1 披露为主）"
+                     % " · ".join(parts))
     exp = (card.get("experience", {}).get("tracks") or {})
     for prof, bucket in exp.items():
         parts = ["T+%s:%s样本%s" % (h, b.get("n"),
@@ -882,7 +1083,135 @@ def selftest():
             clash = fx_keys & real_keys
             assert not clash, "fixture 与真实持仓零重合被破坏：%s" % clash
 
-    # ⑩ 零权重金标准（E4/E5 同构）：evidence 挂 outlook 块/卡片键不得扰动
+    # ⑩-前 市场级情绪五块投影（0.0.19）：可用块入卡、pack 出市场级行；
+    #     全缺 abstained；hk not_supported 不入
+    ev_mkt = ev(blocks={
+        "margin": {"state": "available", "source": "dc-margin",
+                   "balance_yi": 22988.6, "chg_1d_pct": 0.1,
+                   "chg_5d_pct": 0.8, "chg_20d_pct": 2.1,
+                   "pctile_70d": 88.0, "as_of": "2026-11-03"},
+        "turnover_pctile": {"state": "available", "source": "tx-idx",
+                            "pctile": 71.2, "window": 250,
+                            "as_of": "2026-11-03"},
+        "erp": {"state": "available", "source": "legu-pe+dc-bond+csindex",
+                "erp_pct": 3.1, "pctile_5y_monthly": 42.0,
+                "monthly_pe": 16.2, "y10_pct": 2.9, "as_of": "2026-10",
+                "daily_ready": False},
+        "margin_accounts": {"state": "available", "source": "em-mkt-account",
+                            "traders": 324753.0, "traders_chg_5d_pct": 8.1,
+                            "traders_chg_20d_pct": -0.4,
+                            "debt_holders": 280123.0, "as_of": "2026-11-03"},
+        "index": {"state": "available", "source": "tx-idx",
+                  "indices": {"HS300": {"as_of": "2026-11-03",
+                                        "close": 4008.9, "ma60": 3950.2,
+                                        "dist_ma60_pct": 1.5}}}})
+    card_m = derive_outlook(ev_mkt, ctx)
+    mkt = card_m["emotion"]["market"]
+    assert mkt["state"] == "estimated" and set(
+        mkt) >= {"margin", "turnover_pctile", "erp", "margin_accounts",
+                 "index"}, mkt.keys()
+    assert mkt["margin"]["balance_yi"] == 22988.6
+    assert mkt["margin_accounts"]["traders"] == 324753.0
+    assert any(ln.startswith("市场级情绪：") for ln in render_pack_block(card_m))
+    assert card["emotion"]["market"]["state"] == "abstained", \
+        "无市场块 fixture 须 abstained"
+    hk_only = derive_outlook(
+        ev(meta={"symbol": "hk8800", "market": "hk", "code": "8800",
+                 "session": {"phase": "closed"}},
+           blocks={"margin": {"state": "not_supported"},
+                   "index": {"state": "not_supported"},
+                   "turnover_pctile": {"state": "not_supported"},
+                   "erp": {"state": "not_supported"},
+                   "margin_accounts": {"state": "not_supported"}}),
+        dict(ctx, signals=hk_sig))
+    assert hk_only["emotion"]["market"]["state"] == "abstained"
+    # C1 破坏性钉：erp partial「仅日频积累、无数值键」形态不入卡——防
+    # "ERP None%" 字面量渗进 pack/日表（月频链失败是五新源的常态路径）
+    ev_erp_part = ev(blocks={
+        "erp": {"state": "partial", "source": "csindex",
+                "daily_pe_accum": 20, "daily_ready": False},
+        "turnover_pctile": {"state": "available", "source": "tx-idx",
+                            "pctile": 71.2, "window": 250,
+                            "as_of": "2026-11-03"}})
+    card_ep = derive_outlook(ev_erp_part, ctx)
+    mk_ep = card_ep["emotion"]["market"]
+    assert mk_ep["state"] == "estimated" and "erp" not in mk_ep \
+        and "turnover_pctile" in mk_ep, mk_ep.keys()
+    assert "None" not in "".join(render_pack_block(card_ep)), \
+        "pack 不得出现 None 字面量"
+    # ⑩-前2 预测带自校准（P3）：触及判定/样本/分桶/幂等台账
+    cb = [{"date": "2026-06-01", "open": 10, "high": 10.5, "low": 9.8,
+           "close": 10.2, "volume": 1},
+          {"date": "2026-06-02", "open": 10, "high": 11.0, "low": 10.0,
+           "close": 10.8, "volume": 1},
+          {"date": "2026-06-03", "open": 10, "high": 10.4, "low": 9.5,
+           "close": 9.9, "volume": 1},
+          {"date": "2026-06-04", "open": 10, "high": 10.2, "low": 9.9,
+           "close": 10.0, "volume": 1}]
+    assert touch_judgment(cb, "2026-06-01", 10.9, 1) is True   # 卡后首根 high 11.0 上穿
+    assert touch_judgment(cb, "2026-06-01", 11.5, 3) is False  # 窗内最高 11.0 未及
+    assert touch_judgment(cb, "2026-06-01", 9.6, 2) is True    # low 9.5 回落触及
+    assert touch_judgment(cb, "2026-06-01", 10.9, 5) is None, "不满窗不记（右删防护）"
+    assert touch_judgment(cb, "2026-06-01", None, 2) is None
+    cal_card = {"state": "estimated", "market": "cn", "code": "999999",
+                "date": "2026-06-01", "price": 10.2,  # 卡日收盘（qfq 防御基准）
+                "math": {"tracks": {"default": {"anchors": {
+                    "target1": {"value": 10.9,
+                                "touch": {"1": 0.3, "3": 0.5}},
+                    "stop": {"value": 9.7,
+                             "touch": {"1": 0.4, "3": 0.6}}}}}}}
+    smp = calibration_samples([cal_card], {("cn", "999999"): cb})
+    # 卡日收盘 10.2：target1=10.9 上穿锚（h=1 即触，06-02 high 11.0）；
+    # stop=9.7 回落锚（h=1 未触 low 10.0，h=3 触 06-03 low 9.5）
+    assert {(s["anchor"], s["h"], s["touched"]) for s in smp} == {
+        ("target1", 1, True), ("target1", 3, True),
+        ("stop", 1, False), ("stop", 3, True)}, smp
+    many = ([dict(s, p=0.1, touched=False) for s in smp] +
+            [dict(s, p=0.9, touched=True) for s in smp] * 35)
+    bk = calibration_buckets(many)
+    assert any(b["n"] >= 30 and not b["insufficient"] and
+               b["actual_rate"] == 1.0 for b in bk
+               if b["bucket"].startswith("0.8")), bk
+    assert all(b["insufficient"] for b in bk if b["n"] < 30)
+    with tempfile.TemporaryDirectory() as td_c:
+        r1 = merge_calibration(td_c, smp, "2026-11-04T20:00:00+08:00")
+        assert len(r1) == len(smp)
+        r2 = merge_calibration(td_c, smp)  # 幂等：重复合并零增
+        assert r2 == r1
+        with open(os.path.join(td_c, "outlook-calibration.jsonl"),
+                  encoding="utf-8") as f:
+            assert len([l for l in f if l.strip()]) == len(smp)
+        with open(os.path.join(td_c, "outlook-calibration.jsonl"), "a",
+                  encoding="utf-8") as f:  # 坏行/标量行/类型损坏行自愈
+            f.write("not-json\n123\n"
+                    '{"date":"2026-06-01","market":"cn","code":"1","track":'
+                    '"default","anchor":"t","h":"x","p":0.3,"touched":true}\n'
+                    '{"date":"2026-06-01","market":"cn","code":"1","track":'
+                    '"default","anchor":"t","p":0.3}\n')
+        r3 = merge_calibration(td_c, [])
+        assert len(r3) == len(smp), "类型损坏行须载入即滤（防 sort/buckets 毒丸）"
+        assert all(_valid_cal_row(r) for r in r3)
+    # qfq 重基准防御钉：卡 price 与序列卡日收盘偏离 >0.5% → 整卡丢样本
+    rebase_bars = [dict(b, close=round(b["close"] * 0.8, 3))  # 模拟除权重定价
+                   for b in cb]
+    assert calibration_samples([cal_card], {("cn", "999999"): rebase_bars}) == []
+    near_bars = [dict(b, close=round(b["close"] * 1.004, 3))  # 0.4% 噪声不丢
+                 for b in cb]
+    assert calibration_samples([cal_card], {("cn", "999999"): near_bars}), \
+        "≤0.5% 偏离属正常价差噪声，不得丢样本"
+
+    # C1 扩展钉：margin 缺变动/分位键（短序列残块形态）——渲染端 _d 兜底
+    # 出「—」而非 "None%" 字面量（投影端滤键只堵了入卡侧，渲染侧是第二道）
+    ev_mg_part = ev(blocks={
+        "margin": {"state": "available", "source": "dc-margin",
+                   "balance_yi": 22988.6, "as_of": "2026-11-03"}})
+    card_mg = derive_outlook(ev_mg_part, ctx)
+    mk_mg = card_mg["emotion"]["market"]
+    assert mk_mg["state"] == "estimated" and "margin" in mk_mg \
+        and "chg_5d_pct" not in mk_mg["margin"], mk_mg.keys()
+    _mg_line = "".join(ln for ln in render_pack_block(card_mg)
+                       if ln.startswith("市场级情绪："))
+    assert _mg_line and "None" not in _mg_line and "—" in _mg_line, _mg_line
     #     质量分与置信帽——裁决对走势参考结构性零感知（outlook 无意见通道，
     #     LLM 只能引用其数字作 rationale 素材，与 mid_term 同地位）
     import adjudicate as aj

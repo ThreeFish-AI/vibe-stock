@@ -18,6 +18,7 @@
 | portfolio.py | D | 手数贴合 + 三段建仓 + 三价纪律 + 一致性校验 |
 | render_index.py | — | 主报告 index.md 渲染（数字全部从 SSOT 派生，勿手改产物） |
 | outlook_daily.py | — | 在册股走势参考收盘批量（口径以 [09](../references/09-outlook.md) 为准：universe import watch、FetchLock 单窗逐股取数、收盘卡幂等 upsert、全集日表渲染；`--render` 零取数） |
+| outlook/com.threefish.vibestock.outlook.plist | — | 收盘批量 launchd 模板（周一至五 17:35 单槽；安装三步见模板注释；语义见 09 分期表 P2） |
 
 `wf_*.mjs` 是宿主工作流脚本形态（phase/agent/parallel/pipeline/log/args 全局，
 文件头注释写明参数化路径——`scan_root`/`skill_dir`（及 `codes`/`shortlist`）
@@ -62,6 +63,6 @@ yfinance $SK/scripts/postmortem.py`（skill 自带，见
 - 深评摘要 `digest.py` 与主报告 `render_index.py` 不写运行日志类 json；各
   产物文件的唯一事实源地位与「勿手改」纪律见
   [06「产物 SSOT 布局」](../references/06-batch-scan.md)。
-- 本目录属参考实现，不设 `--selftest` 门禁：改动以 scripts/ 五件 selftest
+- 本目录属参考实现，不设 `--selftest` 门禁：改动以 scripts/ 六件 selftest
   全绿（AGENTS.md 测试口径）+ `py_compile`/`node --check` 语法冒烟 + 06
   口径复核为准。

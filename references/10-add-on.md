@@ -15,11 +15,11 @@
   给出独立的加仓动作建议，空仓者建议仍由五信号驱动。
 - 与 [03]「透镜不进裁决」红线的显式例外：lens 三档中的「**有支撑**（置信
   ≥medium）」在**门 2 逆势窄门**内作资格输入。这是本规约对 03 该节的一次
-  显式修订（裁决链外的资格门不属「裁决环节」），已在 CHANGELOG 0.0.19 记录；
+  显式修订（裁决链外的资格门不属「裁决环节」），已在 CHANGELOG 0.0.22 记录；
   除此一处外透镜输出仍不进任何判定。收紧/修订本例外属 minor 级语义变更。
 - 汇率红线（[03]）沿用：门 3 包络不引入 HKD/CNY 换算（跨币种权重线留 P2，
   待裁定是否豁免汇率红线于仓位工程或引入恒定换算口径）。
-- **置信门**（0.0.19 评审补定）：idle 触发前过 addon 自身置信门
+- **置信门**（0.0.22 评审补定）：idle 触发前过 addon 自身置信门
   `aggregate.confidence ≥ 0.5`（与 default 轨登记门同源，口径 =
   adjudicate.CONFIDENCE_GATE）——低置信日不出买入侧建议（首加/等回踩），
   与 [04] §7「检查没过结论停在保守档」对齐；**不要求 executable**：
@@ -34,7 +34,7 @@
 | 判据 | 数值口径 | 冻结条件 |
 |---|---|---|
 | 短线卖族 | verdict.risk_guard.final | ∈ {sell, strong_sell} |
-| 风险角色 | risk.json | veto 或 downgrade = true |
+| 风险角色 | risk.json | veto 或 downgrade = true（通道级判据、判据族无关——含后续新增的只降不升判据族，如 08 ②-8 市场级杠杆拥挤触发 downgrade 时本门同步冻结，属跨判据族的合理收严） |
 | 中线卖族 | verdict.position.risk_guard.final | ∈ {sell, strong_sell}（无中线裁决不冻结） |
 | A-1 临近解禁（→08 ①-3） | `unlock.upcoming[].{date,ratio_pct}` | 未来 90 日历日（≈60 交易日近似）内 ratio_pct ≥3% |
 | A-2 估值极端（→08 ②-4） | `valuation.{pe,pb}_percentile_5y` | 任一 >90（逐项缺失跳过） |

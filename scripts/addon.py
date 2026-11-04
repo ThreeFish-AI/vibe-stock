@@ -282,7 +282,7 @@ def value_trigger(evidence, pverdict, lens):
     红线的显式例外（裁决链外资格门，03/10 已注记）。
     数据源必须是中线轨裁决：quality_value 是 profile=position 策略，其
     买点意见只进 opinions.position.json → pverdict（diagnose prepare
-    契约）——读 default 轨 verdict 恒空，窄门将不可达（I-015 修复）。"""
+    契约）——读 default 轨 verdict 恒空，窄门将不可达（I-020 修复）。"""
     _, tech = _blk(evidence, "technical")
     price, ma20 = _price_of(evidence), _f(tech.get("ma20"))
     blockers = []
@@ -629,7 +629,7 @@ def selftest():
 
     # 5) 逆势窄门：现价<ma20 + quality_value（**中线轨 pverdict**——prepare
     #    契约下 position 策略意见只进 pverdict；旧实现读 default 轨 verdict
-    #    恒空使窄门不可达，I-015 修复）+ 有支撑
+    #    恒空使窄门不可达，I-020 修复）+ 有支撑
     v_ev = ev(technical=tech(ma5=8.5, ma10=9.0, ma20=9.6), quote={"price": 9.0},
               daily_bars={"bars": bars_from([9.5] * 19 + [9.0])},
               unlock={"state": "available", "data": {"upcoming": []}},
