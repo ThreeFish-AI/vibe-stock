@@ -521,6 +521,10 @@ def render_pack_block(card):
     if not card or card.get("state") != "estimated":
         return ["弃权：%s（零权重参考，不影响裁决）" % (
             card.get("reason", "数据不足") if card else "无卡片")]
+
+    def _d(v):  # C1 收口：投影端滤 None 键后渲染端不得再渗 "None%" 字面量
+        return "—" if v is None else v
+
     L = []
     m = card.get("math", {})
     L.append("σ_d=%s（%s）· 预测带=零漂移 ±σ_d×√h（%s；触及概率为 "
@@ -558,19 +562,19 @@ def render_pack_block(card):
         mg = mk.get("margin") or {}
         if mg:
             parts.append("两融 %s 亿（Δ5d %s%%·分位 %s%%）" % (
-                mg.get("balance_yi"), mg.get("chg_5d_pct"),
-                mg.get("pctile_70d")))
+                _d(mg.get("balance_yi")), _d(mg.get("chg_5d_pct")),
+                _d(mg.get("pctile_70d"))))
         tp = mk.get("turnover_pctile") or {}
         if tp:
-            parts.append("全A换手分位 %s%%" % tp.get("pctile"))
+            parts.append("全A换手分位 %s%%" % _d(tp.get("pctile")))
         ep = mk.get("erp") or {}
         if ep:
             parts.append("ERP %s%%（分位 %s%%）" % (
-                ep.get("erp_pct"), ep.get("pctile_5y_monthly")))
+                _d(ep.get("erp_pct")), _d(ep.get("pctile_5y_monthly"))))
         ma = mk.get("margin_accounts") or {}
         if ma:
             parts.append("两融参与 %s 户（Δ5d %s%%）" % (
-                ma.get("traders"), ma.get("traders_chg_5d_pct")))
+                _d(ma.get("traders")), _d(ma.get("traders_chg_5d_pct"))))
         if parts:
             L.append("市场级情绪：%s（市场维度共享数据·T+1 披露为主）"
                      % " · ".join(parts))
@@ -986,6 +990,18 @@ def selftest():
         and "turnover_pctile" in mk_ep, mk_ep.keys()
     assert "None" not in "".join(render_pack_block(card_ep)), \
         "pack 不得出现 None 字面量"
+    # C1 扩展钉：margin 缺变动/分位键（短序列残块形态）——渲染端 _d 兜底
+    # 出「—」而非 "None%" 字面量（投影端滤键只堵了入卡侧，渲染侧是第二道）
+    ev_mg_part = ev(blocks={
+        "margin": {"state": "available", "source": "dc-margin",
+                   "balance_yi": 22988.6, "as_of": "2026-11-03"}})
+    card_mg = derive_outlook(ev_mg_part, ctx)
+    mk_mg = card_mg["emotion"]["market"]
+    assert mk_mg["state"] == "estimated" and "margin" in mk_mg \
+        and "chg_5d_pct" not in mk_mg["margin"], mk_mg.keys()
+    _mg_line = "".join(ln for ln in render_pack_block(card_mg)
+                       if ln.startswith("市场级情绪："))
+    assert _mg_line and "None" not in _mg_line and "—" in _mg_line, _mg_line
     #     质量分与置信帽——裁决对走势参考结构性零感知（outlook 无意见通道，
     #     LLM 只能引用其数字作 rationale 素材，与 mid_term 同地位）
     import adjudicate as aj
