@@ -9,8 +9,8 @@ reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](0
 [batch/README](../batch/README.md)）；在册股票盘中盯盘/收盘复核走
 [07-monitor](07-monitor.md) 盯盘子技能（`batch/monitor/` 参考实现）；
 中线（1–6 个月）因子口径与只降不升风险判据族见 [08-midterm](08-midterm.md)；
-持仓股加仓决策轨（三道门 + 三段确认制）见 [09-add-on](09-add-on.md)。
-
+持仓股加仓决策轨（三道门 + 三段确认制）见 [10-add-on](10-add-on.md)；
+在册股短/中期走势参考（零权重卡与收盘批量）见 [09-outlook](09-outlook.md)。
 ```text
 ① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；16 块=核心六块
               （计分）+扩展十块（资金流/公告/研报/预告/解禁/股东户数/大盘/
@@ -18,7 +18,8 @@ reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](0
               技术节另含 mid_term 中线因子三行——1–6 个月口径，判据见 08
 ② 拼上下文    diagnose.py prepare → context-pack.md（有界证据包+哨兵+置信帽+
               盘中警示行；--cost 时另附基本面锚节——取数时段口径见
-              [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)）
+              [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)；走势参考卡
+              outlook.json 恒现算注入「走势参考（零权重）」节（[09](09-outlook.md)））
 ③ 能力自检    市场支持表与新鲜度体现在八态本身（not_supported/missing 即答案）
 ④ 多角色+策略  LLM 按 SKILL.md 读 context-pack 与 strategies/*.yaml 产意见
               （双轨：短线 opinions.json + 中线 opinions.position.json +
@@ -65,13 +66,18 @@ uv run --no-project $T/scripts/diagnose.py migrate-reports [--apply]
 uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance \
   $T/scripts/postmortem.py --stock 600519
 
+# 在册股走势参考收盘批量（≥17:10；幂等：当日已卡跳过；--render 零取数重渲
+#     日表；并发与预算纪律见 09——FetchLock 单窗、盯盘期间不跑）
+uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
+  python $T/batch/outlook_daily.py --daily [--force]
+
 # 回归（改 scripts/ 后必须全绿）
 uv run --no-project $T/scripts/adjudicate.py --selftest
 uv run --no-project $T/scripts/diagnose.py --selftest
 uv run --no-project $T/scripts/postmortem.py --selftest
 uv run --no-project $T/scripts/lens.py --selftest
 uv run --no-project $T/scripts/addon.py --selftest
-```
+uv run --no-project $T/scripts/outlook.py --selftest```
 
 ## akshare 版本纪律
 

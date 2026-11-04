@@ -40,6 +40,14 @@
    position 文件不出节（单轨形态逐字节兼容）；坑位：波段带是纪律参考线
    不是止损指令——报告不得把它写成离场价，三层下行门（箱体下沿−5% 总回撤/
    regime 失效/基本面证伪走 risk.json）是唯一离场口径（[08](08-midterm.md)）。
+4c. **短/中期走势参考**（条件：workdir 存在 `outlook.json` 且卡片身份与
+   证据一致（零权重软校验——不符只跳节+warn，不 exit 2；分级依据：裁决
+   事实面身份闸门防串目录，信息面可观测即可）；做法：在中线裁决节后渲染
+   「## 短/中期走势参考（零权重 · 不进裁决）」——数学面（双轨 σ√h 预测带
+   +锚位触及概率）、情绪面、经验计数、日差连向、用户锚（实盘股脱敏投影），
+   数字 SSOT 在 outlook.json、报告只渲染不重算；band/beta/零权重三声明
+   齐全（预测带≠后验判定带两把尺）；坑位：不得把预测带写成止损/目标
+   指令——本节是参考不是建议（[09](09-outlook.md)）；abstained 不出节）。
 5. **风险与利好**：逐条挂反对意见与支持意见的 rationale（有据可查）。条件：
    `report` 渲染（读 workdir 的 opinions.json 与 risk.json）；做法：风险栏=卖出族
    意见 + 风险角色 risk.json.rationale（标注 veto/downgrade 触发态），利好栏=买入族
@@ -49,7 +57,7 @@
    表外写法意见的 rationale 混挂进来。
 6. **操作建议**：空仓者与持仓者分开、按最终信号给纪律性动作（不追高/止损位）；
    持仓者分支五档——可加仓（轨道/手数上限/add_ref/确认与撤销条件，仅
-   [09](09-add-on.md) 加仓轨触发时）/ 持有（含「等回踩」变体）/ 持有观察 /
+   [10](10-add-on.md) 加仓轨触发时）/ 持有（含「等回踩」变体）/ 持有观察 /
    减仓 / 离场；持仓股另出「### 加仓评估（addon）」节（三道门逐项
    green/red/skip 可溯源）。
 7. **检查清单**：核心证据齐备 / 无高严重度分歧 / 置信 ≥0.5 / 未偏离 MA20 过远
@@ -150,12 +158,11 @@ Fixture 与 [I-006](../docs/.agents/issue.md#I-006) 以本节为准，不另立�
 | 元素 | `market` | 字符串 | `cn` / `hk` |
 | 元素 | `quantity` | 数值 | 持仓数量 |
 | 元素 | `cost_price` | 数值 | 成本价，按登记币种原样（`currency` 等其余元素键仓内不消费） |
-| 顶层 | `operations` | 列表 | 成交流水（0.0.18 起 [09](09-add-on.md) 加仓轨三段状态机消费：首加/确认加成交判定）；缺失/非列表/元素非对象一律折空列表静默降级（脏数据不开门也不崩栈） |
+| 顶层 | `operations` | 列表 | 实际成交流水（到秒时间戳）；缺失/非列表/元素非对象一律折空列表静默降级（脏数据不开门也不崩栈）。消费方两处：0.0.19 起 [10](10-add-on.md) 加仓轨三段状态机（首加/确认加成交判定），与 [09](09-outlook.md) 用户锚脱敏投影（只读 `time/market/code/action/price` 五键、market 仅归一匹配；quantity/cost_price/成本派生涨幅绝不消费绝不落盘） |
 | 元素（operations） | `code` | 字符串 | 同 holdings 元素 code 形态（状态机按 zfill(5) 归一比对） |
-| 元素（operations） | `action` | 字符串 | `buy` / `sell`（状态机消费 `buy`） |
-| 元素（operations） | `time` | 字符串 | ISO 8601 日期时间（取前 10 位为成交日期，如 `2026-11-04T14:00:00+08:00`） |
-| 元素（operations） | `market`/`qty`/`price` | 可选 | 仓内暂不消费（预留）。坑位：[07](07-monitor.md) sim-portfolio.json 的 `operations` 是**另一文件另一 schema**（`side`/`ts`/`lots` 命名），勿混写 |
-
+| 元素（operations） | `action` | 字符串 | `buy` / `sell`（状态机消费 `buy`；outlook 锚同读） |
+| 元素（operations） | `time` | 字符串 | ISO 8601 日期时间（到秒；取前 10 位为成交日期，如 `2026-11-04T14:00:00+08:00`） |
+| 元素（operations） | `market`/`price` | 可选 | outlook 锚只读不改；`qty` 仓内暂不消费（预留）。坑位：[07](07-monitor.md) sim-portfolio.json 的 `operations` 是**另一文件另一 schema**（`side`/`ts`/`lots` 命名），勿混写 |
 - **契约漂移可观测**（适用：report / postmortem 重建索引时加载 portfolio.json）：
   做法——文件不存在、合法空表静默；文件存在但损坏、顶层非对象、缺 `holdings`
   或非列表、元素缺字符串 `code`/`market` 被跳过、`code`/`market` 不合报告目录

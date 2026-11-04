@@ -17,7 +17,7 @@
   position=波段带三键，见 [04](04-report.md) 4b）；坑位：无 position 文件时
   单轨登记，行为与历史逐字节一致；两轨同用同一份 evidence/报告文件，
   report_id 相同、profile 不同）。
-- **addon 轨登记**（0.0.18 起，[09](09-add-on.md)）：持仓股 report 段加仓轨
+- **addon 轨登记**（0.0.19 起，[10](10-add-on.md)）：持仓股 report 段加仓轨
   判定 advice=first_add 时经 `action_override=add_on` 登记一条
   `profile=addon` 信号（action=add_on、family=bull、horizons=[1,3,5,10]、
   key_levels 附 add_ref/confirm_lo/size_cap/first_qty）；confirm/abort 是
@@ -111,7 +111,7 @@
 - 回看各 horizon 实际收盘：买入族 ≥+band hit / ≤−band miss / 其间 neutral；
   卖出族对称；watch/hold 只观察不记分——band 见上文「期限轨」（default 恒
   ±2%、position=σ_d×√h）。
-- **到期收盘门（I-010）**（条件：到期 horizon 落在日 K 序列末根、末根日期==
+- **到期收盘门（I-011）**（条件：到期 horizon 落在日 K 序列末根、末根日期==
   当日（UTC+8）且该市场盘中——`fetch.session_phase` 的 `last_bar_partial`
   判据，时钟可注入）；做法——视为未到期：不评估、保持 pending，待收盘后
   下一次运行补评（周末/节假日自然收盘态、正常评估）；坑位——盘中价不是

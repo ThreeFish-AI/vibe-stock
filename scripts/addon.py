@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """持仓股加仓决策轨（add-on track）——确定性资格门与三段确认制。
 
-定位（references/09 SSOT）：裁决链**之外**的确定性编排算术（同 batch/
+定位（references/10 SSOT）：裁决链**之外**的确定性编排算术（同 batch/
 portfolio.py 先例）——不进五信号聚合、不改 RiskGuard、不投方向票；对已
 持有股票回答「该不该加、加多少、什么价位、加错怎么撤销」。三道门：
   门1 资格冻结/解冻：短线终判 sell 族 / risk veto·downgrade / 中线降档 /
@@ -29,7 +29,7 @@ import json
 import math
 import os
 
-# ---------------------------------------------------------------- 常量（判据 SSOT，改判据须同步 references/09 与 CHANGELOG）
+# ---------------------------------------------------------------- 常量（判据 SSOT，改判据须同步 references/10 与 CHANGELOG）
 
 FREEZE_SIGNALS = {"sell", "strong_sell"}   # 门1：短线终判卖族即冻结
 UNLOCK_DAYS = 90            # A-1：60 交易日 ≈ 90 日历日近似（确定性可算）
@@ -106,7 +106,7 @@ def load_operations(state_dir):
 # ---------------------------------------------------------------- 门1：风险链与资格冻结
 
 def risk_chain(evidence, today):
-    """A 族风险链确定性判据（字段口径见 references/09；数值判据指回 08）。
+    """A 族风险链确定性判据（字段口径见 references/10；数值判据指回 08）。
     返回 (reasons, detail)：reasons 非空=冻结；detail 逐条给
     green/red/skip（skip=制度性无数据或字段未接入，09 缺证据口径）。"""
     reasons, detail = [], {}

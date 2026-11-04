@@ -656,7 +656,7 @@ def _mid_term(bars, market=None, code=None):
 
 def derive_technical(bars, session=None, market=None, code=None):
     """日 K 纯标准库派生技术指标（MA/RSI/MACD/量比/52 周位置/20 日新高低/
-    量比序列/K 线形态/嵌套 mid_term）。箱体口径（I-012）：box_60d 取**不含
+    量比序列/K 线形态/嵌套 mid_term）。箱体口径（I-013）：box_60d 取**不含
     当日**的前 60 根高低点——含当日会让任何新低日 box.lo==当日最低，「触箱底」
     成同义反复；pos_pct 按现价对该前窗口 hi/lo 计算且不截断（跌破前箱底为负、
     突破上沿 >100，越界即信息）；前窗口不足 20 根不出。"""
@@ -1143,7 +1143,7 @@ def fetch_moneyflow_hk(code, st, now):
     口径（无条件全局规则：披露制度≠数据陈旧）：南向持股为 T-1 披露（收盘后
     傍晚更新），最新日=available+note 注明披露日；仅披露日距今超过
     STALE_DAYS["moneyflow"]（10 自然日，停牌/断更形态）才标 stale——勿把制度性
-    T-1 当陈旧降级。口径二（I-011）：HOLD_SHARES_CHANGE/ADD_MARKET_CAP 是披露
+    T-1 当陈旧降级。口径二（I-012）：HOLD_SHARES_CHANGE/ADD_MARKET_CAP 是披露
     日 D 的持仓差、对应 D-2 日南向成交（港股 T+2 交收，港交所日成交 6 组样本
     验证）——字段名 net_buy_shares_1d/net_buy_amount_1d_hkd 沿用（下游渲染在
     用勿改名），summary.chg_trade_lag_note 与 note 写明，勿当当日净买入解读
