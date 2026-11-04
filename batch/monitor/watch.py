@@ -669,8 +669,11 @@ def _outlook_digest(state_dir, today):
     if not cards:
         return []
     lines = ["## 走势参考（上一张收盘卡 · %s）" % day, ""]
-    lines.append("- 全文（21 只全集日表 + 预测带/经验计数）：~/.vibe-stock/"
-                 "outlook/%s.md" % day)
+
+    def _d(v):  # C1 收口同律：投影端滤 None 键后渲染端不得渗 "None%" 字面量
+        return "—" if v is None else v
+    lines.append("- 全文（全集日表 + 预测带/经验计数）：%s.md"
+                 % os.path.join(vol.outlook_dir(state_dir), day))
     for c in cards:  # 市场维度共享：任取一张卡的市场级投影
         mk = (c.get("emotion") or {}).get("market") or {}
         if mk.get("state") != "estimated":
@@ -678,17 +681,18 @@ def _outlook_digest(state_dir, today):
         mg = mk.get("margin") or {}
         if mg:
             lines.append("- 两融余额 %s 亿（%s，Δ5d %s%%，70 日分位 %s%%）"
-                         % (mg.get("balance_yi"), mg.get("as_of"),
-                            mg.get("chg_5d_pct"), mg.get("pctile_70d")))
+                         % (_d(mg.get("balance_yi")), mg.get("as_of"),
+                            _d(mg.get("chg_5d_pct")),
+                            _d(mg.get("pctile_70d"))))
         tp = mk.get("turnover_pctile") or {}
         if tp:
-            lines.append("- 全A换手分位 %s%%（%s）" % (tp.get("pctile"),
+            lines.append("- 全A换手分位 %s%%（%s）" % (_d(tp.get("pctile")),
                                                       tp.get("as_of")))
         ep = mk.get("erp") or {}
         if ep:
             lines.append("- ERP %s%%（%s，5 年月频分位 %s%%）" % (
-                ep.get("erp_pct"), ep.get("as_of"),
-                ep.get("pctile_5y_monthly")))
+                _d(ep.get("erp_pct")), ep.get("as_of"),
+                _d(ep.get("pctile_5y_monthly"))))
         break
     lines.append("- 当日收盘卡由 17:35 批量产出（outlook_daily --daily）；零权重"
                  "参考，非投资建议")
@@ -1097,7 +1101,6 @@ def selftest():
 
     # 6b) 走势参考附件（09 P2）：close_pass 重渲消费上一张收盘卡（<today——
     #     当日卡 17:35 批量才出）；无目录/当日卡不出节
-    check("附件-无目录不出节", _outlook_digest(tempfile.mkdtemp(), today) == [])
     import outlook as _vol
     _card = {"schema": "outlook/1", "state": "estimated", "market": "cn",
              "code": "600001", "date": "2026-11-03", "price": 10.0,
@@ -1105,7 +1108,9 @@ def selftest():
              "emotion": {"market": {"state": "estimated", "margin": {
                  "balance_yi": 22988.6, "as_of": "2026-11-03",
                  "chg_5d_pct": -4.6, "pctile_70d": 1.4}}}}
-    with tempfile.TemporaryDirectory() as td_ol:
+    with tempfile.TemporaryDirectory() as td_ol, \
+            tempfile.TemporaryDirectory() as td_none:
+        check("附件-无目录不出节", _outlook_digest(td_none, today) == [])
         _vol.persist_card(td_ol, _card, "2026-11-03T18:00:00+08:00")
         dig = _outlook_digest(td_ol, "2026-11-04")
         check("附件-有卡出节", any("上一张收盘卡 · 2026-11-03" in s for s in dig))
@@ -1113,6 +1118,15 @@ def selftest():
         check("附件-零权重尾注",
               any("零权重" in s and "非投资建议" in s for s in dig))
         check("附件-当日卡不进附件", _outlook_digest(td_ol, "2026-11-03") == [])
+        # C1 收口同律（I-012）：残块缺键的投影经 digest 渲染不得渗 None 字面量
+        _card_part = json.loads(json.dumps(_card))
+        _card_part["emotion"]["market"]["margin"] = {
+            "balance_yi": 22988.6, "as_of": "2026-11-03"}
+        _vol.persist_card(td_ol, _card_part, "2026-11-03T18:01:00+08:00")
+        dig_p = _outlook_digest(td_ol, "2026-11-04")
+        _mg = "".join(s for s in dig_p if "两融余额" in s)
+        check("附件-缺键渲染—不渗None",
+              _mg and "None" not in _mg and "—" in _mg)
 
     # 7) launchd 模板回归钉（I-009：仅 09:15 单槽时重启/开机后当日盲窗——钉住
     #    补拉槽语义；模板与 selftest 同目录，plistlib 解析兼钉标准 XML 合法）
@@ -1145,6 +1159,26 @@ def selftest():
           max(blind(a, b) for a, b in zip(cyc, cyc[1:])) <= 30)
     check("盘后兜底槽在 16:10–16:40（收盘复核补跑）",
           any(16 * 60 + 10 <= m <= 16 * 60 + 40 for m in mins))
+    # 7b) outlook 17:35 收盘批量槽模板钉（09 P2 / 0.0.20 声明的 plistlib 解析
+    #     钉落地：模板漂移无钉可拦的虚称补实；与 monitor 模板同目录上两级）
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
+            __file__))), "outlook",
+            "com.threefish.vibestock.outlook.plist"), "rb") as f:
+        ojob = plistlib.load(f)
+    check("outlook 模板拉起 --daily", ojob["ProgramArguments"][-1] == "--daily")
+    check("outlook 模板无 KeepAlive（一次性命令，失败次日自愈）",
+          "KeepAlive" not in ojob)
+    check("outlook 模板 RunAtLoad=false", ojob["RunAtLoad"] is False)
+    o_slots = {}
+    for ent in ojob["StartCalendarInterval"]:
+        o_slots.setdefault(ent["Weekday"], set()).add(
+            ent["Hour"] * 60 + ent["Minute"])
+    check("outlook 模板周一至五单槽 17:35（≥17:10 定型窗后）",
+          sorted(o_slots) == [1, 2, 3, 4, 5]
+          and {frozenset(v) for v in o_slots.values()}
+          == {frozenset({17 * 60 + 35})})
+    check("outlook 槽与 monitor 最晚槽错峰 ≥60min（FetchLock 无重叠排队）",
+          min(next(iter(o_slots.values()))) - max(mins) >= 60)
 
     print("watch selftest: %d checks OK" % ok[0])
     return True

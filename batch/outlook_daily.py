@@ -293,14 +293,22 @@ def render_daily(state_dir):
     return path
 
 
-def calibrate(state_dir):
+def calibrate(state_dir, force=False):
     """预测带自校准后验（09 分期表 P3；独立于信号后验、不进 ledger）：历史
     卡 × 锚 × horizon 的触及概率 vs 实际触及频率。日 K 按股拉一次
     （FetchLock 单窗），样本幂等合并入 outlook-calibration.jsonl，渲染
-    calibration.md（派生视图）。新卡天然不满窗 → 样本随窗龄自然增厚。"""
+    calibration.md（派生视图）。新卡天然不满窗 → 样本随窗龄自然增厚。
+    墙钟门同 --daily（≥17:10；--force 越过）+ 末根未完成过滤（根本防线：
+    台账幂等键永不重判，盘中半根 K 一旦入账即永久错误样本）。"""
     latest = ol.latest_cards(state_dir)
     if not latest:
         print("无历史卡——先跑 --daily")
+        return None
+    now_dt = _now()
+    if not force and (now_dt.hour, now_dt.minute) < (17, 10):
+        print("拒跑：未到 17:10 收盘定型窗后（现 %02d:%02d）——判触及会把"
+              "未定型末根 K 永久钉成错误样本（幂等键永不重判）；--force "
+              "越过需自担（末根过滤仍生效）" % (now_dt.hour, now_dt.minute))
         return None
     lock = FetchLock(state_dir)
     if not lock.acquire(timeout=120):
@@ -316,6 +324,12 @@ def calibrate(state_dir):
             now = int(time.time())
             bars, bstate, _src, _tried = vfetch.fetch_daily_bars(
                 market, code, st, now)
+            if bars:
+                # 末根未完成过滤：判窗只用已定型 K（session_phase 判据=末根
+                # 日==今日且盘中）——盘中跑（--force）也不得记半根 K
+                if vfetch.session_phase(
+                        market, bars[-1]["date"])["last_bar_partial"]:
+                    bars = bars[:-1]
             if bars:
                 bars_by_code[key] = bars
             else:
@@ -334,14 +348,18 @@ def calibrate(state_dir):
         if name.endswith(".jsonl"):
             cards.extend(ol.load_cards(state_dir, name[:-6]))
     samples = ol.calibration_samples(cards, bars_by_code)
-    rows = ol.merge_calibration(state_dir, samples,
-                                _now().isoformat(timespec="seconds"))
+    run_stamp = _now().isoformat(timespec="seconds")
+    rows = ol.merge_calibration(state_dir, samples, run_stamp)
     buckets = ol.calibration_buckets(rows)
     L = ["# 预测带自校准（outlook calibration）", ""]
     L.append("口径：历史卡锚位触及概率（first-passage）vs 其后 h 根日 K 实际触及——"
              "方向按卡日收盘定（上方锚看上穿 high≥锚、下方锚看回落 low≤锚，"
              "屏障对称）；样本幂等键=日期+股+轨+锚+horizon；不满整窗不记"
-             "（右删防护，新卡随窗龄自然增厚）。")
+             "（右删防护，新卡随窗龄自然增厚）。坑位披露：①日 K 为 qfq 序列而"
+             "卡锚是卡时点绝对价——除权除息重基准会让旧锚 vs 新序列系统性偏"
+             "（上方锚触及被压低/下方抬高），卡价与序列卡日收盘偏离 >0.5% 的"
+             "卡整卡丢样本；②同股相邻 horizon 窗共享日 K，样本跨日重叠相关，"
+             "n 非独立样本数，表读数信息量低于表面精度。")
     L.append("")
     L.append("| p 桶 | n | 预测均值 | 实际触及率 | 状态 |")
     L.append("| --- | --- | --- | --- | --- |")
@@ -361,8 +379,9 @@ def calibrate(state_dir):
     path = os.path.join(ol.outlook_dir(state_dir), "calibration.md")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
-    print("校准：新增样本 %d · 台账累计 %d · 渲染 -> %s"
-          % (len(samples), len(rows), path))
+    added = sum(1 for r in rows if r.get("judged_at") == run_stamp)
+    print("校准：新增样本 %d（满窗计算 %d）· 台账累计 %d · 渲染 -> %s"
+          % (added, len(samples), len(rows), path))
     return path
 
 
@@ -377,7 +396,7 @@ def main():
     ap.add_argument("--state-dir", default=STATE_DIR)
     args = ap.parse_args()
     if args.calibrate:
-        return 0 if calibrate(args.state_dir) else 1
+        return 0 if calibrate(args.state_dir, force=args.force) else 1
     only = None
     if args.stock:
         market, code = vfetch.detect_market(args.stock)

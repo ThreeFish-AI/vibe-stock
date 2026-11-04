@@ -543,13 +543,25 @@ def touch_judgment(bars, card_date, anchor, h):
 
 def calibration_samples(cards, bars_by_code):
     """历史卡 × 锚 × horizon → (p, touched) 样本流（幂等键 card date+code+
-    track+anchor+h；touched=None 的不满窗样本丢弃）。纯函数。"""
+    track+anchor+h；touched=None 的不满窗样本丢弃）。纯函数。qfq 重基准
+    防御：bars 全链 adjust=qfq，除权除息后整条历史重定价——卡锚（卡时点
+    绝对价）vs 新序列会系统性偏（上方锚触及被压低/下方抬高），卡 price 与
+    序列在卡日收盘偏离 >0.5% 判重基准、整卡丢样本。"""
     out = []
     for c in cards or []:
         if c.get("state") != "estimated":
             continue
         key = (c.get("market"), c.get("code"))
         bars = bars_by_code.get(key) or []
+        cpx = _f(c.get("price"))
+        if cpx:
+            base_px = None
+            for b in bars:
+                if str(b.get("date", ""))[:10] == str(c.get("date", ""))[:10]:
+                    base_px = _f(b.get("close"))
+                    break
+            if base_px and abs(base_px / cpx - 1) > 0.005:
+                continue  # 重基准卡整卡丢弃（偏置样本比缺样本更坏）
         for track, t in (c.get("math", {}).get("tracks") or {}).items():
             horizons = ar.HORIZONS_OF.get(track, ())
             for name, a in (t.get("anchors") or {}).items():
@@ -588,12 +600,27 @@ def calibration_buckets(samples, min_n=30):
     return out
 
 
-CALIBRATION_LEDGER = os.path.join(STATE_DIR, "outlook-calibration.jsonl")
+def _valid_cal_row(r):
+    """台账行 schema 校验（坏行自愈的宽度口径）：类型损坏行（合法 JSON 但
+    h 非整数/p 非数/touched 非布尔等）与缺键行一并跳过——此类行会让 sort/
+    buckets 抛异常且崩点在台账写回之后（写回自愈永不触发），必须载入即滤。"""
+    return (isinstance(r, dict)
+            and isinstance(r.get("date"), str) and r.get("date")
+            and isinstance(r.get("market"), str) and r.get("market")
+            and isinstance(r.get("code"), str) and r.get("code")
+            and isinstance(r.get("track"), str) and r.get("track")
+            and isinstance(r.get("anchor"), str) and r.get("anchor")
+            and isinstance(r.get("h"), int) and not isinstance(r.get("h"), bool)
+            and isinstance(r.get("p"), (int, float))
+            and not isinstance(r.get("p"), bool)
+            and isinstance(r.get("touched"), bool))
 
 
 def merge_calibration(state_dir, new_samples, now_iso=None):
-    """校准样本台账 append（幂等：键 date+market+code+track+anchor+h 去重，
-    坏行跳过；tmp+replace 原子写）。返回合并后全量样本。"""
+    """校准样本台账 append（幂等：键 date+market+code+track+anchor+h 去重；
+    坏行/类型损坏行载入即滤、重写时自愈清除；tmp+replace 原子写）。返回
+    合并后全量样本。取舍：幂等键不含锚值/p——同键 --force 重跑且锚值更新时
+    保留首判样本（台账以首次判定为准，judged_at 不刷新）。"""
     path = os.path.join(state_dir, "outlook-calibration.jsonl")
     seen, rows = set(), []
     if os.path.exists(path):
@@ -605,7 +632,7 @@ def merge_calibration(state_dir, new_samples, now_iso=None):
                     r = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(r, dict):
+                if not _valid_cal_row(r):
                     continue
                 k = (r.get("date"), r.get("market"), str(r.get("code")),
                      r.get("track"), r.get("anchor"), r.get("h"))
@@ -1127,7 +1154,7 @@ def selftest():
     assert touch_judgment(cb, "2026-06-01", 10.9, 5) is None, "不满窗不记（右删防护）"
     assert touch_judgment(cb, "2026-06-01", None, 2) is None
     cal_card = {"state": "estimated", "market": "cn", "code": "999999",
-                "date": "2026-06-01",
+                "date": "2026-06-01", "price": 10.2,  # 卡日收盘（qfq 防御基准）
                 "math": {"tracks": {"default": {"anchors": {
                     "target1": {"value": 10.9,
                                 "touch": {"1": 0.3, "3": 0.5}},
@@ -1155,10 +1182,23 @@ def selftest():
                   encoding="utf-8") as f:
             assert len([l for l in f if l.strip()]) == len(smp)
         with open(os.path.join(td_c, "outlook-calibration.jsonl"), "a",
-                  encoding="utf-8") as f:  # 坏行/标量行自愈
-            f.write("not-json\n123\n")
+                  encoding="utf-8") as f:  # 坏行/标量行/类型损坏行自愈
+            f.write("not-json\n123\n"
+                    '{"date":"2026-06-01","market":"cn","code":"1","track":'
+                    '"default","anchor":"t","h":"x","p":0.3,"touched":true}\n'
+                    '{"date":"2026-06-01","market":"cn","code":"1","track":'
+                    '"default","anchor":"t","p":0.3}\n')
         r3 = merge_calibration(td_c, [])
-        assert len(r3) == len(smp)
+        assert len(r3) == len(smp), "类型损坏行须载入即滤（防 sort/buckets 毒丸）"
+        assert all(_valid_cal_row(r) for r in r3)
+    # qfq 重基准防御钉：卡 price 与序列卡日收盘偏离 >0.5% → 整卡丢样本
+    rebase_bars = [dict(b, close=round(b["close"] * 0.8, 3))  # 模拟除权重定价
+                   for b in cb]
+    assert calibration_samples([cal_card], {("cn", "999999"): rebase_bars}) == []
+    near_bars = [dict(b, close=round(b["close"] * 1.004, 3))  # 0.4% 噪声不丢
+                 for b in cb]
+    assert calibration_samples([cal_card], {("cn", "999999"): near_bars}), \
+        "≤0.5% 偏离属正常价差噪声，不得丢样本"
 
     # C1 扩展钉：margin 缺变动/分位键（短序列残块形态）——渲染端 _d 兜底
     # 出「—」而非 "None%" 字面量（投影端滤键只堵了入卡侧，渲染侧是第二道）
