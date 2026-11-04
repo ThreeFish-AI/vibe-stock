@@ -16,7 +16,7 @@
 | 绩效因子后验反馈（Beta 收缩、钳制） | `postmortem.py` + `ledger.json` |
 | 分歧显式化（三桶 + 冲突分级） | `adjudicate.py aggregate/disagreement` |
 | RiskGuard 只降不升 | `adjudicate.py risk_guard`（veto/单向降档/永不升级） |
-| 决策信号八态 + 对立失效 + 后验 | `diagnose.py register_signal` + `postmortem.py` |
+| 决策信号九态 + 对立失效 + 后验 | `diagnose.py register_signal` + `postmortem.py` |
 | 策略 YAML 说明书（策略即数据） | `strategies/` 十五策略（十短线 default + 五中线 position）+ 自定义扩展位 |
 | 扩展证据块 | 十五块零权重情报面（资金流/公告/研报/预告/解禁/股东户数/大盘/行业/估值 + 市场级五块：两融/指数基准/全A换手分位/ERP/两融账户参与度；汇率港股专属）不进质量分；簇级熔断 |
 
@@ -24,7 +24,8 @@
 
 财务（东财 HKF10→yfinance）、估值（具名列快照+百度 5 年分位+分位表）、研报
 共识（ETNet→yfinance 双源：逐券商目标价/EPS/评级、90 日 EPS 修正方向）、公告
-（东财 ann_type=H，盈警/回购分型）、南向持股（T-1 披露口径）均已接入免 key
+（东财 ann_type=H，盈警/回购分型）、南向持股（披露 T-1、持股变动对应成交
+D-2 口径）均已接入免 key
 公开源；chip/forecast/unlock/holder/industry 为港股能力边界（无对应披露形态），
 如实标 not_supported。
 
@@ -70,6 +71,18 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
   [docs/research/midterm-strategies.md](docs/research/midterm-strategies.md) 与
   [references/08-midterm.md](references/08-midterm.md)。
 
+## 持仓加仓决策轨（10）
+
+对 portfolio.json 在册持仓，report 段自动跑 `scripts/addon.py` 确定性加仓门：
+**三道门**（资格只冻不升格：短线/中线卖族、风险角色降档、A-1~A-5 风险链
+确定性判据 → 策略买点触发：顺势回踩主轨 + 逆势窄门「quality_value+基本面锚
+支撑+零风险链」→ 三段确认制手数：首加 1/2 批 → T+3 确认/撤销 → 60 日限频
+与浮亏包络）。报告持仓者分支五档（可加仓/持有·含等回踩变体/持有观察/
+减仓/离场）+「加仓
+评估」节逐门可溯源；首加建议登记 addon 信号（T+1/3/5/10 后验按 bull 记
+分——加仓建议也要被市场打分）。规约见
+[references/10-add-on.md](references/10-add-on.md)。
+
 ## 盘中盯盘（07 子技能）
 
 对在册股票（实盘持仓 + 模拟配置 + 观察票）做盘中价格面轮询：确定性规则锚定
@@ -82,10 +95,10 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 [references/07-monitor.md](references/07-monitor.md) 与
 [batch/monitor/](batch/monitor/)。
 
-文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（九篇规约 +
+文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（十篇规约 +
 PIPELINE）→ [batch/](batch/)（批量子技能参考实现）→
 [batch/monitor/](batch/monitor/)（盯盘参考实现）→ [strategies/](strategies/)
-（策略库）。回归：`scripts/*.py --selftest` 五件全绿（硬门禁）+
+（策略库）。回归：`scripts/*.py --selftest` 六件全绿（硬门禁）+
 `batch/monitor/*.py --selftest` 两件全绿（非阻塞旁路门禁）。
 
 ## 在册股走势参考（09 规约，0.0.18 起）
@@ -98,7 +111,6 @@ PIPELINE）→ [batch/](batch/)（批量子技能参考实现）→
 upsert），诊股 prepare 恒现算注入 context-pack 与报告 4c 节——**参考非信号**：
 不进裁决聚合/置信帽/后验记分/RiskGuard，预测带与后验判定带是两把尺。见
 [references/09-outlook.md](references/09-outlook.md)。
-
 ## 免责
 
 本项目输出仅供学习与研究参考，不构成投资建议；不下单、不保证收益。

@@ -25,7 +25,7 @@
 | --- | --- | --- | --- |
 | quote | 25 | 日 K 推导（或源实时） | 日 K 推导（无实时叠加） |
 | daily_bars | 25 | em_quote(akshare→efinance 簇内次选)→qq(腾讯 qfq，不含北交所)→yfinance | em_quote(akshare)→yfinance |
-| technical | 25 | 由日 K 纯标准库推导（MA/RSI/MACD/量比/52 周位置；mid_term 中线因子嵌套子块，口径见 [08](08-midterm.md)） | 同左 |
+| technical | 25 | 由日 K 纯标准库推导（MA/RSI/MACD/量比/52 周位置/60 日箱体（前窗口口径见下）；mid_term 中线因子嵌套子块，口径见 [08](08-midterm.md)） | 同左 |
 | news | 10 | em_search→qq_news（腾讯资讯）→sina_flow（个股资讯页）；港股 qq_news 单源 | qq_news（腾讯资讯） |
 | fundamentals | 10 | em_datacenter(主指标全量)→sina(财务指标)→ths(财务摘要)；港股 em_datacenter(HKF10 主指标)→yfinance(info 兜底) | em_datacenter(HKF10)→yfinance |
 | chip | 5 | 本地自算 derive（日K+qt 流通股本，CYQ 同口径，标 estimated）→em_quote 复活位 | not_supported |
@@ -34,6 +34,13 @@
 - **核心块降级禁高置信**：quote/daily_bars/technical 任一非 available/fallback →
   置信帽 low：context-pack 明示禁高置信表述，裁决器把 strong_buy/strong_sell
   机械压一档（`apply_confidence_cap`）。
+- **box_60d 前窗口口径**（条件：technical 块 60 日箱体派生与全部消费方——
+  box_oscillation/swing_band 策略判据、报告「触箱底」措辞；做法：箱体 hi/lo
+  取**不含当日**的前 60 根（前窗口不足 20 根不出），pos_pct 按现价对该前窗口
+  hi/lo 计算且**不截断**——跌破下沿 pos_pct<0、突破上沿 >100，越界本身即信息；
+  坑位：含当日会让任何新低日 box.lo==当日最低、「精确触箱底」成同义反复冒充
+  支撑验证（I-018），且窗口口径变更后 pos_pct/width_pct 与存量报告不可比、
+  不回改旧报告）。
 
 ## 三层防护（各拦一类故障）
 
@@ -98,7 +105,7 @@
 
 | 块 | 源链（主→回退） | 簇 | 港股 |
 | --- | --- | --- | --- |
-| moneyflow | A：新浪直连 60 日四档净额（主力=r0_net+r1_net 自算，summary 另出 20/60 日累计——中线口径，不足 60 日如实缺省）；HK：南向持股 RPT_MUTUAL_STOCK_HOLDRANKS 直连（T-1 披露，单页 65 行另出持股比 20/60 日变化） | sina_flow；HK=em_datacenter | 南向持股（港股通标的；非标的=not_supported） |
+| moneyflow | A：新浪直连 60 日四档净额（主力=r0_net+r1_net 自算，summary 另出 20/60 日累计——中线口径，不足 60 日如实缺省）；HK：南向持股 RPT_MUTUAL_STOCK_HOLDRANKS 直连（披露 T-1、持股变动对应成交 D-2——T+2 交收，单页 65 行另出持股比 20/60 日变化） | sina_flow；HK=em_datacenter | 南向持股（港股通标的；非标的=not_supported） |
 | notices | em_notice(8 类枚举)→cninfo(26 类，监管权威)；HK=em_notice(ann_type=H 单源，盈警/回购标题分型) | em_notice/cninfo | em-notice-h 单源（HKEXnews 回退在 backlog） |
 | research | em_report(逐篇)+datacenter 直连(评级共识+目标价+EPS1..4 前瞻回收)；HK=etnet(逐券商目标价/EPS/评级)→yf(analyst 互验+eps_trend 90 日修正) | em_report/em_datacenter；HK=etnet/yf | etnet+yf 双源（东财 reportapi 港股 0 覆盖不入链） |
 | forecast | datacenter 直连×2（预告+披露日历） | em_datacenter | not_supported（港股无预告制度，见制度差异句） |
@@ -134,12 +141,15 @@
 - **单厂商依赖如实标注**：forecast/unlock（em_datacenter）、research 共识
   （em_datacenter）无同级回退——失败如实 fetch_failed，零权重保证其失败不动摇
   裁决核心，状态行可见。
-- **南向 T-1 披露口径**（条件：港股 moneyflow 块取南向持股）：南向为收盘后
-  傍晚更新的 T-1 披露制度——最新日=available 且 note 注明披露日，仅
-  披露日距今超 STALE_DAYS["moneyflow"]（10 自然日，停牌/断更形态）才标
-  stale；坑位：勿把制度性 T-1 当数据陈旧降级；非港股通标的空结果=标的级事实
-  （not_supported），且南向过滤必须带 `.HK` 规范后缀（缺后缀恒空结果、会被
-  误判成非港股通，实测坑已入 selftest）。
+- **南向两层口径：披露 T-1、成交 D-2**（条件：港股 moneyflow 块取南向持股）：
+  南向为收盘后傍晚更新的 T-1 披露制度——最新日=available 且 note 注明披露日，
+  仅披露日距今超 STALE_DAYS["moneyflow"]（10 自然日，停牌/断更形态）才标
+  stale；持股变动（`net_buy_shares_1d`/`net_buy_amount_1d_hkd`，字段名沿用
+  下游渲染）是披露日 D 的持仓差、对应 **D-2 日的南向成交**（港股 T+2 交收，
+  港交所日成交 6 组样本验证；summary.chg_trade_lag_note 注明）——勿当当日
+  净买入解读「当日背离」；坑位：勿把制度性 T-1 当数据陈旧降级；非港股通标的
+  空结果=标的级事实（not_supported），且南向过滤必须带 `.HK` 规范后缀（缺
+  后缀恒空结果、会被误判成非港股通，实测坑已入 selftest）。
 - **港股 forecast 制度差异**（条件：market=hk 的 forecast 块）：港股无业绩
   预告制度——not_supported 的 note 与 context-pack 港股口径行固定声明「无预告
   ≠无雷」，盈警/盈喜走 notices 块「盈利警告/正面盈利预告」标题分型；坑位：

@@ -7,6 +7,8 @@
     仅 T+60 记分（T+20/120 照落实判供展示、不进台账）。
     买入族越过带上/下沿记 hit/miss、带内记 neutral；卖出族对称。
     watch/hold/avoid/alert 只观察不记分。
+  - 到期判定排除当日盘中未完成日 K（I-016）：horizon 落末根且末根=当日盘中
+    （fetch.session_phase 判据）时不评估、保持 pending，收盘后下一次运行补评。
   - 每个判定结果按信号记录时的 sources 归因，累计进各自台账（default=
     ledger.json、position=ledger.position.json，wins/losses）。
   - 绩效因子与画像升降档由 adjudicate.performance_factor / profile 消费：
@@ -38,7 +40,8 @@ LEDGER_POSITION = os.path.join(STATE_DIR, "ledger.position.json")
 
 NEUTRAL_BAND = 0.02
 PROMOTE_RATE, DEMOTE_RATE, MIN_SAMPLES = 0.60, 0.40, 10
-SCORABLE = {"buy": "bull", "reduce": "bear", "sell": "bear"}
+SCORABLE = {"buy": "bull", "reduce": "bear", "sell": "bear",
+            "add_on": "bull"}  # add_on=加仓轨建议（09）：按 bull 记分进 ledger
 # position 轨唯一记分期限：T+60 与 T+20/T+120 收益强相关（约 0.58/0.71），
 # 多期限记分是伪重复样本——会使信号提前离开 <30 样本中性门、破坏 Beta(15,15)
 # 收缩；20/120 照落 evaluated 实判（hit/miss/neutral）供展示、不进台账
@@ -84,10 +87,12 @@ def _fx_on(series, keys, date):
     return series[keys[i]] if i >= 0 else None
 
 
-def evaluate_signals(signals, bars_by_code, cny_by_date=None):
+def evaluate_signals(signals, bars_by_code, cny_by_date=None, now=None):
     """就 bars（按代码）评估已到期 horizon；原位更新 signals，返回
     (ledger_delta_map, changed, notes)：delta_map 按 profile 分桶
-    （{"default": {...}, "position": {...}}，台账分文件不串轨）；changed=是否有
+    （{"default": {...}, "position": {...}, "addon": {...}}——default 与 addon
+    同写 ledger.json（09 同账本、delta 分桶不串样本），position 独立
+    ledger.position.json）；changed=是否有
     任何 evaluated 落笔（neutral-only 也算——索引重建据此触发，不再只看台账
     增量）；notes=诊断行（超窗信号等，run 侧打印）。
     判定口径（两轨同守）：基准价用同复权 closes[i]（与 closes[j] 同序列），
@@ -97,8 +102,11 @@ def evaluate_signals(signals, bars_by_code, cny_by_date=None):
     样本不足退化 2%×√(h/10) 并在 entry 注记），且仅 h=60 记分（20/120 只观察）。
     cny_by_date（--cny 时传入 fx.hkd_cny_daily 产物）：hk 信号的 evaluated 附
     cny_close / cny_chg_pct 展示字段（人民币口径收益，含汇兑项）——仅展示，
-    outcome 判定与台账归因仍按标的币种收盘（默认口径不变）。"""
-    delta_map = {"default": {}, "position": {}}
+    outcome 判定与台账归因仍按标的币种收盘（默认口径不变）。
+    到期收盘门（I-016）：horizon 落在序列末根且末根=当日盘中未完成 K 线
+    （fetch.session_phase 的 last_bar_partial 判据；now 可注入、None 即真实
+    时钟）→ 视为未到期（跳过、保持 pending），待收盘后下一次运行补评。"""
+    delta_map = {"default": {}, "position": {}, "addon": {}}
     changed, notes = False, []
     fx_keys = sorted(cny_by_date) if cny_by_date else []
     for s in signals:
@@ -130,6 +138,11 @@ def evaluate_signals(signals, bars_by_code, cny_by_date=None):
                 continue
             i = j
         base_close = closes[i]  # 同复权基准（判定与展示百分比的 SSOT）
+        # I-016 到期收盘门：末根=当日盘中未完成 K 线（session_phase 的
+        # last_bar_partial 判据）时，落在末根的到期 horizon 不评估——盘中价
+        # 非收盘事实，误评即伪命中且已落盘不回改；周末/节假日自然收盘态放行
+        last_partial = fx.session_phase(
+            s.get("market"), dates[-1], now).get("last_bar_partial")
         # position 轨 σ_d：只用信号日「之前」的收盘（无前视）
         band, band_note = NEUTRAL_BAND, ""
         if profile == "position":
@@ -141,6 +154,8 @@ def evaluate_signals(signals, bars_by_code, cny_by_date=None):
             j = i + h
             if j >= len(closes):
                 continue  # 未到期
+            if j == len(closes) - 1 and last_partial:
+                continue  # I-016：到期日 K 线未收盘 → 视为未到期保持 pending，收盘后补评
             if profile == "position":
                 if sigma_d > 0:
                     band = sigma_d * math.sqrt(h)
@@ -264,18 +279,22 @@ def run(args):
     _save(SIGNALS, signals)
     ledger = _load(LEDGER, {})
     wrote = []
-    for profile, path in (("default", LEDGER), ("position", LEDGER_POSITION)):
+    for profile, path in (("default", LEDGER), ("addon", LEDGER),
+                          ("position", LEDGER_POSITION)):
         delta = delta_map.get(profile) or {}
         if not delta:
             continue
         led = merge_ledger(_load(path, {}), delta)
         _save(path, led)
         wrote.append((path, led, delta))
-        if profile == "default":
+        if path == LEDGER:  # default 与 addon 同账本（09）：末次合并态作画像输入
             ledger = led
     if wrote:
+        printed = set()  # default 与 addon 同账本（09）：同路径头行只打一次
         for path, led, delta in wrote:
-            print("评估完成；台账与绩效已更新（%s）" % path)
+            if path not in printed:
+                print("评估完成；台账与绩效已更新（%s）" % path)
+                printed.add(path)
             for src, d in delta.items():
                 print("  归因 %s：+%d 胜 / +%d 负" % (src, d["wins"], d["losses"]))
     else:  # 全部跳过/未到期时不落「已更新」失实陈述，亦不空写台账文件
@@ -322,9 +341,19 @@ def selftest():
     sig_watch = {**sig_buy, "id": "w1", "action": "watch", "family": "neutral",
                  "sources": ["role:技术"], "horizons": [1, 3, 5, 10],
                  "evaluated": {}}
-    delta_map, changed, notes = evaluate_signals([sig_buy, sig_watch],
+    # addon 轨（09）：action=add_on 按 bull 记分（建议也要被市场打分），
+    # 归因进 delta_map["addon"]（台账合并归 ledger.json，与 default 同账本）
+    sig_addon = {**sig_buy, "id": "a1", "profile": "addon", "action": "add_on",
+                 "key_levels": {"add_ref": 100.0, "confirm_lo": 97.0},
+                 "evaluated": {}}
+    delta_map, changed, notes = evaluate_signals([sig_buy, sig_watch, sig_addon],
                                                  {"000001": bars})
     delta = delta_map["default"]
+    assert sig_addon["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral"), \
+        "add_on 须按 bull 记分（SCORABLE），不得落 observed"
+    assert delta_map["addon"]["strategy:bull_trend"]["wins"] + \
+        delta_map["addon"]["strategy:bull_trend"]["losses"] >= 1, \
+        "addon 建议的胜负须进 addon 归因（同源 sources）"
     assert sig_buy["evaluated"]["1"]["outcome"] in ("hit", "miss", "neutral")
     assert sig_watch["evaluated"]["1"]["outcome"] == "observed", "watch 只观察"
     assert sig_buy["status"] in ("evaluated", "observed"), "全部 horizon 到期应收口"
@@ -349,7 +378,7 @@ def selftest():
                "status": "pending", "evaluated": {}, "close_at_signal": 100.0}
     pm, pchg, pnotes = evaluate_signals([dict(sig_pos)],
                                         {"000001": bars})
-    assert set(pm) == {"default", "position"} and not pm["default"], pm
+    assert set(pm) == {"default", "position", "addon"} and not pm["default"], pm
     # 30 根合成日 K：T+20 落 evaluated、T+60/120 未到期（不虚构）
     assert "20" in sig_pos["evaluated"] and "60" not in sig_pos["evaluated"]
     assert sig_pos["evaluated"]["20"].get("base") == 102.0
@@ -564,6 +593,41 @@ def selftest():
     evaluate_signals([s4], {"000001": bars_g})
     assert s4["evaluated"] == {} and s4["status"] == "pending", \
         "信号日新于最新 bar 属未到期，不得提前评估"
+    # I-016 到期收盘门：horizon 落末根且末根=当日盘中未完成 K 线（T+3 盘中
+    # 跑 postmortem 被盘中价记伪命中的根因）→ 视为未到期保持 pending；
+    # 同数据收盘后/周末跑 → 正常评估（session_phase 口径，now 注入钉两态）
+    bars_p = bars + [{"date": "2026-11-02", "open": 90.0, "high": 90.0,
+                      "low": 90.0, "close": 90.0, "volume": 50}]  # 周一盘中午半截 K
+    s_g1 = {**sig_buy, "id": "g1", "date": "2026-10-30", "close_at_signal": 100.0,
+            "status": "pending", "horizons": [1], "evaluated": {}}
+    evaluate_signals([s_g1], {"000001": bars_p},
+                     now=dt.datetime(2026, 11, 2, 10, 58, tzinfo=fx.TZ_CN))
+    assert s_g1["evaluated"] == {} and s_g1["status"] == "pending", \
+        "末根为当日盘中未完成 K 线：到期 horizon 不评估、保持 pending（I-016）"
+    s_g2 = {**s_g1, "id": "g2", "evaluated": {}}
+    evaluate_signals([s_g2], {"000001": bars_p},
+                     now=dt.datetime(2026, 11, 2, 15, 5, tzinfo=fx.TZ_CN))
+    assert s_g2["evaluated"]["1"]["close"] == 90.0 and s_g2["status"] != "pending", \
+        "同数据收盘后（15:05 过 A 股收盘）：末根即完成 K 线，正常评估"
+    s_g3 = {**sig_buy, "id": "g3", "date": "2026-10-29", "close_at_signal": 100.0,
+            "status": "pending", "horizons": [1], "evaluated": {}}
+    evaluate_signals([s_g3], {"000001": bars},
+                     now=dt.datetime(2026, 10, 31, 10, 58, tzinfo=fx.TZ_CN))
+    assert s_g3["evaluated"]["1"]["date"] == "2026-10-30", \
+        "周末时段自然 closed：周五末根照常评估"
+    # 破坏性实验：旁路 session_phase（守卫失效形态）→ 同一盘中数据被误评估
+    # ——证明上钉守的是守卫本身而非数据形状（去掉守卫时 g1 断言必红）
+    _sp = fx.session_phase
+    fx.session_phase = lambda m, d, now=None: {"phase": "closed"}
+    try:
+        s_g4 = {**s_g1, "id": "g4", "evaluated": {}}
+        evaluate_signals([s_g4], {"000001": bars_p},
+                         now=dt.datetime(2026, 11, 2, 10, 58, tzinfo=fx.TZ_CN))
+        assert "1" in s_g4["evaluated"] and \
+            s_g4["evaluated"]["1"]["close"] == 90.0, \
+            "守卫旁路时盘中价必被误评估（破坏性基准）"
+    finally:
+        fx.session_phase = _sp
     # 人民币口径展示（--cny）：hk 信号附 cny_close/cny_chg_pct（含汇兑项），
     # outcome 判定与归因不变——默认口径（不传 cny_by_date）不附 cny 字段
     cny_map = {"2026-10-%02d" % d: 0.90 - 0.001 * d for d in range(1, 31)}
@@ -604,6 +668,7 @@ def selftest():
         and "cny_close" in s6["evaluated"]["1"], \
         "复权基准修复后 null 登记价不再降级：outcome 与 cny 展示均以 closes[i] 为基"
     print("  ok 买入/观察双路径 · 归因台账 · 升降档阈值 · 未到期不动 · 非交易日回退 · 索引后验格")
+    print("  ok I-016 到期收盘门：末根盘中不评保持 pending · 收盘后/周末补评 · 旁路必误评（破坏性）")
     print("  ok 人民币口径展示：hk 附 cny 字段 · outcome/归因仍港币 · 缺根如实缺省")
     print("SELFTEST PASSED ✔")
 

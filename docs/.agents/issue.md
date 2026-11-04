@@ -20,6 +20,12 @@
 | I-013 | index/erp 链守卫与归因三处：HSI 短序列零披露、新浪回退失败归因用错异常变量、csindex 空响应打回满仓台账 | ✅ 已完成 | 2026-11-04 | [详情](#I-013) |
 | I-014 | --calibrate 无墙钟门/末根未完成过滤：盘中手跑把未定型末根 K 永久钉成错误样本 | ✅ 已完成 | 2026-11-04 | [详情](#I-014) |
 | I-015 | 校准台账与样本面三处：qfq 重基准偏置无防御、类型损坏行毒丸崩在写回后、「新增样本」计数虚报 | ✅ 已完成 | 2026-11-04 | [详情](#I-015) |
+| I-016 | 后验评估消费盘中未完成日 K，到期 horizon 被盘中价误判命中；05 基准口径前后矛盾 | ✅ 已完成 | 2026-11-04 | [详情](#I-016) |
+| I-017 | 港股南向持股变动（T+2 交收）被标为当日净买入，money_flow 把 D−2 成交读成当日背离 | ✅ 已完成 | 2026-11-04 | [详情](#I-017) |
+| I-018 | box_60d 含当日 K 线，新低日「精确触箱底」是同义反复，被当作支撑验证 | ✅ 已完成 | 2026-11-04 | [详情](#I-018) |
+| I-019 | 中线波段带 g 为收益率却按价差加减，带宽塌缩到不足 1 港元，selftest 同公式测不出 | ✅ 已完成 | 2026-11-04 | [详情](#I-019) |
+| I-020 | 逆势窄门读错裁决轨：quality_value 买点从 default 轨取，生产永不触发且被非法 fixture 掩盖 | ✅ 已完成 | 2026-11-04 | [详情](#I-020) |
+
 
 <a id="I-001"></a>
 
@@ -123,7 +129,7 @@
 - **表因根因**：卡片 `date` 取末根日 K 交易日（与 signal.date 同口径，设计正确），全局时序按该日期分文件；但盘后各数据源更新有时差——A 股 em/qq 链 16:30 时末根仍是前一交易日，港股与部分 A 股源已出当日 K——同一批次被拆进两个日文件。渲染与幂等判断按「最新一个日文件」单文件读取，漏掉另一文件里的股；幂等若按卡片交易日判断，还会让当日已跑但末根滞后的股每次重跑都重新取数。
 - **处理方式**：`outlook.latest_cards`（跨最近 10 个日文件、每股取最新一张）作为日表与幂等的统一读面；幂等改按卡片 `persisted_at` 的批次运行日（墙钟）判断；日表文件名=批次运行日，新增「交易日」列如实披露时差，在册却无卡的股以「缺卡」行列出；元组键 (market, code) 防 cn:002513 与 hk:02513 撞键。outlook selftest 新增跨日合并钉；同时修源侧 float32 噪声（yf 港股价 8.2600002…）——卡片价格取 3 位。
 - **后续防范**：凡「按交易日分文件 + 跨股批量」的派生视图，读面一律按实体取最新、不按单日文件；幂等键用批次运行日，不用数据日。
-- **同类问题影响**：monitor day-summary 的「末根日 K 未出或非当日，次日补判」是同一时差在收盘复核侧的表现（07 已按挂起次日补判处理）；后续 0.0.19 市场级块（两融 T+1 披露）的 stale 判据同样不能按墙钟日硬比。
+- **同类问题影响**：monitor day-summary 的「末根日 K 未出或非当日，次日补判」是同一时差在收盘复核侧的表现（07 已按挂起次日补判处理）；后续版本市场级块（两融 T+1 披露）的 stale 判据同样不能按墙钟日硬比。
 - **处理注意事项**：16:30 前后跑批量时 A 股卡大概率仍是前一交易日数据——09 规约的「≥17:10」时点纪律即为此设；早跑不是错误，日表交易日列会如实暴露。
 
 
@@ -181,3 +187,58 @@
 - **后续防范**：台账「自愈」必须按消费面 schema 定义坏行（语法层合法≠类型安全），且校验要在写回前——崩在写回后的毒丸无自愈路径；绝对价锚 × 复权序列的任何组合都要先过重基准检测（检测基准：两个时点同日收盘的比值）。
 - **同类问题影响**：erp_pe_daily.jsonl 与 outlook 卡片 jsonl 的坏行口径仍是语法层（值域天然安全无 int()/[] 消费面，暂不扩）；后续任何带数值消费面的 jsonl 台账，schema 校验为必做项。
 - **处理注意事项**：重基准阈值 0.5% 为防御性首版（正常价差噪声 <0.5%、除权除息通常 ≥数个百分点），调整属口径变更须评审；幂等键不含锚值——同键 --force 重跑锚值更新保留首判样本（merge docstring 已显式化该取舍）。
+
+<a id="I-016"></a>
+
+## I-016：后验评估消费盘中未完成日 K，到期 horizon 被盘中价误判命中；05 基准口径前后矛盾
+
+- **问题描述**：2026-11-04 盘中（10:58）跑 postmortem，一只港股的 sell 信号 T+3 恰在当日到期，评估用了当日未完成 K 线的盘中价 433.2，记为「−10.4% 命中」；当日真实收盘 484.2，相对基准 +0.12%，应为中性。同一信号的 T+1 旧 entry 无 `base` 键，沿用登记价 495.4 得「−3.0% 命中」，按现行复权基准应为 −0.66% 中性。两条伪命中都在强化看空来源的战绩。
+- **表因根因**：`evaluate_signals` 只判 `j >= len(closes)`（未到期），不判末根 K 线是否已收盘（[postmortem.py](../../scripts/postmortem.py) 到期分支）；已落盘结果不重评，错误永久留在台账。规约层 [05](../../references/05-postmortem.md)「复权基准」写基准=同复权 `closes[i]`，「价格口径」又写「后验基准沿用登记价原样」，两处矛盾，代码按前者执行。
+- **处理方式**：已修复（收严型，只减少评估不放宽判据）：[postmortem.py](../../scripts/postmortem.py) `evaluate_signals` 增末位可注入参数 `now=None`（既有调用方不受影响），每信号经 `fetch.session_phase(market, dates[-1], now)` 取 `last_bar_partial`，到期分支增守卫——horizon 落末根且末根=当日盘中未完成 K 线时不评估、保持 pending，收盘后下一次运行补评（周末/节假日自然收盘态放行；未知市场判 None 维持原行为）；[05](../../references/05-postmortem.md)「价格口径」节删与「复权基准」矛盾的「沿用登记价原样」句、统一为同复权信号日收盘基准（存量旧 entry 无 `base` 键时回落登记价），并新增「到期收盘门（I-016）」规约句；selftest 增 g1–g4 四钉（盘中不评 / 收盘后补评 / 周末补评 / monkeypatch 旁路 session_phase 必误评的破坏性实验）。存量伪命中条目是否回改仍需人工评审（05 维持已评估不回改）。
+- **后续防范**：postmortem selftest 增「末根为盘中 K 线时到期 horizon 不评估」的钉；破坏性实验（去掉收盘判定）必红。
+- **同类问题影响**：addon 轨与 position 轨共用同一到期分支；任何在盘中触发的 postmortem（盯盘收盘复核前、诊股前置全量 postmortem）都会命中。
+- **注意事项**：台账样本 <30 时绩效因子仍为中性 1.0，误记暂未改变权重；样本跨过 30 后误记会直接进入绩效因子。
+
+<a id="I-017"></a>
+
+## I-017：港股南向持股变动（T+2 交收）被标为当日净买入，money_flow 把 D−2 成交读成当日背离
+
+- **问题描述**：东方财富 `RPT_MUTUAL_STOCK_HOLDRANKS` 的 D 日持股变动对应的是 D−2 日的南向成交（T+2 交收）。用港交所每日南向成交统计（`data_tab_daily_YYYYMMDDe.js`）按当日 VWAP 换算股数与持股变动逐日比对，6 组样本全部对上 D−2。系统把该字段当作当日净买入，导致一次复盘中「下跌日南向逆势净买、背离」的结论实为两天前上涨日的成交；按成交日口径，那轮下跌最后一天南向是净卖出。
+- **表因根因**：[fetch.py](../../scripts/fetch.py) `fetch_moneyflow_hk` 把 `HOLD_SHARES_CHANGE` / `ADD_MARKET_CAP` 落为 `net_buy_shares_1d` / `net_buy_amount_1d_hkd`，并注「T-1 披露口径」——混淆了披露时点与成交日。
+- **处理方式**：已修复（口径标注型，字段名 `net_buy_shares_1d`/`net_buy_amount_1d_hkd` 沿用不改名——下游渲染在用）：[fetch.py](../../scripts/fetch.py) note 改「南向两层口径：披露 T-1；持股变动对应成交 D-2（T+2 交收，非当日净买入）」、summary 增 `chg_trade_lag_note` 键、docstring 增口径二段；[diagnose.py](../../scripts/diagnose.py) 渲染改「持股日净增持 …（对应 D-2 成交，净额 … 亿 HKD）」、pack 港股口径行同步两层；[01](../../references/01-evidence.md) moneyflow 行与「南向两层口径」bullet 同步；selftest 钉新 note 与 D-2 渲染行、旧「当日净增持」措辞缺席必红。全仓 grep 该字段仅 diagnose 渲染一处消费、策略与裁决器无「当日净买入」判据，误读路径已在 fetch note / summary 键 / 渲染措辞 / 01 规约四层关闭。
+- **后续防范**：fetch selftest 钉字段语义（持股变动日 ≠ 成交日）；改扩展块字段命名须同步 01 证据规约。
+- **同类问题影响**：中线 `hold_pct_chg_20d/60d` 是持股比差值，不受日期错位影响结论方向，但窗口边界同样滞后 2 个交易日；A 股北向若接同类端点需同查。
+- **注意事项**：港交所文件只含当日南向前十大成交股，未进前十的标的拿不到成交日数据，只能用持股变动倒推。
+
+<a id="I-018"></a>
+
+## I-018：box_60d 含当日 K 线，新低日「精确触箱底」是同义反复，被当作支撑验证
+
+- **问题描述**：一只港股在 11-04 盘中跌到 421 后反弹，报告与策略意见写「421 精确触 60 日箱底、箱底支撑首次验证」。实际此前 60 日最低价是 434（前一日），421 是跌破前低 3.0% 后的反弹。
+- **表因根因**：[fetch.py](../../scripts/fetch.py) `derive_technical` 的箱体窗口 `w = bars[-60:]` 包含当日（含未完成）K 线，任何新低日的 `box.lo` 都等于当日最低价，`pos_pct` 贴 0。
+- **处理方式**：已修复（收严型）：[fetch.py](../../scripts/fetch.py) `derive_technical` 箱体窗口改前窗口 `bars[:-1][-60:]`（前窗不足 20 根不出——出箱门槛变为总根数 ≥21），hi/lo/width_pct 全按前窗口，pos_pct 按现价对前窗口 hi/lo 计算且不截断（跌破 <0、突破 >100，越界即信息）；新增 docstring；[diagnose.py](../../scripts/diagnose.py) 渲染括号说明同步；[01](../../references/01-evidence.md) 增「box_60d 前窗口口径」规约句与 technical 表行注记；selftest 改四键精确钉值（独立手算）+ 突破钉（末根收 15.5 → pos>100，含当日口径必红）。策略 YAML（box_oscillation/swing_band/volume_breakout）判据文字未注窗口口径，语义自洽、留后续防范项。
+- **后续防范**：fetch selftest 钉「新低日 box.lo 取前窗口」；策略 YAML 中引用箱底支撑的判据须注明窗口口径。
+- **同类问题影响**：`hi52/lo52`、`pct_from_52w_low` 同样含当日，创新高/新低日的距离为 0；volume_breakout 的「创 20 日新高」用 `prev19` 前窗口，口径不一致。
+- **注意事项**：改窗口会改变历史报告中 `width_pct` / `pos_pct` 的可比性，不回改存量报告。
+
+<a id="I-019"></a>
+
+## I-019：中线波段带 g 为收益率却按价差加减，带宽塌缩到不足 1 港元，selftest 同公式测不出
+
+- **问题描述**：中线裁决「波段带」三个版本输出 433.4/433.97、481.42/482.58、489.22/490.38，带宽约 0.6 港元，对一只日 σ 约 6% 的股票毫无操作意义。
+- **表因根因**：[diagnose.py](../../scripts/diagnose.py) `_mid_key_levels` 中 `g = max(2σ_d√21, 3×往返成本)` 是收益率（此例约 0.57），却以 `price − g` / `price + g` 当价差加减；[08](../../references/08-midterm.md) 明写 g 是收益率口径。对应 selftest 用同一公式断言，测不出。
+- **处理方式**：已修复：[diagnose.py](../../scripts/diagnose.py) `_mid_key_levels` 改 `band_lo=max(lo60, price×(1−g))`、`band_hi=min(hi60, price×(1+g))`——g 为收益率按乘法取价差后钳制 60 日高低点（σ_d 大时整带被钳属预期，成本下限仅极低波动票生效），docstring 同步；selftest 弃「同公式算 want」，改 A（高波动 σ 支路整带被 60 日高低点钳制）/B（成本下限 0.0045 双侧不钳）两场景独立手算字面量钉值 + 两条价差口径反事实必红；[08](../../references/08-midterm.md)/[04](../../references/04-report.md) 无 band 价差语义句（08 已按收益率表述 g），无需改。
+- **后续防范**：涉及收益率与价格混算的派生价位，selftest 期望值必须独立计算，不得复用被测公式。
+- **同类问题影响**：signals.json 中 position 轨信号的 `key_levels.band_lo/band_hi` 全部受影响（仅展示，不进后验判定带）；盯盘若消费该价位会产生贴价误告警。
+- **注意事项**：修复后带宽会显著变宽（σ_d 6% 时 g 约 0.55），可能整体被 60 日高低点钳制，属预期。
+
+<a id="I-020"></a>
+
+## I-020：逆势窄门读错裁决轨——quality_value 买点从 default 轨 verdict 取，生产永不触发
+
+- **问题描述**：`addon.value_trigger` 从 **default（短线）轨 verdict** 的 `valid_opinions` 找 `strategy:quality_value` 买点，但 `quality_value` 是 `profile: position` 策略——diagnose prepare 契约下其意见只进 `opinions.position.json` → **pverdict**。default 轨 verdict 永不含 quality_value → 门 2 逆势窄门 blocker「quality_value 无买点意见」恒在，逆势轨成不可达死代码；selftest fixture 把 quality_value 塞进 default verdict（契约下不可能的形态）恰好掩盖缺陷，diagnose 集成钉 T11e 也只测顺势与冻结两形态。
+- **表因根因**：双轨架构（0.0.16）下「策略→轨」的路由先于本轨（0.0.19 分支）开发，value_trigger 按策略名直觉取了 default verdict；fixture 手搓 valid_opinions 未按 prepare 契约校验轨归属。
+- **处理方式**：`value_trigger(evidence, pverdict, lens)` 改读中线轨裁决（pverdict 缺席时显式 blocker「无中线裁决」，门不开、保守方向）；selftest fixture 改合法形态（quality_value 进 pverdict）+ 两条回归钉（default 轨读到 quality_value 不开门；pverdict 缺席 blocker）；diagnose T11e 增逆势集成钉（verdict.position.json + lens 有支撑 + 现价<ma20 → 「**可加仓**（逆势窄门）」+ add_ref=触发时价登记）。
+- **后续防范**：任何按策略名取意见的门，fixture 与实现都要显式声明轨归属（default/position）；手搓 verdict fixture 里的 `strategy:*` 意见须与 strategies/*.yaml 的 profile 字段一致——「契约下不可能的 fixture」是最隐蔽的掩蔽源。双轨消费新增点上线前，用真实 prepare 产物（opinions.position.json）做一次集成钉。
+- **同类问题影响**：门 1 的 pverdict 消费（中线卖族冻结）实现正确不受影响；逆势窄门此前从未在生产触发过，无存量错误建议（失败方向保守）。
+- **处理注意事项**：逆势窄门现在要求「有中线裁决」——单轨日（无 verdict.position.json）逆势轨天然关闭、报告落「无中线裁决（pverdict 缺席）」blocker，属设计内保守形态。

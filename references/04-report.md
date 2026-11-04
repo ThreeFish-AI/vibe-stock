@@ -55,7 +55,11 @@
    是 opinions.json（verdict.valid_opinions 只存四键），按 source 接回且只挂过验票
    门的意见（`partition` 同一判据）；坑位：按 source 集合朴素过滤会把同 source
    表外写法意见的 rationale 混挂进来。
-6. **操作建议**：空仓者与持仓者分开、按最终信号给纪律性动作（不追高/止损位）。
+6. **操作建议**：空仓者与持仓者分开、按最终信号给纪律性动作（不追高/止损位）；
+   持仓者分支五档——可加仓（轨道/手数上限/add_ref/确认与撤销条件，仅
+   [10](10-add-on.md) 加仓轨触发时）/ 持有（含「等回踩」变体）/ 持有观察 /
+   减仓 / 离场；持仓股另出「### 加仓评估（addon）」节（三道门逐项
+   green/red/skip 可溯源）。
 7. **检查清单**：核心证据齐备 / 无高严重度分歧 / 置信 ≥0.5 / 未偏离 MA20 过远
    ——未通过项如实打叉，检查没过照样出报告，但结论停在保守档。
 8. **附**：各意见（含绩效因子加权，附 rationale 原文）与诊断记录。
@@ -148,14 +152,17 @@ Fixture 与 [I-006](../docs/.agents/issue.md#I-006) 以本节为准，不另立�
 
 | 位置 | 键 | 类型 | 语义 |
 | :--- | :--- | :--- | :--- |
-| 顶层 | — | 对象 | v2 结构；`version` 等其余顶层键仓内不消费 |
+| 顶层 | — | 对象 | v2 结构；仓内消费的顶层键仅 `holdings` 与 `operations`，`version` 等其余顶层键不消费 |
 | 顶层 | `holdings` | 列表 | 当前持仓；`[]` 合法，表示清仓 |
 | 元素 | `code` | 字符串 | A 股 6 位 / 港股 5 位 ASCII 数字（全角不匹配），与报告目录同形态 |
 | 元素 | `market` | 字符串 | `cn` / `hk` |
 | 元素 | `quantity` | 数值 | 持仓数量 |
 | 元素 | `cost_price` | 数值 | 成本价，按登记币种原样（`currency` 等其余元素键仓内不消费） |
-| 顶层 | `operations` | 列表 | 实际成交流水（到秒时间戳）；outlook 用户锚只读 `time/market/code/action/price` 五键（market 仅用于归一匹配）（[09](09-outlook.md) 脱敏投影：quantity/cost_price/成本派生涨幅绝不消费绝不落盘） |
-
+| 顶层 | `operations` | 列表 | 实际成交流水（到秒时间戳）；缺失/非列表/元素非对象一律折空列表静默降级（脏数据不开门也不崩栈）。消费方两处：0.0.22 起 [10](10-add-on.md) 加仓轨三段状态机（首加/确认加成交判定），与 [09](09-outlook.md) 用户锚脱敏投影（只读 `time/market/code/action/price` 五键、market 仅归一匹配；quantity/cost_price/成本派生涨幅绝不消费绝不落盘） |
+| 元素（operations） | `code` | 字符串 | 同 holdings 元素 code 形态（状态机按 zfill(5) 归一比对） |
+| 元素（operations） | `action` | 字符串 | `buy` / `sell`（状态机消费 `buy`；outlook 锚同读） |
+| 元素（operations） | `time` | 字符串 | ISO 8601 日期时间（到秒；取前 10 位为成交日期，如 `2026-11-04T14:00:00+08:00`） |
+| 元素（operations） | `market`/`price` | 可选 | outlook 锚只读不改；`qty` 仓内暂不消费（预留）。坑位：[07](07-monitor.md) sim-portfolio.json 的 `operations` 是**另一文件另一 schema**（`side`/`ts`/`lots` 命名），勿混写 |
 - **契约漂移可观测**（适用：report / postmortem 重建索引时加载 portfolio.json）：
   做法——文件不存在、合法空表静默；文件存在但损坏、顶层非对象、缺 `holdings`
   或非列表、元素缺字符串 `code`/`market` 被跳过、`code`/`market` 不合报告目录

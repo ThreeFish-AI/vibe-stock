@@ -30,8 +30,10 @@ LEGACY_RE = re.compile(r"^(.+)-(\d{4}-\d{2}-\d{2})\.md$")
 LOST = "（报告已被覆盖，无法恢复）"
 # 期限轨 SSOT（register_signal / postmortem / 索引表头共用）：default=短线
 # T+1/3/5/10；position=中线 T+20/60/120（≈1/3/6 个月，仅 T+60 进台账记分——
-# 多期限记分是伪重复样本，规约见 references/05「期限轨」与 08）
-HORIZONS_OF = {"default": (1, 3, 5, 10), "position": (20, 60, 120)}
+# 多期限记分是伪重复样本，规约见 references/05「期限轨」与 08）；addon=加仓
+# 轨建议（09），与短线同期限（T+1/3/5/10），台账归 ledger.json 按 bull 记分
+HORIZONS_OF = {"default": (1, 3, 5, 10), "position": (20, 60, 120),
+               "addon": (1, 3, 5, 10)}
 HORIZONS = HORIZONS_OF["default"]  # 向后兼容别名（短线表头）
 INDEX_NOTE = ("> 派生视图：数据源 signals.json（总览持仓列另合并 "
               "~/.vibe-stock/portfolio.json 持仓 SSOT，存在时）；report / "
@@ -393,7 +395,8 @@ def render_stock_index(signals, market, code, names=None):
                 " | ".join(_horizon_cell(s, h) for h in hz)))
         return out
 
-    L += _table([s for s in rows if s.get("profile", "default") == "default"],
+    L += _table([s for s in rows
+                 if s.get("profile", "default") in ("default", "addon")],
                 None, "default")
     mid = [s for s in rows if s.get("profile") == "position"]
     if mid:  # 中线轨单独成表（T+20/60/120；无中线信号不出，向后兼容）

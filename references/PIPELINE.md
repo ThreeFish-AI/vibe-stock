@@ -9,6 +9,7 @@ reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](0
 [batch/README](../batch/README.md)）；在册股票盘中盯盘/收盘复核走
 [07-monitor](07-monitor.md) 盯盘子技能（`batch/monitor/` 参考实现）；
 中线（1–6 个月）因子口径与只降不升风险判据族见 [08-midterm](08-midterm.md)；
+持仓股加仓决策轨（三道门 + 三段确认制）见 [10-add-on](10-add-on.md)；
 在册股短/中期走势参考（零权重卡与收盘批量）见 [09-outlook](09-outlook.md)。
 
 ```text
@@ -77,6 +78,7 @@ uv run --no-project $T/scripts/adjudicate.py --selftest
 uv run --no-project $T/scripts/diagnose.py --selftest
 uv run --no-project $T/scripts/postmortem.py --selftest
 uv run --no-project $T/scripts/lens.py --selftest
+uv run --no-project $T/scripts/addon.py --selftest
 uv run --no-project $T/scripts/outlook.py --selftest
 ```
 
@@ -94,7 +96,7 @@ CHANGELOG 记录并同步本文件锁版本。
 fundamentals（东财 HKF10→yf，质量分 85 good）、valuation（em-hk-ind 具名列
 快照+baidu 5 年分位）、research（etnet→yf 双源：逐券商目标价/EPS/评级 +
 90 日 EPS 修正方向）、notices（em-notice ann_type=H 单源，盈警/回购分型）、
-moneyflow（南向持股 T-1 披露）、news（qq_news 单源）、market（港股指数）。
+moneyflow（南向持股：披露 T-1、持股变动对应成交 D-2，口径见 [01](01-evidence.md)）、news（qq_news 单源）、market（港股指数）。
 仍 not_supported：chip/forecast/unlock/holder/industry（港股无对应披露形态，
 见 01 backlog）。港股全链约 +12 次 HTTP（16 簇之 etnet 为港股唯一新簇）。
 fx 块取 HKD/CNY 入 pack 与 report 情报面（人民币敞口；汇率不进信号判定与

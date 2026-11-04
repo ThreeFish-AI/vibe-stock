@@ -5,7 +5,7 @@
 裁定（生成时机=收盘批量+决策现算混合、覆盖=全在册 universe 21 只、情绪面
 含市场级块、权限=零权重纯参考、市场级四块一次全落——裁定 6 增补两融账户
 参与度替代口径后为五块）是本机制的边界依据。
-实现：[scripts/outlook.py](../scripts/outlook.py)（第五件硬门禁纯函数件）+
+实现：[scripts/outlook.py](../scripts/outlook.py)（六件硬门禁之一，纯函数件）+
 [batch/outlook_daily.py](../batch/outlook_daily.py)（非门禁编排）；注入点在
 [diagnose.py](../scripts/diagnose.py)（prepare 现算 / context-pack / 报告 4c）。
 
@@ -124,7 +124,7 @@
 
 ## 回归门禁
 
-`uv run --no-project scripts/outlook.py --selftest` 是第五件硬门禁
+`uv run --no-project scripts/outlook.py --selftest` 是六件硬门禁之一
 （四处登记：AGENTS.md 测试节与目录表、evals/README、PIPELINE 回归块、
 README 回归行；SKILL 判表只登记命令入口不承载门禁语义），提交前置与既有
 四件同级；判据只收严。核心钉：预测带数学（带宽 ∝√h
