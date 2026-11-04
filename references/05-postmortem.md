@@ -95,6 +95,18 @@
 
 ## 后验（postmortem 时）
 
+- **收盘后评估节奏（0.0.24 · I-022）**（条件——评估无自动运行机制时经验面
+  与绩效因子恒空：实测 69 条 pending 大量到期、evaluated 为零的空转形态；
+  做法——launchd 周一至五 17:50 单槽全量评估，模板
+  [batch/postmortem/com.threefish.vibestock.postmortem.plist](../batch/postmortem/com.threefish.vibestock.postmortem.plist)
+  （安装三步见模板注释）；错峰 outlook 17:35 槽 15 分钟（FetchLock 无重叠窗）；
+  预算≈当日到期股数条日 K 链、如实计入诊股熔断账本；到期收盘门（I-016）
+  天然幂等——失败次日槽位补评；坑位——17:30–18:10 勿并发跑 report
+  （signals.json 读改写尚无文件锁，I-005 时段分离是现行防线）。
+- **两把尺分立（无条件全局规则）**：本文件的判定带（default 恒 ±2%、
+  position σ√h 仅 T+60 记分）是后验记分唯一口径；[09](09-outlook.md) 走势
+  参考卡的 σ√h 预测带只描述价格分布量级、**永不进入本判定**（band_note
+  逐字钉在卡上，双向引用指针）——两把尺混读即第二事实源。
 - **未知市场跳过**：适用条件——pending 信号 market 不在 `fetch.CHAINS`
   （如快照兜底登记的 `?`、缺 market/code 字段的陈旧记录）；做法——逐条打印
   跳过诊断行（id、code、market 实际值与缺失项），该记录保持 pending 不动、

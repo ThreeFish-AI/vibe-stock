@@ -16,7 +16,9 @@ reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](0
 ① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；21 块=核心六块
               （计分）+扩展十五块（资金流/公告/研报/预告/解禁/股东户数/大盘/
               行业/估值/两融/指数基准/全A换手分位/ERP/两融账户参与度/汇率，
-              零权重；后五块市场级共享一次取数）；A 股全链实测 ~17s/17 次 HTTP）
+              零权重；其中两融/指数基准/全A换手分位/ERP/两融账户参与度五块
+              市场级共享一次取数——汇率为港股链专属非共享）；A 股全链实测
+              ~17s/17 次 HTTP）
               技术节另含 mid_term 中线因子三行——1–6 个月口径，判据见 08
 ② 拼上下文    diagnose.py prepare → context-pack.md（有界证据包+哨兵+置信帽+
               盘中警示行；--cost 时另附基本面锚节——取数时段口径见
@@ -69,9 +71,15 @@ uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance \
   $T/scripts/postmortem.py --stock 600519
 
 # 在册股走势参考收盘批量（≥17:10；幂等：当日已卡跳过；--render 零取数重渲
-#     日表；并发与预算纪律见 09——FetchLock 单窗、盯盘期间不跑）
+#     日表；--stock <code> 单股刷新；--daily 成功后自动接 --calibrate 校准
+#     （--no-calibrate 跳过）；并发与预算纪律见 09——FetchLock 单窗、盯盘期间不跑）
 uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
   python $T/batch/outlook_daily.py --daily [--force]
+
+# 信号后验收盘评估（launchd 17:50 槽同款；evaluated 是经验面/绩效因子唯一
+#     数据源——节奏与预算见 05「收盘后评估节奏」）
+uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
+  $T/scripts/postmortem.py
 
 # 回归（改 scripts/ 后必须全绿）
 uv run --no-project $T/scripts/adjudicate.py --selftest
@@ -86,7 +94,8 @@ uv run --no-project $T/scripts/outlook.py --selftest
 
 命令面统一锁 `akshare==1.20.*`（minor 锁：拿补丁修复、不吃破坏性迁移——
 上游小版本内即发生接口文件迁移与列名随年份动态生成，2026-10 实证）。升版
-流程：①探活候选版本四源（日K/新闻/财务/板块）；②四 selftest 全绿；③
+流程：①探活候选版本四源（日K/新闻/财务/板块）；②scripts 六件 selftest
+  全绿；③
 CHANGELOG 记录并同步本文件锁版本。
 
 ## 港股速查
@@ -98,7 +107,7 @@ fundamentals（东财 HKF10→yf，质量分 85 good）、valuation（em-hk-ind 
 90 日 EPS 修正方向）、notices（em-notice ann_type=H 单源，盈警/回购分型）、
 moneyflow（南向持股：披露 T-1、持股变动对应成交 D-2，口径见 [01](01-evidence.md)）、news（qq_news 单源）、market（港股指数）。
 仍 not_supported：chip/forecast/unlock/holder/industry（港股无对应披露形态，
-见 01 backlog）。港股全链约 +12 次 HTTP（16 簇之 etnet 为港股唯一新簇）。
+见 01 backlog）。港股全链约 +12 次 HTTP（20 簇之 etnet 为港股唯一新簇）。
 fx 块取 HKD/CNY 入 pack 与 report 情报面（人民币敞口；汇率不进信号判定与
 策略 YAML）；postmortem 加 `--cny` 可对 hk 信号附人民币口径展示（判定与
 归因仍港币，见 [05](05-postmortem.md)）。

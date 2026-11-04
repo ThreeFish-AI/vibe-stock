@@ -14,10 +14,14 @@ unlocked 退避 8–12s——06 取数串行+抖动）→ scripts/outlook.py 纯
 
 用法（依赖同全诊：akshare/efinance/yfinance 经 uv run --with 临时装）：
   uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
-    python batch/outlook_daily.py --daily [--force]
+    python batch/outlook_daily.py --daily [--force] [--no-calibrate]
   uv run --no-project python batch/outlook_daily.py --render   # 零取数重渲日表
   uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
     python batch/outlook_daily.py --stock 600519               # 单股刷新
+  uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
+    python batch/outlook_daily.py --calibrate                  # 单独跑校准
+（0.0.24 起 --daily 成功后自动接 --calibrate，launchd 17:35 槽零改动获得
+校准增厚；--stock 单股不触发。）
 """
 import argparse
 import datetime as dt
@@ -94,7 +98,7 @@ def collect(state_dir, force=False, only=None):
     （I-010/M4/L8 一并堵死）；节假日/周末 17:10 后跑无害（末根=上一交易
     日，卡片如实带交易日）。"""
     now_dt = _now()
-    if not force and (now_dt.hour, now_dt.minute) < (17, 10):
+    if not force and not ol.close_gate_open(now_dt):
         print("拒跑：未到 17:10 收盘定型窗后（现 %02d:%02d）——早跑会把未定型"
               " K 线钉成当日卡；--force 越过需自担" % (now_dt.hour, now_dt.minute))
         return [], [], [], False
@@ -103,6 +107,12 @@ def collect(state_dir, force=False, only=None):
     cached = ol.latest_cards(state_dir)
     rows = [r for r in uni["rows"]
             if only is None or _norm(r["market"], r["code"]) == only]
+    if only is not None and not rows:
+        # 宇宙外单股（I-024）：宇宙当日派生一次后缓存，盘中新入册股不在其中
+        # ——此前误报「当日卡齐备（0 只）」；正确出路是重派生宇宙再跑
+        print("%s 不在当日宇宙（universe 当日派生一次后缓存）——新入册股先"
+              " 跑 watch --print-universe 重派生，再 --stock 刷新" % only)
+        return [], [], [], False
     todo = []
     for r in rows:
         c = cached.get((r["market"], _norm(r["market"], r["code"])))
@@ -305,7 +315,7 @@ def calibrate(state_dir, force=False):
         print("无历史卡——先跑 --daily")
         return None
     now_dt = _now()
-    if not force and (now_dt.hour, now_dt.minute) < (17, 10):
+    if not force and not ol.close_gate_open(now_dt):
         print("拒跑：未到 17:10 收盘定型窗后（现 %02d:%02d）——判触及会把"
               "未定型末根 K 永久钉成错误样本（幂等键永不重判）；--force "
               "越过需自担（末根过滤仍生效）" % (now_dt.hour, now_dt.minute))
@@ -325,11 +335,9 @@ def calibrate(state_dir, force=False):
             bars, bstate, _src, _tried = vfetch.fetch_daily_bars(
                 market, code, st, now)
             if bars:
-                # 末根未完成过滤：判窗只用已定型 K（session_phase 判据=末根
-                # 日==今日且盘中）——盘中跑（--force）也不得记半根 K
-                if vfetch.session_phase(
-                        market, bars[-1]["date"])["last_bar_partial"]:
-                    bars = bars[:-1]
+                # 末根未完成过滤（I-014 根本防线，谓词 SSOT 在 ol.final_bars
+                # ——盘中跑（--force）也不得记半根 K）
+                bars = ol.final_bars(bars, market)
             if bars:
                 bars_by_code[key] = bars
             else:
@@ -348,6 +356,13 @@ def calibrate(state_dir, force=False):
         if name.endswith(".jsonl"):
             cards.extend(ol.load_cards(state_dir, name[:-6]))
     samples = ol.calibration_samples(cards, bars_by_code)
+    # F-4：历史卡全集 vs latest_cards（10 日窗）——窗外的股（退册/断档>10日）
+    # 无 bars 可判且此前完全静默，其历史卡样本永久缺席须可观测
+    ghost = sorted({(str(c.get("market")), str(c.get("code"))) for c in cards}
+                   - set(bars_by_code))
+    for m, code in ghost:
+        print("warn: %s %s 不在 latest_cards（10 日窗）——未拉日 K，该股历史"
+              "卡校准样本缺席（退册/断档>10 日？）" % (m, code))
     run_stamp = _now().isoformat(timespec="seconds")
     rows = ol.merge_calibration(state_dir, samples, run_stamp)
     buckets = ol.calibration_buckets(rows)
@@ -379,7 +394,7 @@ def calibrate(state_dir, force=False):
     path = os.path.join(ol.outlook_dir(state_dir), "calibration.md")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
-    added = sum(1 for r in rows if r.get("judged_at") == run_stamp)
+    added = ol.count_new_samples(rows, run_stamp)
     print("校准：新增样本 %d（满窗计算 %d）· 台账累计 %d · 渲染 -> %s"
           % (added, len(samples), len(rows), path))
     return path
@@ -393,6 +408,9 @@ def main():
     ap.add_argument("--render", action="store_true", help="只重渲日表（零取数）")
     ap.add_argument("--calibrate", action="store_true",
                     help="预测带自校准后验（拉日 K 判触及，幂等合并台账）")
+    ap.add_argument("--no-calibrate", action="store_true",
+                    help="--daily 收盘批量后跳过自动校准（0.0.24 起批量成功"
+                         "后默认自动接校准，幂等台账无损失）")
     ap.add_argument("--state-dir", default=STATE_DIR)
     args = ap.parse_args()
     if args.calibrate:
@@ -414,6 +432,12 @@ def main():
     path = render_daily(args.state_dir)
     if path:
         print("day table -> %s" % path)
+    # 收盘批量后自动校准（0.0.24 · I-022）：台账/分桶表不再依赖手动增厚；
+    # --daily 幂等跳过取数时校准仍照跑（新卡随窗龄自然增厚样本）。--stock
+    # 单股操作不触发（单股语义）；墙钟门与幂等台账在 calibrate 内自担
+    if args.daily and not args.no_calibrate and not locked:
+        if not calibrate(args.state_dir, force=args.force):
+            print("warn: 自动校准未完成（锁竞争/无历史卡）——幂等，次日自愈")
     return 0
 
 

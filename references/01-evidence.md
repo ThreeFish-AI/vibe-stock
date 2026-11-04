@@ -63,9 +63,10 @@
   一致性钉）；坑位：只删守卫不换源会把 datacenter 空结果（9201）伪造成
   available·无研报（先例入册）。
 - **熔断**：持续失败——单簇连续 3 败停 300s（半开放行单次探测）；状态持久化
-  `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（16 簇：
-  em_quote/em_search/em_datacenter/em_notice/em_report/emweb/cninfo/sina/
-  sina_flow/ths/qq/qt/qq_news/baidu_gushitong/yf/etnet——etnet 为港股盈利
+  `~/.vibe-stock/fetch_state.json`。计账粒度为**上游服务簇**而非库名（20 簇，
+  0.0.19 扩 16→20：jin10/sina_idx/legulegu/csindex 新增，完整清单以
+  [fetch.py](../scripts/fetch.py) CLUSTERS 注释为 SSOT——下表扩展块「簇」列
+  逐源归簇；etnet 为港股盈利
   预测独立主机簇；em 系港股新源键 em-fin-hk/em-hk-ind/dc-hsgt 均归既有 em 簇）；簇判定规则（无条件全局规则：
   簇=主机/服务族粒度的故障域）——同厂商不同服务族分簇（东财先例：push2* 行情
   簇死而 datacenter/np-anotice/reportapi 同期活，2026-10-28 实证），同子域多
@@ -117,7 +118,7 @@
 | margin | 市场级两融余额：dc `RPTA_RZRQ_LSHJ` 直连（全市场·元·单次 70 日）→金十转发回退（沪深两所合计，差北交所 ~0.33%） | dc-margin=em_datacenter；jin10-margin=jin10（新簇） | not_supported（市场级块仅 A 股） |
 | index | 指数基准 HS300/ALLA(000985)/HSI：腾讯 K 主源（amount 列实为量手非额——禁当成交额）→新浪回退（000985 新浪断更 2016 仅腾讯）；HSI yf→新浪港股（yf 当日行 Volume=0） | tx-idx=qq；sina-idx=sina_idx（新簇）；yf | HSI 随 A 股装配（本块对 hk 为 not_supported——港股诊股「同享」的是既有 market 块的 qt 港股指数快照，非本块） |
 | turnover_pctile | 全A 换手分位（000985 成交量滚动 250 日分位——成交活跃度代理，非严格换手率；东财换手率列补测后升级） | tx-idx=qq | not_supported |
-| erp | 月频 ERP（乐咕沪深300 滚动 PE×东财 10Y，ERP=1/PE−y10）+ 中证官网 000300 P/E2 日频增量落盘 `~/.vibe-stock/erp_pe_daily.jsonl`（单次仅回 20 日不可回填，满 250 日出日频分位） | legu-pe=legulegu（新簇）；dc-bond=em_datacenter；csindex=csindex（新簇） | not_supported |
+| erp | 月频 ERP（乐咕沪深300 滚动 PE×东财 10Y，ERP=1/PE−y10）+ 中证官网 000300 P/E2 日频增量落盘 `~/.vibe-stock/erp_pe_daily.jsonl`（单次仅回 20 日不可回填，满 250 日出日频分位——**接管实现尚无代码路径，须满窗 ETA 2027-10 前落地**，09 再评审节登记） | legu-pe=legulegu（新簇）；dc-bond=em_datacenter；csindex=csindex（新簇） | not_supported |
 | margin_accounts | 两融账户参与度（日频·户·T+1；原「新开户」上游 2023-09 停更，用户 2026-11-04 裁定替代且不冒充新开户） | em-mkt-account=em_datacenter | not_supported |
 | fx | yfinance HKDCNY=X 日线（近 1 年，`hkd_cny_daily` 为 SSOT） | yf | 港股专属（cn=not_supported） |
 
