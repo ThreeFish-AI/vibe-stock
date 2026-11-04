@@ -513,6 +513,128 @@ def latest_cards(state_dir, max_days=10):
     return out
 
 
+# ---------------------------------------------------------------- 预测带自校准（P3）
+
+def touch_judgment(bars, card_date, anchor, h):
+    """触及判定（校准后验的判定器）：方向按卡日收盘定（first-passage 屏障
+    对称——上方锚只看上穿 high≥anchor、下方锚只看回落 low≤anchor；锚在
+    现价上方时 low≤anchor 恒真，双向或判是错的）。bars 升序全量日 K；
+    不足 h 根 → None（右删防护：不满整窗不记样本——新卡天然不足，等窗满
+    再记）；卡日收盘缺失 → None（无方向基准）。"""
+    if not bars or anchor is None or not h:
+        return None
+    base = None
+    after = []
+    for b in bars:
+        d = str(b.get("date", ""))[:10]
+        if d == str(card_date):
+            base = _f(b.get("close"))
+        elif d > str(card_date):
+            after.append(b)
+    if base is None or len(after) < h:
+        return None
+    win = after[:h]
+    if anchor > base:  # 上方锚：看上穿
+        return bool(any((_f(b.get("high")) or 0) >= anchor for b in win))
+    if anchor < base:  # 下方锚：看回落
+        return bool(any((_f(b.get("low")) or 1e18) <= anchor for b in win))
+    return None
+
+
+def calibration_samples(cards, bars_by_code):
+    """历史卡 × 锚 × horizon → (p, touched) 样本流（幂等键 card date+code+
+    track+anchor+h；touched=None 的不满窗样本丢弃）。纯函数。"""
+    out = []
+    for c in cards or []:
+        if c.get("state") != "estimated":
+            continue
+        key = (c.get("market"), c.get("code"))
+        bars = bars_by_code.get(key) or []
+        for track, t in (c.get("math", {}).get("tracks") or {}).items():
+            horizons = ar.HORIZONS_OF.get(track, ())
+            for name, a in (t.get("anchors") or {}).items():
+                anchor = _f(a.get("value"))
+                for h_str, p in (a.get("touch") or {}).items():
+                    h = int(h_str)
+                    if h not in horizons or _f(p) is None:
+                        continue
+                    touched = touch_judgment(bars, c.get("date"), anchor, h)
+                    if touched is None:
+                        continue
+                    out.append({"date": c.get("date"), "market": c.get("market"),
+                                "code": c.get("code"), "track": track,
+                                "anchor": name, "h": h, "p": _f(p),
+                                "touched": bool(touched)})
+    return out
+
+
+def calibration_buckets(samples, min_n=30):
+    """分桶校准表：p 五桶 [0,.2/.2,.4/.4,.6/.6,.8/.8,1] 的预测均值 vs 实际
+    触及频率；n<min_n 标 insufficient（与台账 MIN_SAMPLES 哲学同源、独立
+    常量——校准是信息面披露不是绩效因子）。"""
+    edges = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+    out = []
+    for lo, hi in zip(edges, edges[1:]):
+        bucket = [s for s in samples
+                  if lo <= s["p"] < hi or (hi == 1.0 and s["p"] == 1.0)]
+        if not bucket:
+            continue
+        n = len(bucket)
+        out.append({"bucket": "%.1f–%.1f" % (lo, hi), "n": n,
+                    "mean_p": round(sum(s["p"] for s in bucket) / n, 3),
+                    "actual_rate": round(
+                        sum(1 for s in bucket if s["touched"]) / n, 3),
+                    "insufficient": n < min_n})
+    return out
+
+
+CALIBRATION_LEDGER = os.path.join(STATE_DIR, "outlook-calibration.jsonl")
+
+
+def merge_calibration(state_dir, new_samples, now_iso=None):
+    """校准样本台账 append（幂等：键 date+market+code+track+anchor+h 去重，
+    坏行跳过；tmp+replace 原子写）。返回合并后全量样本。"""
+    path = os.path.join(state_dir, "outlook-calibration.jsonl")
+    seen, rows = set(), []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(r, dict):
+                    continue
+                k = (r.get("date"), r.get("market"), str(r.get("code")),
+                     r.get("track"), r.get("anchor"), r.get("h"))
+                if k in seen:
+                    continue
+                seen.add(k)
+                rows.append(r)
+    for s in new_samples:
+        k = (s["date"], s["market"], str(s["code"]), s["track"], s["anchor"],
+             s["h"])
+        if k in seen:
+            continue
+        seen.add(k)
+        s = dict(s, judged_at=now_iso) if now_iso else dict(s)
+        rows.append(s)
+    rows.sort(key=lambda r: (str(r.get("date")), str(r.get("market")),
+                             str(r.get("code")), str(r.get("track")),
+                             str(r.get("anchor")), int(r.get("h") or 0)))
+    tmp = path + ".tmp"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(tmp, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    return rows
+
+
 # ---------------------------------------------------------------- 渲染（数字 SSOT 全在卡）
 
 def render_pack_block(card):
@@ -986,6 +1108,53 @@ def selftest():
         and "turnover_pctile" in mk_ep, mk_ep.keys()
     assert "None" not in "".join(render_pack_block(card_ep)), \
         "pack 不得出现 None 字面量"
+    # ⑩-前2 预测带自校准（P3）：触及判定/样本/分桶/幂等台账
+    cb = [{"date": "2026-06-01", "open": 10, "high": 10.5, "low": 9.8,
+           "close": 10.2, "volume": 1},
+          {"date": "2026-06-02", "open": 10, "high": 11.0, "low": 10.0,
+           "close": 10.8, "volume": 1},
+          {"date": "2026-06-03", "open": 10, "high": 10.4, "low": 9.5,
+           "close": 9.9, "volume": 1},
+          {"date": "2026-06-04", "open": 10, "high": 10.2, "low": 9.9,
+           "close": 10.0, "volume": 1}]
+    assert touch_judgment(cb, "2026-06-01", 10.9, 1) is True   # 卡后首根 high 11.0 上穿
+    assert touch_judgment(cb, "2026-06-01", 11.5, 3) is False  # 窗内最高 11.0 未及
+    assert touch_judgment(cb, "2026-06-01", 9.6, 2) is True    # low 9.5 回落触及
+    assert touch_judgment(cb, "2026-06-01", 10.9, 5) is None, "不满窗不记（右删防护）"
+    assert touch_judgment(cb, "2026-06-01", None, 2) is None
+    cal_card = {"state": "estimated", "market": "cn", "code": "999999",
+                "date": "2026-06-01",
+                "math": {"tracks": {"default": {"anchors": {
+                    "target1": {"value": 10.9,
+                                "touch": {"1": 0.3, "3": 0.5}},
+                    "stop": {"value": 9.7,
+                             "touch": {"1": 0.4, "3": 0.6}}}}}}}
+    smp = calibration_samples([cal_card], {("cn", "999999"): cb})
+    # 卡日收盘 10.2：target1=10.9 上穿锚（h=1 即触，06-02 high 11.0）；
+    # stop=9.7 回落锚（h=1 未触 low 10.0，h=3 触 06-03 low 9.5）
+    assert {(s["anchor"], s["h"], s["touched"]) for s in smp} == {
+        ("target1", 1, True), ("target1", 3, True),
+        ("stop", 1, False), ("stop", 3, True)}, smp
+    many = ([dict(s, p=0.1, touched=False) for s in smp] +
+            [dict(s, p=0.9, touched=True) for s in smp] * 35)
+    bk = calibration_buckets(many)
+    assert any(b["n"] >= 30 and not b["insufficient"] and
+               b["actual_rate"] == 1.0 for b in bk
+               if b["bucket"].startswith("0.8")), bk
+    assert all(b["insufficient"] for b in bk if b["n"] < 30)
+    with tempfile.TemporaryDirectory() as td_c:
+        r1 = merge_calibration(td_c, smp, "2026-11-04T20:00:00+08:00")
+        assert len(r1) == len(smp)
+        r2 = merge_calibration(td_c, smp)  # 幂等：重复合并零增
+        assert r2 == r1
+        with open(os.path.join(td_c, "outlook-calibration.jsonl"),
+                  encoding="utf-8") as f:
+            assert len([l for l in f if l.strip()]) == len(smp)
+        with open(os.path.join(td_c, "outlook-calibration.jsonl"), "a",
+                  encoding="utf-8") as f:  # 坏行/标量行自愈
+            f.write("not-json\n123\n")
+        r3 = merge_calibration(td_c, [])
+        assert len(r3) == len(smp)
     #     质量分与置信帽——裁决对走势参考结构性零感知（outlook 无意见通道，
     #     LLM 只能引用其数字作 rationale 素材，与 mid_term 同地位）
     import adjudicate as aj

@@ -291,14 +291,91 @@ def render_daily(state_dir):
     return path
 
 
+def calibrate(state_dir):
+    """预测带自校准后验（09 分期表 P3；独立于信号后验、不进 ledger）：历史
+    卡 × 锚 × horizon 的触及概率 vs 实际触及频率。日 K 按股拉一次
+    （FetchLock 单窗），样本幂等合并入 outlook-calibration.jsonl，渲染
+    calibration.md（派生视图）。新卡天然不满窗 → 样本随窗龄自然增厚。"""
+    latest = ol.latest_cards(state_dir)
+    if not latest:
+        print("无历史卡——先跑 --daily")
+        return None
+    lock = FetchLock(state_dir)
+    if not lock.acquire(timeout=120):
+        print("warn: fetch_state.lock 竞争超时，校准挂起——稍后重跑幂等无损失")
+        return None
+    bars_by_code = {}
+    try:
+        st = vfetch.load_fetch_state()
+        for i, (key, _c) in enumerate(sorted(latest.items())):
+            market, code = key
+            if i:
+                time.sleep(random.uniform(8, 12))
+            now = int(time.time())
+            bars, bstate, _src, _tried = vfetch.fetch_daily_bars(
+                market, code, st, now)
+            if bars:
+                bars_by_code[key] = bars
+            else:
+                print("warn: %s %s 日 K %s（该股校准样本缺席）" % (
+                    market, code, bstate))
+    finally:
+        try:
+            vfetch.save_fetch_state(st)  # 熔断账本 finally 落盘（M3 同款）
+        except Exception:
+            pass
+        lock.release()
+    # 全量历史卡（不只 latest——每张卡都是一组样本）
+    cards = []
+    d = ol.outlook_dir(state_dir)
+    for name in sorted(os.listdir(d)):
+        if name.endswith(".jsonl"):
+            cards.extend(ol.load_cards(state_dir, name[:-6]))
+    samples = ol.calibration_samples(cards, bars_by_code)
+    rows = ol.merge_calibration(state_dir, samples,
+                                _now().isoformat(timespec="seconds"))
+    buckets = ol.calibration_buckets(rows)
+    L = ["# 预测带自校准（outlook calibration）", ""]
+    L.append("口径：历史卡锚位触及概率（first-passage）vs 其后 h 根日 K 实际触及——"
+             "方向按卡日收盘定（上方锚看上穿 high≥锚、下方锚看回落 low≤锚，"
+             "屏障对称）；样本幂等键=日期+股+轨+锚+horizon；不满整窗不记"
+             "（右删防护，新卡随窗龄自然增厚）。")
+    L.append("")
+    L.append("| p 桶 | n | 预测均值 | 实际触及率 | 状态 |")
+    L.append("| --- | --- | --- | --- | --- |")
+    for b in buckets:
+        L.append("| %s | %s | %s | %s | %s |" % (
+            b["bucket"], b["n"], b["mean_p"], b["actual_rate"],
+            "样本不足" if b["insufficient"] else "ok"))
+    if not buckets:
+        L.append("| — | 0 | — | — | 尚无满窗样本 |")
+    L.append("")
+    L.append("- 校准是信息面披露（描述预测带可信度），不进裁决、不进台账、"
+             "不改预测带公式；桶 n<30 标不足。")
+    L.append("- %s" % ol.BAND_NOTE)
+    L.append("")
+    L.append("---")
+    L.append("*%s*" % DISCLAIMER)
+    path = os.path.join(ol.outlook_dir(state_dir), "calibration.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(L) + "\n")
+    print("校准：新增样本 %d · 台账累计 %d · 渲染 -> %s"
+          % (len(samples), len(rows), path))
+    return path
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--daily", action="store_true", help="收盘后批量（默认形态）")
     ap.add_argument("--force", action="store_true", help="忽略当日缓存全量重取")
     ap.add_argument("--stock", default="", help="单股刷新（归一匹配 universe 行）")
     ap.add_argument("--render", action="store_true", help="只重渲日表（零取数）")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="预测带自校准后验（拉日 K 判触及，幂等合并台账）")
     ap.add_argument("--state-dir", default=STATE_DIR)
     args = ap.parse_args()
+    if args.calibrate:
+        return 0 if calibrate(args.state_dir) else 1
     only = None
     if args.stock:
         market, code = vfetch.detect_market(args.stock)
