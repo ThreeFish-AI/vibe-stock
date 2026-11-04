@@ -658,7 +658,8 @@ def _price_kind(evidence):
 def register_signal(evidence, verdict, opinions, report_id, report_path,
                     report_version=None, now=None, profile="default",
                     horizons=None, action_override=None, extra_levels=None):
-    """信号登记（双轨）：profile=default 短线 / position 中线——horizons 缺省
+    """信号登记（多轨）：profile=default 短线 / position 中线 / addon 加仓轨
+    （09，经 action_override=add_on 产生）——horizons 缺省
     取 archive.HORIZONS_OF[profile]（期限轨 SSOT）。返回 (action, invalidated,
     superseded)。条件：同股同 profile 同 report_id 的旧 pending 信号标
     superseded（I-004 去重：同日重跑以最新版为准，旧版不再双计样本）；做法：
@@ -1097,26 +1098,27 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None,
         L.append("- 空仓者：不参与。")
     else:
         L.append("- 空仓者：观望，等待方向明确。")
-    # 持仓者分支五档（04 §6）：信号档为基础，addon 轨（09）只在其上给「加仓」
-    # 与「等回踩」两档加法建议——冻结/冷却时维持信号档并附冻结原因
-    hold_line = None
+    # 持仓者分支五档（04 §6，档名与 04/09 枚举同口径：持有·含等回踩变体/
+    # 持有观察/减仓/离场）：信号档为基础，addon 轨（09）只在其上给「可加仓」
+    # 与「等回踩」两档加法建议——冻结/冷却时维持信号档并附原因行
     if final in ("buy", "strong_buy"):
-        hold_line = "可持有或逢高减仓，跌破止损位离场。"
+        hold_line = "- 持仓者（持有）：可持有或逢高减仓，跌破止损位离场。"
     elif final in ("sell", "strong_sell"):
-        hold_line = "减仓或离场。"
+        hold_line = "- 持仓者（减仓/离场）：减仓或离场。"
     else:
-        hold_line = "控制仓位，按止损纪律执行。"
+        hold_line = "- 持仓者（持有观察）：控制仓位，按止损纪律执行。"
     if addon and addon.get("advice") == "first_add":
         L.append("- 持仓者：**可加仓**（%s）——%s"
                  % ("顺势轨" if addon["track"] == "trend" else "逆势窄门",
                     addon["rationale"]))
     elif addon and addon.get("advice") == "wait_pullback":
-        L.append("- 持仓者：%s 加仓：%s" % (hold_line.rstrip("。"), addon["rationale"]))
+        L.append("%s——加仓：%s" % (hold_line.rstrip("。"), addon["rationale"]))
     else:
-        L.append("- 持仓者：%s" % hold_line)
+        L.append(hold_line)
         if addon and addon.get("advice") == "frozen":
             L.append("  - 加仓资格冻结（09）：%s" % "；".join(addon["frozen_reasons"]))
-        elif addon and addon.get("advice") in ("confirm_add", "abort", "hold"):
+        elif addon and addon.get("advice") in ("confirm_add", "abort", "hold",
+                                               "cooldown"):
             L.append("  - 加仓轨：%s" % addon["rationale"])
     L.append("")
     if addon and addon.get("held"):  # 加仓评估节（09）：三道门逐项可溯源
@@ -1224,7 +1226,8 @@ def cmd_report(args, now=None):
     sig_all = ar.load_signals(SIGNALS)
     stock_sigs = [s for s in sig_all
                   if str(s.get("code", "")).zfill(5) == code.zfill(5)
-                  and s.get("market") == market]
+                  and s.get("market") == market
+                  and not s.get("snapshot")]  # 快照信号不进实盘状态机（索引 live 同口径）
     addon_eval = None
     if holding:
         try:
@@ -1261,7 +1264,9 @@ def cmd_report(args, now=None):
             report_version=version, now=now, profile="addon",
             action_override="add_on",
             extra_levels={"add_ref": addon_eval.get("add_ref"),
-                          "confirm_lo": addon_eval.get("confirm_lo")})
+                          "confirm_lo": addon_eval.get("confirm_lo"),
+                          "size_cap": addon_eval.get("size_cap"),
+                          "first_qty": addon_eval.get("first_qty")})
         print("signal(addon): action=%s（对立失效 %d · 同日旧版 superseded %d）"
               % (aaction, ainv, asup))
     quote_name = (evidence["blocks"].get("quote", {}) or {}).get("name")
@@ -3600,8 +3605,9 @@ def _selftest_archive(evidence, verdict, opinions):
             sig_ad = [s for s in sigs_now if s.get("profile") == "addon"]
             assert len(sig_ad) == 1 and sig_ad[0]["action"] == "add_on" \
                 and sig_ad[0]["horizons"] == [1, 3, 5, 10], sig_ad
-            assert sig_ad[0]["key_levels"].get("add_ref") == 10.0 \
-                and "confirm_lo" in sig_ad[0]["key_levels"], sig_ad[0]["key_levels"]
+            assert sig_ad[0]["key_levels"].get("add_ref") == 9.8 \
+                and sig_ad[0]["key_levels"].get("first_qty") == 100, \
+                sig_ad[0]["key_levels"]  # add_ref 钳制不高于现价（09）·首加半批
             v_sell = dict(v_hold, aggregate={**v_hold["aggregate"],
                                              "final_signal": "sell"},
                           risk_guard={"initial": "hold", "final": "sell",
@@ -3612,7 +3618,16 @@ def _selftest_archive(evidence, verdict, opinions):
             assert not [s for s in sigs_now2 if s.get("profile") == "addon"
                         and s["status"] == "pending" and s["id"] != sig_ad[0]["id"]]
             assert "加仓资格冻结" in md2 and "短线终判 sell" in md2, md2[-800:]
-            print("  ok 加仓轨集成：顺势首加五档/登记/add_ref · 卖族冻结无登记")
+            # 快照 addon 信号不进状态机（09）：标记 snapshot 后重跑，在途态
+            # 不被快照信号锁定 → 重新评估出 first_add（同 report_id 让位新版）
+            sigs3 = json.load(open(SIGNALS, encoding="utf-8"))
+            for s in sigs3:
+                if s.get("profile") == "addon":
+                    s["snapshot"] = True
+            write(SIGNALS, json.dumps(sigs3, ensure_ascii=False))
+            out3, _, _ = report_addon(v_hold, 42)
+            assert "signal(addon): action=add_on" in out3, out3
+            print("  ok 加仓轨集成：顺势首加五档/登记/add_ref 钳制 · 卖族冻结无登记 · 快照信号不锁状态机")
 
             assert ar.load_portfolio(os.path.join(td, "无此目录"), p) == {} and p == [], \
                 "文件不存在：problems 不追加"

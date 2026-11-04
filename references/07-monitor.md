@@ -250,5 +250,5 @@ whipsaw 路径判据用日 K high/low（tick 缺口不影响判定）。
 
 `batch/monitor/rules.py --selftest`（36 checks）与 `watch.py --selftest`
 （31 checks，含 launchd 模板回归钉与 position 轨 profile 过滤钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
-scripts/ 四件硬门禁成员（AGENTS.md 测试段第五条非阻塞），P4 机械判据合流
-scripts/ 后归四件 selftest 接管。判据只许收严（门禁只收严红线）。
+scripts/ 五件硬门禁成员（AGENTS.md 测试段第六条非阻塞），P4 机械判据合流
+scripts/ 后归五件 selftest 接管。判据只许收严（门禁只收严红线）。

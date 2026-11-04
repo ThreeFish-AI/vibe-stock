@@ -47,6 +47,6 @@
 | strategies/ | 策略 YAML 库 |
 | scripts/ | fetch / adjudicate / diagnose / postmortem / lens / addon / archive（裁决 · 诊断 · 基本面锚透镜 · 加仓轨 · 报告归档与索引） |
 | batch/ | 批量子技能参考实现（口径以 references/06 为准；除 monitor/ 外不设 selftest 门禁——以 scripts/ 五件全绿 + 06 口径复核为准） |
-| batch/monitor/ | 盯盘参考实现 watch/rules（口径以 references/07 为准，自带 --selftest 非阻塞第五条门禁） |
+| batch/monitor/ | 盯盘参考实现 watch/rules（口径以 references/07 为准，自带 --selftest 非阻塞第六条门禁） |
 | evals/ | 合成 Fixture 与黄金样本 |
 | docs/.agents/ | [Issue 记录](docs/.agents/issue.md) 与 [知识索引](docs/.agents/knowledge-map.md) |

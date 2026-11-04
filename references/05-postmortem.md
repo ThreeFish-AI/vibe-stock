@@ -1,6 +1,7 @@
 # 05 · 决策信号后验自校准（SSOT）
 
-后验评估两条期限轨的信号（策略/角色意见）：基本面锚（lens.py 三档结论，
+后验评估各期限轨（default/position/addon）的信号（策略/角色意见）：基本面锚
+（lens.py 三档结论，
 12 个月量级）仍不进后验——两轨窗都证伪不了基本面论点（期限正交），把透镜
 塞进短窗归因只会错杀长周期视角。
 
@@ -9,13 +10,18 @@
 
 ## 期限轨（profile，0.0.16 起）
 
-- **双轨登记**（条件：`diagnose.py report`；做法：default 轨照旧登记一条；
+- **多轨登记**（条件：`diagnose.py report`；做法：default 轨照旧登记一条；
   workdir 存在 `verdict.position.json` 时同刻再登记一条 `profile=position`
   信号——horizons 取 `archive.HORIZONS_OF` SSOT（default=[1,3,5,10]、
   position=[20,60,120]≈1/3/6 个月），key_levels 按轨取（default=20 日三价、
   position=波段带三键，见 [04](04-report.md) 4b）；坑位：无 position 文件时
   单轨登记，行为与历史逐字节一致；两轨同用同一份 evidence/报告文件，
   report_id 相同、profile 不同）。
+- **addon 轨登记**（0.0.18 起，[09](09-add-on.md)）：持仓股 report 段加仓轨
+  判定 advice=first_add 时经 `action_override=add_on` 登记一条
+  `profile=addon` 信号（action=add_on、family=bull、horizons=[1,3,5,10]、
+  key_levels 附 add_ref/confirm_lo/size_cap/first_qty）；confirm/abort 是
+  在途复核不登记（不双计样本）；快照 addon 信号不进实盘状态机。
 - **对立失效按 profile 隔离**（无条件全局规则：期限正交的执法面）：失效与
   superseded 都只作用于同 profile 的信号——短线 sell 不得把中线 pending buy
   标 invalidated（反之亦然），存量无 profile 键的信号按 default 兜底。
@@ -31,7 +37,9 @@
   neutral）供展示、不进台账——多期限记分是伪重复样本（T+60 与 T+120 收益
   相关约 0.71），会使信号提前离开 <30 样本中性门、破坏 Beta(15,15) 收缩。
 - **台账分文件**：default 增量写 `ledger.json`（裸键原样）、position 写
-  `ledger.position.json`；裁决器经 `--ledger` 按轨查表（[03](03-synthesis.md)
+  `ledger.position.json`；addon 增量并入 `ledger.json`（与 default 同账本、
+  同 sources 归因、delta 分桶不串样本——09：加仓建议也要被市场打分）；
+  裁决器经 `--ledger` 按轨查表（[03](03-synthesis.md)
   双跑制），绩效因子与画像升降档互不串轨。
 - **复权基准（两轨同修，正确性修正）**：outcome 判定与涨跌幅展示基准=
   同复权 `closes[i]`（evaluated entry 落 `base`），不用 `close_at_signal`
@@ -46,8 +54,9 @@
 
 ## 信号登记（report 时）
 
-- 信号动作八态：buy / add / hold / reduce / sell / watch / avoid / alert
-  （最终信号映射：strong_buy→buy、buy→buy、hold→watch、sell→reduce、
+- 信号动作九态：buy / add / hold / reduce / sell / watch / avoid / alert /
+  add_on（0.0.18 起，仅 addon 轨经 action_override 产生，按 bull 记分；
+  最终信号映射：strong_buy→buy、buy→buy、hold→watch、sell→reduce、
   strong_sell→sell）。
 - 身份键 (report_id, source_type, market, code, profile, action, horizon,
   regime) 即八元组；**去重未实现**：同日重跑每版各登记一条信号（挂起项见
@@ -57,7 +66,7 @@
   补 5 位；快照符号两侧同口径归一），存量 4 位港码/带后缀旧形态信号同样互通。
 - **置信门**：buy 族置信 <0.5 → 登记 watch（不算可执行建议）。
 - 期限 horizons 按轨取 `archive.HORIZONS_OF`：default=[1,3,5,10]、
-  position=[20,60,120]（交易日）。
+  addon=[1,3,5,10]、position=[20,60,120]（交易日）。
 - 报告指针（适用：读信号定位报告时）：做法——`report_id` = `<code>-<date>` 日级
   分组键，定位用 `report_path` + `report_version`（布局见 [04](04-report.md)
   「落盘与跟踪」）；坑位——迁移还原的丢失版带 `report_lost: true`，正文不可得。

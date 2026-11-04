@@ -88,7 +88,9 @@ def _fx_on(series, keys, date):
 def evaluate_signals(signals, bars_by_code, cny_by_date=None):
     """就 bars（按代码）评估已到期 horizon；原位更新 signals，返回
     (ledger_delta_map, changed, notes)：delta_map 按 profile 分桶
-    （{"default": {...}, "position": {...}}，台账分文件不串轨）；changed=是否有
+    （{"default": {...}, "position": {...}, "addon": {...}}——default 与 addon
+    同写 ledger.json（09 同账本、delta 分桶不串样本），position 独立
+    ledger.position.json）；changed=是否有
     任何 evaluated 落笔（neutral-only 也算——索引重建据此触发，不再只看台账
     增量）；notes=诊断行（超窗信号等，run 侧打印）。
     判定口径（两轨同守）：基准价用同复权 closes[i]（与 closes[j] 同序列），
@@ -276,8 +278,11 @@ def run(args):
         if path == LEDGER:  # default 与 addon 同账本（09）：末次合并态作画像输入
             ledger = led
     if wrote:
+        printed = set()  # default 与 addon 同账本（09）：同路径头行只打一次
         for path, led, delta in wrote:
-            print("评估完成；台账与绩效已更新（%s）" % path)
+            if path not in printed:
+                print("评估完成；台账与绩效已更新（%s）" % path)
+                printed.add(path)
             for src, d in delta.items():
                 print("  归因 %s：+%d 胜 / +%d 负" % (src, d["wins"], d["losses"]))
     else:  # 全部跳过/未到期时不落「已更新」失实陈述，亦不空写台账文件

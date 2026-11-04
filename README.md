@@ -16,7 +16,7 @@
 | 绩效因子后验反馈（Beta 收缩、钳制） | `postmortem.py` + `ledger.json` |
 | 分歧显式化（三桶 + 冲突分级） | `adjudicate.py aggregate/disagreement` |
 | RiskGuard 只降不升 | `adjudicate.py risk_guard`（veto/单向降档/永不升级） |
-| 决策信号八态 + 对立失效 + 后验 | `diagnose.py register_signal` + `postmortem.py` |
+| 决策信号九态 + 对立失效 + 后验 | `diagnose.py register_signal` + `postmortem.py` |
 | 策略 YAML 说明书（策略即数据） | `strategies/` 十五策略（十短线 default + 五中线 position）+ 自定义扩展位 |
 | 扩展证据块 | 十块零权重情报面（资金流/公告/研报/预告/解禁/股东户数/大盘/行业/估值/汇率）不进质量分；簇级熔断（fx 汇率为港股专属块） |
 
@@ -76,7 +76,8 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 **三道门**（资格只冻不升格：短线/中线卖族、风险角色降档、A-1~A-5 风险链
 确定性判据 → 策略买点触发：顺势回踩主轨 + 逆势窄门「quality_value+基本面锚
 支撑+零风险链」→ 三段确认制手数：首加 1/2 批 → T+3 确认/撤销 → 60 日限频
-与浮亏包络）。报告持仓者分支五档（可加仓/持有/等回踩/减仓/离场）+「加仓
+与浮亏包络）。报告持仓者分支五档（可加仓/持有·含等回踩变体/持有观察/
+减仓/离场）+「加仓
 评估」节逐门可溯源；首加建议登记 addon 信号（T+1/3/5/10 后验按 bull 记
 分——加仓建议也要被市场打分）。规约见
 [references/09-add-on.md](references/09-add-on.md)。

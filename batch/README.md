@@ -61,6 +61,6 @@ yfinance $SK/scripts/postmortem.py`（skill 自带，见
 - 深评摘要 `digest.py` 与主报告 `render_index.py` 不写运行日志类 json；各
   产物文件的唯一事实源地位与「勿手改」纪律见
   [06「产物 SSOT 布局」](../references/06-batch-scan.md)。
-- 本目录属参考实现，不设 `--selftest` 门禁：改动以 scripts/ 四件 selftest
+- 本目录属参考实现，不设 `--selftest` 门禁：改动以 scripts/ 五件 selftest
   全绿（AGENTS.md 测试口径）+ `py_compile`/`node --check` 语法冒烟 + 06
   口径复核为准。
