@@ -13,7 +13,10 @@
   质量分 good；零权重样本——扩展块 moneyflow=available/valuation=fetch_failed
   不扰动 verdict 与 quality（零权重钉）。
 - 回归执法：`scripts/adjudicate.py --selftest`、`scripts/diagnose.py --selftest`、
-  `scripts/postmortem.py --selftest`、`scripts/lens.py --selftest` 四件全绿是
-  提交前置（AGENTS.md）；盯盘件 `batch/monitor/{rules,watch}.py --selftest`
-  为非阻塞第五条（Fixture 内联于脚本、一律合成标的，见
+  `scripts/postmortem.py --selftest`、`scripts/lens.py --selftest`、
+  `scripts/outlook.py --selftest` 五件全绿是提交前置（AGENTS.md；outlook 为
+  0.0.18 起第五件，Fixture 内联于脚本、合成标的与真实持仓零重合断言，
+  见 [09](../references/09-outlook.md)「回归门禁」）；盯盘件
+  `batch/monitor/{rules,watch}.py --selftest`
+  为非阻塞旁路门禁（Fixture 内联于脚本、一律合成标的，见
   [07](../references/07-monitor.md)「回归门禁」）。

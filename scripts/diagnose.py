@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import archive as ar  # noqa: E402
 import fetch as fx  # noqa: E402
 import adjudicate as aj  # noqa: E402
+import outlook as ol  # noqa: E402  走势参考卡（零权重，references/09）
 
 STATE_DIR = os.path.expanduser("~/.vibe-stock")
 SIGNALS = os.path.join(STATE_DIR, "signals.json")
@@ -524,6 +525,14 @@ def render_context_pack(evidence, workdir):
                         blk["history"][p], ensure_ascii=False)))
             else:
                 lines.append(json.dumps(blk["data"], ensure_ascii=False))
+    # 走势参考（零权重，references/09）：置于扩展块之前——pack 超预算时
+    # 整截的是扩展节，本节存活（截断序钉在 selftest）；信息面与 mid_term
+    # 同地位，LLM 可引用数字作 rationale 素材。
+    oc = load_json(os.path.join(workdir, "outlook.json"), None)
+    if oc:
+        lines.append("")
+        lines.append("## 走势参考（零权重，不进裁决）")
+        lines.extend(ol.render_pack_block(oc))
     render_ext_blocks(lines, b)
     _render_lens_block(lines, workdir)
     lines.append("")
@@ -592,6 +601,9 @@ def cmd_prepare(args):
             json.dump(evidence, f, ensure_ascii=False, indent=1)
     if evidence["blocks"].get("daily_bars", {}).get("state") == "fetch_failed":
         print("日 K 全链失败：改用 --snapshot-dir 提供快照，或稍后重试")
+        _stale = os.path.join(args.workdir, "outlook.json")
+        if os.path.exists(_stale):  # 早退同样清残留卡（09「失败即清除」不变式）
+            os.remove(_stale)
         return 2
     if getattr(args, "cost", None):
         # 用户参考价（持仓成本）：只落 workdir（.vs 已 gitignore，不进全局
@@ -615,6 +627,23 @@ def cmd_prepare(args):
             p = os.path.join(args.workdir, stale)
             if os.path.exists(p):
                 os.remove(p)
+    # 走势参考卡（零权重，references/09）：恒现算落 workdir（决策侧数学面
+    # 不受缓存牵制，搭本次取数便车零额外网络）；快照不出卡；失败/弃权即
+    # 清除残留卡（lens 清理同款不变式，防旧卡数字拼进新证据）。
+    ol_path = os.path.join(args.workdir, "outlook.json")
+    ol_card = None
+    if not evidence["meta"].get("snapshot"):
+        try:
+            ol_card = ol.compute_card(evidence, STATE_DIR)
+        except Exception as e:  # 防御面：参考卡缺失不得拖挂诊股（如实告警）
+            print("warn: outlook 计算失败（%r），已清除残留卡" % e)
+    if ol_card:
+        with open(ol_path, "w", encoding="utf-8") as f:
+            json.dump(ol_card, f, ensure_ascii=False, indent=1)
+        print("outlook -> %s/outlook.json（%s · %s）" % (
+            args.workdir, ol_card.get("state"), ol_card.get("date")))
+    elif os.path.exists(ol_path):
+        os.remove(ol_path)
     pack = render_context_pack(evidence, args.workdir)
     for name, default in (("opinions.json", []), ("risk.json",
                          {"veto": False, "downgrade": False, "severity": "medium"}),
@@ -974,7 +1003,7 @@ def _report_lens_section(lens):
 
 
 def render_report(evidence, verdict, opinions, stock, risk=None, lens=None,
-                  position=None):
+                  position=None, outlook=None):
     risk = risk if isinstance(risk, dict) else {}
     q = evidence["quality"]
     agg = verdict["aggregate"]
@@ -1064,6 +1093,8 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None,
     if position:  # 中线裁决节（profile=position；workdir 有 verdict.position.json 才出）
         L.extend(_report_position_section(evidence, position[0], position[1],
                                           risk))
+    if outlook:  # 4c 走势参考（零权重；cmd_report 侧身份软校验后才传入）
+        L.extend(ol.render_report_section(outlook))
     L.append("")
     L.append("## 风险与利好")
     # 逐条可溯源（04 §5）：意见带 source 与 signal/置信；风险栏另挂风险角色
@@ -1121,6 +1152,21 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None,
     L.append("---")
     L.append("*%s*" % DISCLAIMER)
     return "\n".join(L) + "\n"
+
+
+def _outlook_card_for(wd, market, code):
+    """cmd_report 侧 4c 卡装配：身份软校验——不符只跳节+warn（零权重信息面
+    可观测即可，不 exit 2；分级依据同 evidence/verdict 身份闸门的先例差）。"""
+    card = load_json(os.path.join(wd, "outlook.json"), None)
+    if not card:
+        return None
+    oc = str(card.get("code") or "")
+    oc = oc.zfill(5) if card.get("market") == "hk" else oc
+    if card.get("market") != market or oc != code:
+        print("warn: outlook 卡身份 %s/%s 与 %s/%s 不符，跳过走势参考节"
+              % (card.get("market"), oc, market, code))
+        return None
+    return card
 
 
 def cmd_report(args, now=None):
@@ -1181,9 +1227,11 @@ def cmd_report(args, now=None):
                   "未写报告" % (pverdict.get("stock_code"), code))
             return 2
         position = (pverdict, popinions)
+    # 4c 走势参考卡（零权重软校验，helper 内分级注记）
+    outlook_card = _outlook_card_for(wd, market, code)
     sections, footer = ar.split_report(
         render_report(evidence, verdict, opinions, args.stock, risk=risk,
-                      lens=lens, position=position))
+                      lens=lens, position=position, outlook=outlook_card))
     path = os.path.join(sdir, date + ".md")
     try:
         version = ar.append_version(path, ar.day_title(os.path.basename(sdir), date),
@@ -2263,6 +2311,128 @@ def selftest():
     rep2 = render_report(ev_hk, vr, [], "hk01810", risk=None, lens=None)
     assert "目标可达性" not in rep2
     print("  ok 基本面锚：透镜四锚/三档渲染 · abstained 弃权行 · 无 cost 不出节 · 报告正交声明")
+    # -- 走势参考卡：pack/报告注入与截断序钉（references/09 · 零权重） --
+    ol_card = {"schema": "outlook/1", "state": "estimated", "market": "hk",
+               "code": "01810", "date": "2026-11-03", "price": 25.68,
+               "price_kind": "close", "band_note": ol.BAND_NOTE,
+               "beta_note": ol.BETA_NOTE,
+               "zero_weight_note": ol.ZERO_WEIGHT_NOTE,
+               "math": {"sigma_daily": 0.021, "sigma_src": "60d",
+                        "mid_term": {"rv60": 0.33, "ret_20d": 0.05},
+                        "tracks": {
+                            "default": {"horizons": {
+                                "1": {"band_pct": 2.1, "lo": 24.0, "hi": 26.0},
+                                "10": {"band_pct": 6.6, "lo": 22.0, "hi": 28.0}},
+                                "anchors": {"stop": {
+                                    "value": 24.0, "dist_pct": -6.6,
+                                    "touch": {"10": 0.7}}},
+                                "anchors_source": "signals"},
+                            "position": {"horizons": {
+                                "60": {"band_pct": 16.0, "lo": 20.0,
+                                       "hi": 32.0}}}}},
+               "emotion": {"stock": {"max_ret_20d": 0.04},
+                           "moneyflow": {"hold_pct_chg_20d": 0.5},
+                           "market": {"state": "abstained"}},
+               "experience": {"tracks": {"default": {"1": {
+                   "n": 6, "hit": 5, "miss": 1, "neutral": 0,
+                   "insufficient": True}}}, "note": ol.EXP_NOTE},
+               "deltas": {"prev_date": "2026-11-02",
+                          "changes": {"price_pct": 1.2},
+                          "streaks": {"rv60_down": 2}},
+               "user_anchor": {"ops": [{"time": "2026-11-01T10:00:00+08:00",
+                                        "action": "buy", "price": 24.0,
+                                        "move_pct": 7.0}],
+                               "band_hi_dist_pct": -3.1, "note": ol.OPS_NOTE}}
+    with tempfile.TemporaryDirectory() as td:
+        with open(os.path.join(td, "outlook.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(ol_card, f, ensure_ascii=False)
+        p = render_context_pack(ev_hk, td)
+        text = open(p, encoding="utf-8").read()
+        assert "## 走势参考（零权重，不进裁决）" in text
+        assert "预测带≠后验判定带" in text and "经验计数" in text
+        # 截断序钉：预算压到全文长度−10 → 必走「扩展节整截」分支，走势参考
+        # 节存活（置于 render_ext_blocks 之前的机制性保证——heads 首命中是
+        # 扩展节头；猴补 cap 后 finally 恢复，不留脏全局）
+        _full = open(p, encoding="utf-8").read()
+        _cap_backup = PACK_CHAR_CAP
+        try:
+            globals()["PACK_CHAR_CAP"] = len(_full) - 10
+            t_big = open(render_context_pack(ev_hk, td),
+                         encoding="utf-8").read()
+            assert len(t_big) <= len(_full) - 10, "pack 须守住字符护栏"
+            assert "## 走势参考（零权重，不进裁决）" in t_big, \
+                "超预算时走势参考须存活（截断序：扩展节先死）"
+            assert "扩展证据节因超出" in t_big
+        finally:
+            globals()["PACK_CHAR_CAP"] = _cap_backup
+        # abstained → 弃权一行（不硬凑）
+        td2 = tempfile.mkdtemp()
+        with open(os.path.join(td2, "outlook.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump({"state": "abstained", "reason": "缺日 K"}, f,
+                      ensure_ascii=False)
+        assert "弃权：缺日 K" in open(render_context_pack(ev_hk, td2),
+                                     encoding="utf-8").read()
+        # 无卡：不出节不报错；身份软校验：异股卡跳节
+        td3 = tempfile.mkdtemp()
+        assert "走势参考" not in open(render_context_pack(ev_hk, td3),
+                                      encoding="utf-8").read()
+        wrong = dict(ol_card, code="00700")
+        with open(os.path.join(td3, "outlook.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(wrong, f, ensure_ascii=False)
+        assert _outlook_card_for(td3, "hk", "01810") is None
+        assert _outlook_card_for(td, "hk", "01810") == ol_card
+    # 报告 4c：estimated 出节（band/beta/零权重三声明）；无卡不出
+    rep = render_report(ev_hk, vr, [], "hk01810", risk=None, lens=None,
+                        position=None, outlook=ol_card)
+    assert "## 短/中期走势参考（零权重 · 不进裁决）" in rep
+    assert "预测带≠后验判定带" in rep and "未剔除大盘 beta" in rep \
+        and "本节不构成投资建议" in rep
+    rep_wo = render_report(ev_hk, vr, [], "hk01810", risk=None)
+    assert "走势参考" not in rep_wo
+    # prepare 落卡/清残留（offline --evidence）：cn 出卡；快照清除残留
+    ev_syn = {"meta": {"symbol": "999999", "market": "cn", "code": "999999",
+                       "session": {"phase": "closed"}},
+              "blocks": {"quote": {"state": "available", "price": 100.0,
+                                   "name": "合成fixture"},
+                         "daily_bars": {"state": "available", "bars": vol_bars},
+                         "technical": {"state": "available"}},
+              "quality": {"score": 90, "tier": "good",
+                          "confidence_cap": "high"}}
+    with tempfile.TemporaryDirectory() as td4:
+        ev_path = os.path.join(td4, "evidence.json")
+        with open(ev_path, "w", encoding="utf-8") as f:
+            json.dump(ev_syn, f, ensure_ascii=False)
+        with open(os.path.join(td4, "outlook.json"), "w",
+                  encoding="utf-8") as f:  # 陈旧残留
+            json.dump({"stale": True}, f)
+        ns = argparse.Namespace(evidence=ev_path, workdir=td4, cost=None,
+                                snapshot_dir=None)
+        # 门禁封闭：prepare 经 compute_card 读 STATE_DIR（signals/portfolio）
+        # ——经 globals() 重定向到临时目录（不触真实状态文件；selftest 后段
+        # 另有 global 声明，此处不得裸用名字）
+        _sd_backup = globals()["STATE_DIR"]
+        globals()["STATE_DIR"] = td4
+        try:
+            assert cmd_prepare(ns) == 0
+            fresh = load_json(os.path.join(td4, "outlook.json"), None)
+            assert fresh and fresh.get("state") == "estimated" \
+                and fresh.get("schema") == "outlook/1", fresh
+            # 快照形态：不出卡且清除残留（snapshot 短路的写拓扑面）
+            ev_snap = json.loads(json.dumps(ev_syn))
+            ev_snap["meta"] = {"symbol": "600519", "snapshot": True,
+                               "market": "?", "session": {"phase": "unknown"}}
+            with open(ev_path, "w", encoding="utf-8") as f:
+                json.dump(ev_snap, f, ensure_ascii=False)
+            assert cmd_prepare(ns) == 0
+            assert not os.path.exists(os.path.join(td4, "outlook.json")), \
+                "快照运行必须清除残留卡（防旧卡数字拼进新证据）"
+        finally:
+            globals()["STATE_DIR"] = _sd_backup
+    print("  ok 走势参考：pack 节+截断序存活 · 报告 4c 三声明 · 无卡/弃权如实 · "
+          "身份软跳 · prepare 落卡/快照清残留")
     evidence = {"meta": {"symbol": "TEST", "market": "cn", "code": "000001"},
                 "blocks": {"quote": {"state": "available", "price": 12.4},
                            "daily_bars": {"state": "available", "bars": bars},

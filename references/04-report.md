@@ -40,6 +40,14 @@
    position 文件不出节（单轨形态逐字节兼容）；坑位：波段带是纪律参考线
    不是止损指令——报告不得把它写成离场价，三层下行门（箱体下沿−5% 总回撤/
    regime 失效/基本面证伪走 risk.json）是唯一离场口径（[08](08-midterm.md)）。
+4c. **短/中期走势参考**（条件：workdir 存在 `outlook.json` 且卡片身份与
+   证据一致（零权重软校验——不符只跳节+warn，不 exit 2；分级依据：裁决
+   事实面身份闸门防串目录，信息面可观测即可）；做法：在中线裁决节后渲染
+   「## 短/中期走势参考（零权重 · 不进裁决）」——数学面（双轨 σ√h 预测带
+   +锚位触及概率）、情绪面、经验计数、日差连向、用户锚（实盘股脱敏投影），
+   数字 SSOT 在 outlook.json、报告只渲染不重算；band/beta/零权重三声明
+   齐全（预测带≠后验判定带两把尺）；坑位：不得把预测带写成止损/目标
+   指令——本节是参考不是建议（[09](09-outlook.md)）；abstained 不出节）。
 5. **风险与利好**：逐条挂反对意见与支持意见的 rationale（有据可查）。条件：
    `report` 渲染（读 workdir 的 opinions.json 与 risk.json）；做法：风险栏=卖出族
    意见 + 风险角色 risk.json.rationale（标注 veto/downgrade 触发态），利好栏=买入族
@@ -146,6 +154,7 @@ Fixture 与 [I-006](../docs/.agents/issue.md#I-006) 以本节为准，不另立�
 | 元素 | `market` | 字符串 | `cn` / `hk` |
 | 元素 | `quantity` | 数值 | 持仓数量 |
 | 元素 | `cost_price` | 数值 | 成本价，按登记币种原样（`currency` 等其余元素键仓内不消费） |
+| 顶层 | `operations` | 列表 | 实际成交流水（到秒时间戳）；outlook 用户锚只读 `time/market/code/action/price` 五键（market 仅用于归一匹配）（[09](09-outlook.md) 脱敏投影：quantity/cost_price/成本派生涨幅绝不消费绝不落盘） |
 
 - **契约漂移可观测**（适用：report / postmortem 重建索引时加载 portfolio.json）：
   做法——文件不存在、合法空表静默；文件存在但损坏、顶层非对象、缺 `holdings`

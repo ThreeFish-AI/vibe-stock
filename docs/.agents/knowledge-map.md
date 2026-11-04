@@ -17,6 +17,7 @@
 | [batch/README.md](../../batch/README.md) | 批量参考实现命令序与文件清单 | Agent |
 | [references/07-monitor.md](../../references/07-monitor.md) | 盯盘子技能：在册股票盘中监控与收盘复核 | Agent |
 | [references/08-midterm.md](../../references/08-midterm.md) | 中线（1–6 个月）规约：因子口径与只降不升风险判据族 | Agent |
+| [references/09-outlook.md](../../references/09-outlook.md) | 在册股短/中期走势参考：零权重卡三面口径、写拓扑与收盘批量 | Agent |
 | [docs/research/midterm-strategies.md](../research/midterm-strategies.md) | A/HK 1–6 个月中线策略调研与评估（IEEE 引文） | 贡献者 / Agent |
 | [batch/monitor/README.md](../../batch/monitor/README.md) | 盯盘参考实现命令序、launchd 安装与文件清单 | Agent / 用户 |
 | [strategies/README.md](../../strategies/README.md) | 策略 YAML 库说明 | 贡献者 |

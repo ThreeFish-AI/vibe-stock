@@ -7,6 +7,70 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.18] - 2026-11-04
+
+### Added
+
+- 在册股短/中期走势参考机制（用户 2026-11-04 五项裁定：生成时机=收盘批量
+  +决策现算混合、覆盖=全在册 universe 21 只、情绪面含市场级块、权限=零权重
+  纯参考、市场级四块一次全落——后者随 0.0.19 落地）：新增
+  `references/09-outlook.md`（机制 SSOT）、`scripts/outlook.py`（第五件硬
+  门禁纯函数件：双轨 σ√h 预测带 + first-passage 触及概率（复用 lens/
+  realized_vol/HORIZONS_OF/MIN_SAMPLES，import 禁复制）、个股级情绪键与资金
+  流投影、每股×轨×horizon 经验计数桶（observed 不入桶、n<MIN_SAMPLES 标
+  不足）、与前卡确定性日差连向、实盘股用户锚脱敏投影（operations 只读
+  time/code/action/price，quantity/cost_price/成本派生涨幅绝不落盘，负断言
+  钉））、`batch/outlook_daily.py`（非门禁编排：universe import watch、
+  FetchLock 单窗 + 股间 8–12s 退避、收盘卡幂等 upsert 入
+  `~/.vibe-stock/outlook/<date>.jsonl`、`<date>.md` 全集日表；盘中卡拒写、
+  当日已卡幂等跳过）。
+- 诊股注入（diagnose.py）：prepare 恒现算落 `.vs/outlook.json`（失败/弃权/
+  快照即清除残留卡，lens 清理同款不变式）；context-pack 新增「走势参考
+  （零权重）」节并**置于扩展块之前**（超预算时扩展节先截、本节存活，截断序
+  selftest 钉）；报告新增 4c「短/中期走势参考（零权重 · 不进裁决）」条件节
+  （band/beta/零权重三声明；身份软校验不符只跳节+warn——与裁决事实面身份
+  exit 2 的分级依据）。
+- 两把尺分立与零权重执法面：band_note 逐字钉（预测带≠后验判定带：default
+  ±2% 固定带、position σ√h 仅 T+60 记分——判定带 SSOT 仍在 postmortem，
+  卡片只引用）；outlook selftest E4 同构钉（evidence 挂卡不扰动
+  evidence_cap）；03「透镜不进裁决」节 outlook 并列句共用同一执法面。
+- 门禁升格：scripts/ 四件 → **五件**（`outlook.py --selftest` 提交前置；
+  AGENTS 测试节/目录表、evals/README、PIPELINE 回归块、README 四处同步 +
+  SKILL 判表命令入口；monitor 两件的「非阻塞第五条」措辞改「非阻塞旁路
+  门禁」防与第五件硬门禁撞名）；指针全套同步（SKILL frontmatter 0.0.18+description+判表+工作
+  流注释、PIPELINE 头部/② 段/命令速查、README、AGENTS、knowledge-map、04
+  4c 条目与 portfolio 契约表 operations 消费行）。
+- 版本依据：信息面新增机制 + 门禁收严（四件→五件），裁决链与后验零改动，
+  按 0.0.x patch 升版。
+
+### Fixed（0.0.18 合入前独立盲审 22 项全修）
+
+- 严重三项：S1 selftest fixture 与真实持仓零重合改为**动态负断言**（两侧
+  `_norm_code` 归一、覆盖 holdings∪operations 全量码，不再假设码段永真；
+  hk fixture 换合成段并构造 4/5 位真互通用例）；S2 `persist_card` 落盘前
+  剥离 `user_anchor`（实盘操作价/成本派生 move_pct 绝不入全局时序——只住
+  workdir 现算卡，存量卡已清洗重写，selftest 钉）；S3 满卡 17 行超 pack
+  截界致零权重声明被截（改为截内容不截声明、报告侧按内容过滤，破坏性
+  实验钉）。
+- 较严重六项：M1 `_streak` None 改真断链（中段缺值掐断历史，不桥接）；
+  M2 批量取数 now 每股现取（冷却/熔断/时段判定不吃批次开头陈旧值）；
+  M3 熔断账本落盘移入 finally + 出卡计算并入 try（异常/Ctrl-C 不丢账本）；
+  M4/L8 新增 **<17:10 墙钟门**（代码闸：收盘竞价定型窗内早跑会把未定型 K
+  钉成当日卡且幂等键当日不再重取——「≥17:10」时点纪律落成代码，--force
+  可越过）；M5 signals 快照合成信号不入经验桶/不作锚（archive 索引同口径）；
+  M6 门禁登记口径修正为四处（SKILL 判表只登记命令入口）+ batch/README、
+  07「四件」→「五件」存量指针同步 + monitor「非阻塞第五条」改「非阻塞
+  旁路门禁」防撞名。
+- 一般项：anchors_source 三态精确化（无有效键=abstained）· σ 退化链删不可
+  达的 rv120 中间档（注释同步「宁宽勿窄」）· 预测带下沿夹 0（极端波动）·
+  first-passage 高估注记随 pack σ 行输出 · `--daily`/`--stock` 显式旗标
+  （裸跑不触发 ~84 HTTP）+ 抖动改 random.uniform · 锁竞争独立计数不入
+  「盘中拒写」· jsonl 坏行统一跳过 + tmp 补 fsync · prepare 日 K 全链失败
+  早退同清残留卡 · 经验桶 n 含 neutral 与台账 MIN_SAMPLES 只数 decisive
+  的口径差异在 09 显式声明 · pack 预算挤占记为已知取舍 · operations 读入
+  按 time 排序防乱序登记 · prepare selftest 用例 STATE_DIR 重定向临时目录
+  （门禁封闭不触真实状态文件）。
+
 ## [0.0.17] - 2026-11-03
 
 ### Fixed
