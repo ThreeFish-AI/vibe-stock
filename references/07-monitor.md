@@ -121,8 +121,10 @@
 - `monitor/day-summary/<date>.md` 是派生视图（events/ticks 台账是事实源），
   幂等重渲（当日无事件也出，覆盖区间可审计），含盯盘覆盖区间（首末 tick +
   缺口：相邻 tick 间隔 >2×interval 且不在午休窗）、次日盯盘重点（未处理机械
-  降档事件）、固定免责尾注。`close_done` 按日归零（跨日继承会让次日起收盘
-  复核静默跳过）。
+  降档事件）、「走势参考（上一张收盘卡 · <date>）」附件节（09 P2：由
+  close_pass 自身消费 outlook jsonl 重算，当日卡 17:35 批量才出、收盘复核
+  只见 <today 卡）、固定免责尾注。`close_done` 按日归零（跨日继承会让次日
+  起收盘复核静默跳过）。
 - 港股源每日抽检随 --close 执行（见数据面）。锁竞争失败 → 显式告警挂起
   重跑，不静默跳过。
 
@@ -250,6 +252,7 @@ whipsaw 路径判据用日 K high/low（tick 缺口不影响判定）。
 ## 回归门禁
 
 `batch/monitor/rules.py --selftest`（36 checks）与 `watch.py --selftest`
-（31 checks，含 launchd 模板回归钉与 position 轨 profile 过滤钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
+（42 checks，含 launchd 模板回归钉、outlook 17:35 槽模板钉、走势参考附件钉
+与 position 轨 profile 过滤钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
 scripts/ 五件硬门禁成员（AGENTS.md 测试段非阻塞旁路门禁），P4 机械判据合流
 scripts/ 后归五件 selftest 接管。判据只许收严（门禁只收严红线）。

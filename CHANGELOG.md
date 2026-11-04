@@ -7,6 +7,73 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.21] - 2026-11-04
+
+### Added
+
+- 走势参考 P3 两件（09 分期表收官；RiskGuard 接入经用户「继续 P3」指令
+  完成评审授权——判据只收严方向）：
+  ① 08 ②族新增判据 ②-8「市场级杠杆拥挤」（0.0.21）：margin 块 70 日分位
+  >90 且 Δ5d >+2% 且个股级拥挤键并发（turnover_pctile_250>80 或
+  limit_up_count_20d≥2）→ 风险角色 downgrade（medium，rationale 引用数值）
+  ——走既有 risk.json 通道只降不升；市场级形态单独出现不独立降档；阈值
+  属首版防御性设定非实证结论，放宽须评审。
+  ② 预测带自校准后验：`outlook_daily --calibrate`——历史卡 × 锚 × horizon
+  触及概率 vs 实际触及（方向按卡日收盘定：上方锚看上穿/下方锚看回落——
+  双向或判对上方锚恒真的缺陷已修并有钉；不满整窗不记防右删），样本幂等
+  台账 `~/.vibe-stock/outlook-calibration.jsonl`（坏行/标量行自愈）、
+  `outlook/calibration.md` 分桶校准表（桶 n<30 标不足）；信息面披露不进
+  裁决/台账/不改预测带公式。首跑 34 样本落地（低 p 桶实际 3.8% vs 预测
+  2.8%，量级吻合）。outlook selftest 新增校准钉（触及判定四态/样本流/
+  分桶/幂等合并/坏行自愈）。
+- 版本依据：一条 LLM 判据（只降不升方向）+ 信息面后验，按 0.0.x patch。
+
+### Fixed（合入前二次评审修复，I-014/I-015）
+
+- **I-014**：`--calibrate` 无墙钟门/末根未完成过滤——盘中手跑会把未定型
+  末根 K 永久钉成错误样本（台账幂等键永不重判；--daily 侧本有 (17,10)
+  硬门）。修复：墙钟门同 --daily（--force 可越过）+ 根本防线 `session_phase`
+  末根未完成过滤（判窗只用已定型 K，--force 越过时过滤仍生效）。
+- **I-015**：校准台账与样本面三处——①qfq 重基准偏置无防御：bars 全链
+  adjust=qfq，除权除息后旧锚（卡时点绝对价）vs 新序列系统性偏（上方锚
+  触及被压低/下方抬高）——卡 price 与序列卡日收盘偏离 >0.5% 整卡丢样本
+  （outlook selftest 钉：×0.8 重定价丢/×1.004 噪声不丢），calibration.md
+  口径行披露该偏置与「样本跨日重叠相关、n 非独立样本数」；②`merge_calibration`
+  坏行自愈只覆盖非 JSON/标量行，类型损坏行（h 非整数/缺键）是毒丸且崩点
+  在台账写回之后（永不自愈）——载入 schema 校验（`_valid_cal_row`），
+  重写时自愈清除；③「新增样本 N」按满窗计算数虚报（重跑零增也打印满数）
+  ——改按本运行 judged_at 戳计真实增量。
+- 随附：删死常量 `CALIBRATION_LEDGER`（无引用且绑全局 STATE_DIR 易误用）；
+  幂等键不含锚值的取舍在 merge docstring 显式化。
+
+## [0.0.20] - 2026-11-04
+
+### Added
+
+- 走势参考 P2 两件（[09](references/09-outlook.md) 分期表）：
+  ① day-summary 附件：close_pass 渲染「走势参考（上一张收盘卡 · <date>）」
+  指针节——由 close_pass 自身消费 outlook jsonl 重算（幂等；外挂追加会被
+  重渲冲掉的问题形态不存在）；全文指针 + 市场级摘要行 + 零权重尾注；当日
+  卡 17:35 才出、收盘复核只见 <today 卡（语义钉）；watch selftest 新增 5
+  checks（31→36：无目录不出节/有卡出节/市场级行/零权重尾注/当日卡不进
+  附件）。
+  ② launchd 17:35 独立槽模板 `batch/outlook/com.threefish.vibestock.outlook.plist`
+  （周一至五单槽每日批量、与 16:15 兜底槽错峰 80min、一次性命令无
+  KeepAlive 失败次日自愈、RunAtLoad=false、节假日误拉一次无害——无交易日
+  历取舍同 07 P4；plistlib 解析钉含 --daily 参数与五槽 17:35 形态）。
+- 版本依据：编排面与模板新增（脚本核心件零改动），按 0.0.x patch 升版。
+
+### Fixed（合入前二次评审修复，I-014/I-015）
+
+- 0.0.20 原条目宣称的「plistlib 解析钉」此前不存在（模板本身合法但无钉，
+  漂移无门禁可拦）——补真钉进 watch selftest（--daily 尾参/无 KeepAlive/
+  RunAtLoad=False/周一至五单槽 17:35/与 monitor 最晚槽错峰 ≥60min）；
+  `_outlook_digest` 硬编码 `~/.vibe-stock` 路径与「21 只」字样改由
+  `state_dir` 派生（--state-dir 下指错路）；digest 市场级行渲染补 `_d`
+  缺数兜底（I-012 同律，残块缺键不渗 None%）；selftest `mkdtemp` 泄漏改
+  `TemporaryDirectory`（watch 36→42 checks）。
+- 07 回归门禁行 watch checks 口径同步（31→42）与 day-summary 附件节登记。
+
 ## [0.0.19] - 2026-11-04
 
 ### Added
