@@ -63,7 +63,9 @@ BLOCKS = [("quote", 25), ("daily_bars", 25), ("technical", 25),
 # 只反映核心行情链可用性）。修订此口径属 minor 级语义变更：须人工评审 + golden
 # 重建（selftest E4/E5 两钉冻结当前语义）。
 EXT_BLOCKS = ["moneyflow", "notices", "research", "forecast", "unlock",
-              "holder", "market", "industry", "valuation"]
+              "holder", "market", "industry", "valuation",
+              # 市场级情绪五块（0.0.19，references/09）——镜像随 fetch 加宽
+              "margin", "index", "turnover_pctile", "erp", "margin_accounts"]
 PF_CLAMP = (0.83, 1.2)
 PF_PRIOR = 15.0        # Beta(15,15) 先验
 PF_MIN_SAMPLES = 30    # 样本不足 → 中性 1.0

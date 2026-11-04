@@ -72,11 +72,17 @@ def build_evidence(market, code, name, st, now):
     tech = vfetch.derive_technical(bars, session, market, code) if bars else {}
     tech["state"] = "available" if bars else bars_state
     mf = vfetch.fetch_moneyflow(market, code, st, now)
+    blocks = {"daily_bars": {"state": bars_state, "source": bars_src,
+                             "bars": bars},
+              "quote": quote, "technical": tech, "moneyflow": mf}
+    # 市场级五块（0.0.19）：市场维度共享——fetch 层 _MKT_CACHE 使 21 股批量
+    # 只付一次取数（hk 守卫 not_supported 如实）
+    for name in ("margin", "index", "turnover_pctile", "erp",
+                 "margin_accounts"):
+        blocks[name] = getattr(vfetch, "fetch_%s" % name)(market, code, st, now)
     return {"meta": {"symbol": code, "market": market, "code": code,
                      "session": session},
-            "blocks": {"daily_bars": {"state": bars_state, "source": bars_src,
-                                      "bars": bars},
-                       "quote": quote, "technical": tech, "moneyflow": mf}}
+            "blocks": blocks}
 
 
 def collect(state_dir, force=False, only=None):
@@ -226,8 +232,49 @@ def render_daily(state_dir):
              "港股已出），同批次可跨两个交易日——如实披露不对齐。")
     L.append("")
     L.append("## 市场级情绪")
-    L.append("- abstained——两融/全A换手分位/ERP/新开户块待接入"
-             "（references/09 分期表；接入后此节出实数）")
+    mkt = None
+    for c in cards:  # 市场维度共享：任取一张 estimated 卡的市场级投影
+        em = c.get("emotion") or {}
+        if (em.get("market") or {}).get("state") == "estimated":
+            mkt = em["market"]
+            break
+    if mkt:
+        def _d(v):  # C1 收口：投影端滤 None 键后日表不得渗 "None%" 字面量
+            return "—" if v is None else v
+        mg = mkt.get("margin") or {}
+        if mg:
+            L.append("- 两融余额 %s 亿（%s）· Δ1d %s%% / Δ5d %s%% / Δ20d %s%% · "
+                     "70 日分位 %s%%（%s）" % (
+                         _d(mg.get("balance_yi")), mg.get("as_of"),
+                         _d(mg.get("chg_1d_pct")), _d(mg.get("chg_5d_pct")),
+                         _d(mg.get("chg_20d_pct")), _d(mg.get("pctile_70d")),
+                         mg.get("source")))
+        tp = mkt.get("turnover_pctile") or {}
+        if tp:
+            L.append("- 全A换手分位 %s%%（%s 日窗，%s）" % (
+                _d(tp.get("pctile")), tp.get("window") or 0, tp.get("as_of")))
+        ep = mkt.get("erp") or {}
+        if ep:
+            L.append("- ERP %s%%（月频 PE %s × 10Y %s%%，%s）· 5 年月频分位 "
+                     "%s%% · 日频积累 %s" % (
+                         _d(ep.get("erp_pct")), _d(ep.get("monthly_pe")),
+                         _d(ep.get("y10_pct")), ep.get("as_of"),
+                         _d(ep.get("pctile_5y_monthly")),
+                         "就绪" if ep.get("daily_ready") else "进行中"))
+        ma = mkt.get("margin_accounts") or {}
+        if ma:
+            L.append("- 两融账户参与度 %s 户（%s）· Δ5d %s%% / Δ20d %s%%"
+                     % (_d(ma.get("traders")), ma.get("as_of"),
+                        _d(ma.get("traders_chg_5d_pct")),
+                        _d(ma.get("traders_chg_20d_pct"))))
+        ix = mkt.get("index") or {}
+        for name, s in (ix.get("indices") or {}).items():
+            L.append("- 指数 %s %s（%s，距 MA60 %s%%，%s）" % (
+                name, _d(s.get("close")), s.get("as_of"),
+                _d(s.get("dist_ma60_pct")), s.get("source")))
+    else:
+        L.append("- abstained——市场级五块本批全部不可用（单块状态见各股诊股"
+                 "证据面状态行；references/09）")
     L.append("")
     L.append("## 说明")
     L.append("- %s" % ol.ZERO_WEIGHT_NOTE)

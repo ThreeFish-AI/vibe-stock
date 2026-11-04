@@ -207,7 +207,8 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
 - P2 规则预钉（前置门：缓存 technical 数据日 == 今日，否则当日禁用 + data_stale
   告警）：ma20_break（price < ma20×0.98 → 注入 downgrade=medium）、trailing
   （high_since_entry ≥ 成本×1.15 武装、武装后破 ma20 → trailing_exit 收盘终判）、
-  HS300/HSI 收盘破 MA60 → 全组合降档评估提示。
+  HS300/HSI 收盘破 MA60 → 全组合降档评估提示（指数链已就绪：0.0.19 index 块
+  出 HS300/HSI 快照与 MA60，[01](01-evidence.md)——实施仍随 P2/P3 期别）。
 - P2 波段带带内状态（0.0.16 规约先行，实施随 P2）：position 轨信号
   `key_levels` 的 band_lo/band_hi/trail_ref 三键作监控锚——band_lo 触发
   「低吸复核」提示、band_hi 触发「高抛复核」提示、收盘破 trail_ref 提示

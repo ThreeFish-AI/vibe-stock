@@ -88,7 +88,7 @@
 做法：包裹 + 声明 + 报告不复述；
 坑位：哨兵声明写在外层、不进外文正文，报告引用新闻事实时不得携带哨兵标记。
 
-## 扩展证据块（零权重，现十块）
+## 扩展证据块（零权重，现十五块）
 
 扩展块是**信息面不是裁决面**：不进六块质量分与置信帽（置信帽只反映核心行情链
 可用性，与情报丰富度正交——资金流缺失不该压低 strong_sell 的可信度表达）。可见
@@ -107,7 +107,17 @@
 | market | qt 指数快照（与个股快照共用调用） | qt | qt 港股指数 |
 | industry | 申万归属(新浪 F10)+同花顺板块表 | sina_flow/ths | not_supported（backlog：HKCVALUE 同业锚） |
 | valuation | A：qt 快照→baidu 历史分位；HK：em-hk-ind 具名列快照(RPT_CUSTOM_HKF10)→baidu 分位（qt 港股位序未验证不入链） | qt/baidu_gushitong；HK=em_datacenter/baidu_gushitong | em-hk-ind+baidu 双路 |
+| margin | 市场级两融余额：dc `RPTA_RZRQ_LSHJ` 直连（全市场·元·单次 70 日）→金十转发回退（沪深两所合计，差北交所 ~0.33%） | dc-margin=em_datacenter；jin10-margin=jin10（新簇） | not_supported（市场级块仅 A 股） |
+| index | 指数基准 HS300/ALLA(000985)/HSI：腾讯 K 主源（amount 列实为量手非额——禁当成交额）→新浪回退（000985 新浪断更 2016 仅腾讯）；HSI yf→新浪港股（yf 当日行 Volume=0） | tx-idx=qq；sina-idx=sina_idx（新簇）；yf | HSI 随 A 股装配（本块对 hk 为 not_supported——港股诊股「同享」的是既有 market 块的 qt 港股指数快照，非本块） |
+| turnover_pctile | 全A 换手分位（000985 成交量滚动 250 日分位——成交活跃度代理，非严格换手率；东财换手率列补测后升级） | tx-idx=qq | not_supported |
+| erp | 月频 ERP（乐咕沪深300 滚动 PE×东财 10Y，ERP=1/PE−y10）+ 中证官网 000300 P/E2 日频增量落盘 `~/.vibe-stock/erp_pe_daily.jsonl`（单次仅回 20 日不可回填，满 250 日出日频分位） | legu-pe=legulegu（新簇）；dc-bond=em_datacenter；csindex=csindex（新簇） | not_supported |
+| margin_accounts | 两融账户参与度（日频·户·T+1；原「新开户」上游 2023-09 停更，用户 2026-11-04 裁定替代且不冒充新开户） | em-mkt-account=em_datacenter | not_supported |
 | fx | yfinance HKDCNY=X 日线（近 1 年，`hkd_cny_daily` 为 SSOT） | yf | 港股专属（cn=not_supported） |
+
+市场级五块规约（0.0.19，[09](09-outlook.md)）：市场维度共享数据——fetch 层
+`_MKT_CACHE` 使同进程多股一次取数（单诊 +2~6 HTTP、批量 +8~14 HTTP）；
+块状态 available/partial/fetch_failed 八态如实；簇归属见 CLUSTERS 注释（16→20
+簇：jin10/sina_idx/legulegu/csindex 新增，其余归既有簇）。
 
 规约句（三属性）：
 - **qt 位序双路校验**（无条件全局规则：qt.gtimg 无官方文档、~ 分隔字段序随版本
@@ -171,10 +181,13 @@ hkex_stat）；**港股回购金额**（SRRPT xls 唯一结构化免费源）；
 （RPT_PCF10_INDUSTRY_HKCVALUE 同业估值锚一次调用搭车）；**Reverse DCF/前瞻
 PE 锚**（待 FX 公开源验证 + FCF 基数规则：TTM 为负 vs 3 年均值为正会翻转结论）；
 **长周期 theses 台账**（BARS_WINDOW=250 与 252 日窗物理冲突待解）；龙虎榜 RPT_DAILYBILLBOARD_
-DETAILSNEW、两融（sse/szse 官网直连）、十大股东/机构持仓（emweb F10）、大宗
+DETAILSNEW、**东财指数 K 换手率列**（push2his 直连写死 secid 绕开 clist 放大器
+——限流解除后补测，测通则 turnover_pctile 块升级为严格换手率）、十大股东/机构持仓（emweb F10）、大宗
 RPT_DATA_BLOCKTRADE、质押 RPT_CSDC_LIST、增减持 RPT_SHARE_HOLDER_INCREASE、
 增发回购、机构调研 RPT_ORG_SURVEYNEW、同行估值（cninfo_webapi 行业 PE+qt 批量）、
 舆情（emappdata 人气榜）、互动问答（irm.cninfo POST）。
+（已转正：两融——0.0.19 margin 块，主源 dc `RPTA_RZRQ_LSHJ`（backlog 原名
+RPT_RZRQ_LSHJ 已失效），sse/szse 官网为仲裁源不入链——单日调用形态不适合序列。）
 
 ## L0 情报兜底（WebSearch）
 

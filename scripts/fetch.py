@@ -52,7 +52,11 @@ ROUNDTRIP_COST = {"cn": 0.0015, "hk": 0.0035}
 STALE_DAYS = {"quote": 1, "daily_bars": 5, "news": 3, "fundamentals": 120,
               "chip": 5, "moneyflow": 10, "notices": 1, "research": 30,
               "forecast": 1, "unlock": 1, "holder": 7, "market": 1,
-              "industry": 1, "valuation": 1}  # 声明式口径（过期判级参照；
+              "industry": 1, "valuation": 1,
+              # 市场级五块（0.0.19）：两融/指数/换手 T+1 披露 + 周末 → 5 自然日；
+              # 账户统计 7；ERP 月频主口径 → 45
+              "margin": 5, "index": 5, "turnover_pctile": 5,
+              "margin_accounts": 7, "erp": 45}  # 声明式口径（过期判级参照；
               # moneyflow 为自然日口径且被 fetch_moneyflow 新鲜度门消费）
 
 # 上游服务簇（熔断/冷却计账粒度）：同簇共享故障域，键为取数源名、值为簇名。
@@ -94,6 +98,23 @@ CLUSTERS = {
     "dc-hsgt": "em_datacenter",  # 南向持股（RPT_MUTUAL_STOCK_HOLDRANKS 直连）
     "em-notice-h": "em_notice",  # 港股公告（np-anotice ann_type=H，同簇加分支）
     "etnet": "etnet",            # ETNet 经济通簇 · 港股盈利预测（www.etnet.com.hk）
+    # —— 市场级情绪块（0.0.19，references/09；源实测口径见 PR 描述附探针报告） ——
+    # 取舍：dc-margin/dc-bond/em-mkt-account 三源并入 em_datacenter 既有簇——
+    # 簇=主机故障域（dc-respredict 先例同款），报表级失败（改名/字段漂移）在
+    # 批量下 3 连败会熔断整个 datacenter 家族 300s、波及财务/预告/解禁等核心
+    # 扩展源；失败面加宽属只收严方向，观察后再议是否拆「无证券过滤市场汇总」独立簇
+    "dc-margin": "em_datacenter",   # 两融余额全市场汇总（RPTA_RZRQ_LSHJ 直连；
+                                    #  backlog 原名 RPT_RZRQ_LSHJ 已失效——改名多一个 A）
+    "jin10-margin": "jin10",        # 金十转发簇（cdn.jin10.com，macro_china_ 前缀
+                                    #  易误读为新浪——akshare 源码实证为金十）
+    "tx-idx": "qq",                 # 腾讯指数 K（proxy.finance.qq.com，与个股 qq-tx
+                                    #  同端点族；坑位：该接口 amount 列实测量手非额）
+    "sina-idx": "sina_idx",         # 新浪指数簇（finance.sina.com.cn——与 vip.stock/
+                                    #  money.finance 两个既有新浪簇均不同主机）
+    "legu-pe": "legulegu",          # 乐咕乐股簇（月频指数 PE，hash token 反爬）
+    "csindex": "csindex",           # 中证官网簇（日频 P/E2，单次仅回 20 日）
+    "dc-bond": "em_datacenter",     # 中美国债收益率（datacenter，10Y 列）
+    "em-mkt-account": "em_datacenter",  # 两融账户统计（RPTA_WEB_MARGIN_DAILYTRADE）
 }
 
 # 市场能力表（块级 SSOT，簇数钉的姊妹钉）：市场 → 有取数链的块集合；不在集合
@@ -104,7 +125,9 @@ CLUSTERS = {
 MARKET_CAPS = {
     "cn": {"quote", "daily_bars", "technical", "news", "fundamentals", "chip",
            "moneyflow", "notices", "research", "forecast", "unlock", "holder",
-           "market", "industry", "valuation"},
+           "market", "industry", "valuation",
+           # 市场级情绪五块（0.0.19）：全市场共享一次取数（_MKT_CACHE）
+           "margin", "index", "turnover_pctile", "erp", "margin_accounts"},
     "hk": {"quote", "daily_bars", "technical", "news", "fundamentals",
            "moneyflow", "notices", "research", "market", "valuation", "fx"},
 }
@@ -2060,13 +2083,544 @@ def fetch_fx(market, st, now):
             "note": "人民币敞口提示：汇率仅情报面，不进信号判定与策略 YAML"}
 
 
+# ---------------------------------------------------------------- 市场级情绪扩展块
+# （零权重，references/09；用户 2026-11-04 裁定 3/5——08 Phase 5 预留提前落地，
+#   源实测口径见 0.0.19 PR 描述附探针报告）。全部市场维度数据：同进程多股
+#   共享一次取数（_MKT_CACHE），单诊 +2~6 HTTP、批量 +8~14 HTTP。
+
+_MKT_CACHE = {}  # 进程内缓存：块名 → 已取结果（进程短生命周期，无需过期）
+
+
+def _mkt_cached(name, fn):
+    """同进程共享一次取数——只缓存成功数据：fetch_failed 不入缓存（首股
+    瞬态失败不得固化成全批终局，绕过熔断器「连续 3 败」判定阈值；重试节流
+    由既有 source_allowed 冷却天然承担，最坏多付 1–2 次 HTTP）。"""
+    if name not in _MKT_CACHE or \
+            (isinstance(_MKT_CACHE[name], dict)
+             and _MKT_CACHE[name].get("state") == "fetch_failed"):
+        _MKT_CACHE[name] = fn()
+    return _MKT_CACHE[name]
+
+
+def _pctile_of(series, cur):
+    """滚动分位 (<=cur)/n——与 turnover_pctile_250 / pe_quantiles 同一口径。"""
+    vals = [v for v in series if v is not None]
+    if not vals or cur is None:
+        return None
+    return round(100.0 * sum(1 for v in vals if v <= cur) / len(vals), 1)
+
+
+def _dc_rows_market(report_name, columns, st, now, src_key, page_size=70,
+                    sort=""):
+    """市场级 dc 直连（无证券过滤——全市场汇总表如两融 RPTA_RZRQ_LSHJ）。"""
+    cluster = CLUSTERS[src_key]
+    ok, why = source_allowed(st, cluster, now)
+    if not ok:
+        raise _Skip(why)
+    import urllib.parse
+    url = ("%s?reportName=%s&columns=%s&pageNumber=1&pageSize=%d%s"
+           % (_DC, report_name, columns, page_size, sort))
+    data = json.loads(_http_text(url))
+    if data.get("success") is False:
+        if "返回数据为空" in str(data.get("message", "")) or data.get("code") == 9201:
+            record(st, cluster, True, "", now)
+            return []
+        raise ValueError("dc fail: %s" % data.get("message", ""))
+    rows = (data.get("result") or {}).get("data") or []
+    record(st, cluster, True, "", now)
+    return rows
+
+
+def _chg_pct(vals, k):
+    """近 k 日变化%（vals 升序、末位为最新；基期缺值/不足 → None）。"""
+    if len(vals) <= k or not vals[-1 - k] or not vals[-1]:
+        return None
+    return round((vals[-1] / vals[-1 - k] - 1) * 100, 2)
+
+
+def fetch_margin(market, code, st, now):
+    """扩展块·市场级两融余额（A 股）。主源 dc RPTA_RZRQ_LSHJ（全市场汇总·元·
+    单次 70 日，口径=RZYE+RQYE——探针实测行内严格成立）；回退金十转发（沪深
+    两所合计，差北交所 ~0.33% 如实披露）。T+1 披露。"""
+    if market not in MARKET_CAPS or "margin" not in MARKET_CAPS[market]:
+        return {"state": "not_supported", "source": "",
+                "note": "市场级情绪块仅 A 股口径（港股无两融制度）"}
+
+    def _build():
+        series, src = [], None
+        try:
+            rows = _dc_rows_market(
+                "RPTA_RZRQ_LSHJ", "DIM_DATE,RZYE,RQYE,RZRQYE", st, now,
+                "dc-margin", sort="&sortColumns=dim_date&sortTypes=-1")
+            series = [(str(r.get("DIM_DATE", ""))[:10], _fnum(r.get("RZRQYE")))
+                      for r in rows]
+            series = [(d, v) for d, v in series if d and v]
+            series.sort()
+            if len(series) >= 21:  # <21 出不了 20 日变动——形状问题不记源败
+                src = "dc-margin"
+        except Exception as e:
+            if not isinstance(e, _Skip):
+                record(st, CLUSTERS["dc-margin"], False, str(e), now)
+            series = []
+        # 回退条件是 src is None（非 not series）：主源「行数不足」残 1–20 行也
+        # 必须走回退，否则 available·source=None 渗透 pack 头、note 错标
+        if src is None:  # 回退：金十转发（akshare macro_china_* 实为 jin10 cdn）
+            series = []  # 主源残行是三所口径，不得与金十两所行混序
+            try:
+                import akshare as ak
+                ok, why = source_allowed(st, CLUSTERS["jin10-margin"], now)
+                if not ok:
+                    raise _Skip(why)
+                sz = {}
+                for _, r in ak.macro_china_market_margin_sz().iterrows():
+                    d = str(r.get("日期", ""))[:10]
+                    v = _fnum(r.get("融资融券余额"))
+                    if d and v is not None:
+                        sz[d] = v
+                sh = ak.macro_china_market_margin_sh()
+                for _, r in sh.iterrows():
+                    d = str(r.get("日期", ""))[:10]
+                    a, b = _fnum(r.get("融资融券余额")), sz.get(d)
+                    if d and a is not None and b is not None:
+                        series.append((d, a + b))  # 两列单位均元，直接加总
+                series.sort()
+                record(st, CLUSTERS["jin10-margin"], True, "", now)
+                if len(series) >= 21:  # 与主源同守卫：短/零配对序列不出 20 日变动
+                    src = "jin10-margin"
+                else:
+                    # HTTP 成功但零配对行/行数不足（列名漂移、两表日期零交集的
+                    # 常见形态）——不得落到下方 vals[-1]，也不得 available 出缺键
+                    return {"state": "fetch_failed", "source": "dc-margin/jin10",
+                            "note": "回退无可配对行或行数不足（%d 行）" % len(series)}
+            except ImportError:
+                return {"state": "fetch_failed", "source": "jin10-margin",
+                        "note": "akshare 未安装（uv --with 形态装载）"}
+            except Exception as e:
+                if not isinstance(e, _Skip):
+                    record(st, CLUSTERS["jin10-margin"], False, str(e), now)
+                return {"state": "fetch_failed", "source": "dc-margin/jin10",
+                        "note": "主源与回退均失败"}
+        series = series[-70:]
+        vals = [v for _, v in series]
+        return {"state": "available", "source": src,
+                "balance_yi": round(vals[-1] / 1e8, 1),
+                "chg_1d_pct": _chg_pct(vals, 1), "chg_5d_pct": _chg_pct(vals, 5),
+                "chg_20d_pct": _chg_pct(vals, 20),
+                "pctile_70d": _pctile_of(vals, vals[-1]),
+                "as_of": series[-1][0],
+                "note": ("全市场汇总（沪深北）" if src == "dc-margin"
+                         else "沪深两所合计（差北交所 ~0.33%）") + "·T+1 披露"}
+
+    return _mkt_cached("margin", _build)
+
+
+def _tx_index_series(symbol, st, now):
+    """腾讯指数日 K（proxy.finance.qq.com，与个股 qq-tx 同端点族）。坑位：
+    akshare 该接口 `amount` 列实测量（手）非额——分位口径与单位无关，但绝不
+    可当成交额消费（探针实测：尾行 244401128 手 == 新浪 volume 股 ÷100）。"""
+    ok, why = source_allowed(st, CLUSTERS["tx-idx"], now)
+    if not ok:
+        raise _Skip(why)
+    import akshare as ak
+    df = ak.stock_zh_index_daily_tx(symbol=symbol)
+    record(st, CLUSTERS["tx-idx"], True, "", now)
+    out = []
+    for _, r in df.tail(300).iterrows():
+        d, c, v = str(r.get("date", ""))[:10], _fnum(r.get("close")), \
+            _fnum(r.get("amount"))
+        if d and c is not None:
+            out.append((d, c, v))
+    return out
+
+
+def _sina_index_series(symbol, st, now):
+    """新浪指数日 K（finance.sina.com.cn——独立簇 sina_idx，与 vip.stock/money
+    两个既有新浪簇均不同主机）。坑位：无成交额列；000985 断更 2016-06 不可用。"""
+    ok, why = source_allowed(st, CLUSTERS["sina-idx"], now)
+    if not ok:
+        raise _Skip(why)
+    import akshare as ak
+    df = ak.stock_zh_index_daily(symbol=symbol)
+    record(st, CLUSTERS["sina-idx"], True, "", now)
+    out = []
+    for _, r in df.tail(300).iterrows():
+        d, c = str(r.get("date", ""))[:10], _fnum(r.get("close"))
+        if d and c is not None:
+            out.append((d, c, None))
+    return out
+
+
+def _index_snapshot(series):
+    if not series:  # 空序列守卫：快照不可算，防 IndexError 被 caller 误记源败
+        return None
+    closes = [c for _, c, _ in series]
+    ma60 = round(sum(closes[-60:]) / 60, 2) if len(closes) >= 60 else None
+    snap = {"as_of": series[-1][0], "close": closes[-1],
+            "chg_1d_pct": _chg_pct(closes, 1), "ma60": ma60}
+    if ma60:
+        snap["dist_ma60_pct"] = round((closes[-1] / ma60 - 1) * 100, 2)
+    return snap
+
+
+def fetch_index(market, code, st, now):
+    """扩展块·指数基准（HS300 / 中证全指 ALLA / 恒指 HSI）——07 P3 收盘破
+    MA60 与 08 Phase 5 超额收益带的共享前置件（本块只出快照，两消费方实施
+    随各自期别）。链：A 股 tx 主源→新浪回退（000985 新浪断更仅 tx）；HSI
+    yf 主源→新浪港股回退。坑位：盘后 1h 内新浪/腾讯末根常为 T-1、yf 当日行
+    Volume=0——快照带 as_of 如实披露，不做日历对齐硬判。"""
+    if market not in MARKET_CAPS or "index" not in MARKET_CAPS[market]:
+        return {"state": "not_supported", "source": "",
+                "note": "指数基准块仅 A 股诊股装配（港股恒指快照同块随装）"}
+
+    def _alla():
+        return _tx_index_series("sh000985", st, now)
+
+    def _build():
+        idx, fails = {}, []
+
+        def _cn(name, sym):
+            series = []
+            try:
+                series = _mkt_cached("idx_%s" % sym,
+                                     lambda s=sym: _tx_index_series(s, st, now))
+                src = "tx-idx"
+            except Exception as e:
+                if not isinstance(e, _Skip):
+                    record(st, CLUSTERS["tx-idx"], False, str(e), now)
+                fails.append("%s-tx:%s" % (name, type(e).__name__))
+                src = ""
+            if not series and sym == "sh000300":
+                try:  # 回退结果同入共享缓存——tx 失效时批量不被每股重打新浪
+                    series = _mkt_cached(
+                        "idx_%s_sina" % sym,
+                        lambda s=sym: _sina_index_series(s, st, now))
+                    src = "sina-idx"
+                except Exception as e:
+                    if not isinstance(e, _Skip):
+                        record(st, CLUSTERS["sina-idx"], False, str(e), now)
+                    fails.append("%s-sina:%s" % (name, type(e).__name__))
+            # 与 HSI 同守卫：短序列不出 ma60=None 快照（「距 MA60 0.00%」会
+            # 把无 MA60 误读成贴线），入 fails 如实披露
+            if len(series) >= 60:
+                snap = _index_snapshot(series)
+                snap["source"] = src
+                idx[name] = snap
+            elif series:
+                fails.append("%s:short_series(%d)" % (name, len(series)))
+
+        _cn("HS300", "sh000300")
+        try:  # ALLA 与换手分位块共享同一序列（缓存键唯一 → 单次 HTTP）
+            alla = _mkt_cached("idx_sh000985", _alla)
+            if len(alla) >= 60:
+                idx["ALLA"] = {**_index_snapshot(alla), "source": "tx-idx"}
+            else:
+                fails.append("ALLA:short_series(%d)" % len(alla))
+        except Exception as e:
+            if not isinstance(e, _Skip):
+                record(st, CLUSTERS["tx-idx"], False, str(e), now)
+            fails.append("ALLA:%s" % type(e).__name__)
+        try:  # HSI：yf 主源（当日行已有但 Volume=0——量不消费）→新浪港股回退
+            ok, why = source_allowed(st, CLUSTERS["yf"], now)
+            if not ok:
+                raise _Skip(why)
+            import yfinance as yf
+            df = yf.download("^HSI", period="1y", interval="1d",
+                             auto_adjust=False, progress=False)
+            record(st, CLUSTERS["yf"], True, "", now)
+            # MultiIndex 陷阱：df["Close"] 是单列 DataFrame 不是 Series——
+            # .items() 逐行给 Series 会被 _fnum 全滤空，必须 iloc[:, 0] 取列
+            col = df["Close"].dropna().iloc[:, 0]
+            closes = []
+            for ts, v in col.items():
+                c = _fnum(v)
+                if c is not None:
+                    closes.append((str(ts)[:10], c))
+            if len(closes) >= 60:
+                idx["HSI"] = {**_index_snapshot([(d, c, None) for d, c in closes]),
+                              "source": "yf"}
+            elif closes:
+                fails.append("HSI:short_series(%d)" % len(closes))
+        except Exception as e:
+            if not isinstance(e, _Skip):
+                record(st, CLUSTERS["yf"], False, str(e), now)
+            try:
+                import akshare as ak
+                ok2, why2 = source_allowed(st, CLUSTERS["sina-idx"], now)
+                if not ok2:
+                    raise _Skip(why2)
+                df = ak.stock_hk_index_daily_sina(symbol="HSI")
+                record(st, CLUSTERS["sina-idx"], True, "", now)
+                series = []
+                for _, r in df.tail(300).iterrows():
+                    d, c = str(r.get("date", ""))[:10], _fnum(r.get("close"))
+                    if d and c is not None:
+                        series.append((d, c, _fnum(r.get("amount"))))
+                if len(series) >= 60:  # 与 yf 主源同守卫：短序列不出 ma60=None 快照
+                    idx["HSI"] = {**_index_snapshot(series), "source": "sina-idx"}
+                elif series:
+                    fails.append("HSI:short_series(%d)" % len(series))
+            except Exception as e2:
+                if not isinstance(e2, _Skip):
+                    record(st, CLUSTERS["sina-idx"], False, str(e2), now)
+                fails.append("HSI:%s" % type(e2).__name__)  # 归因内层异常（e2）
+        if not idx:
+            return {"state": "fetch_failed", "source": "tx-idx/sina-idx/yf",
+                    "note": "指数链全失败：%s" % ";".join(fails)}
+        blk = {"state": "partial" if fails else "available",
+               "source": "+".join(sorted({v["source"] for v in idx.values()})),
+               "indices": idx,
+               "note": "指数快照（07 P3 MA60/08 超额带共享前置件）；as_of 为"
+                       "各源末根日（盘后 1h 内常为 T-1，如实披露）"}
+        if fails:
+            blk["note"] += "；部分失败：%s" % ";".join(fails)
+        return blk
+
+    return _mkt_cached("index", _build)
+
+
+def fetch_turnover_pctile(market, code, st, now):
+    """扩展块·全 A 换手分位（成交活跃度代理）：000985 腾讯量序列（手口径——
+    分位与单位无关）滚动 250 日分位。非严格换手率（东财指数 K 换手率列待限流
+    解除补测后升级，届时本块换源不改键名）。"""
+    if market not in MARKET_CAPS or "turnover_pctile" not in MARKET_CAPS[market]:
+        return {"state": "not_supported", "source": "",
+                "note": "市场级情绪块仅 A 股口径"}
+
+    def _build():
+        try:
+            alla = _mkt_cached("idx_sh000985",
+                               lambda: _tx_index_series("sh000985", st, now))
+        except Exception as e:
+            if not isinstance(e, _Skip):
+                record(st, CLUSTERS["tx-idx"], False, str(e), now)
+            return {"state": "fetch_failed", "source": "tx-idx",
+                    "note": "全 A 量序列不可用（%s）" % type(e).__name__}
+        vols = [v for _, _, v in alla if v]
+        if not vols:
+            return {"state": "fetch_failed", "source": "tx-idx",
+                    "note": "全 A 量序列全空（amount 列缺失形态）"}
+        win = vols[-250:]
+        return {"state": "available", "source": "tx-idx",
+                "pctile": _pctile_of(win, win[-1]), "window": len(win),
+                "as_of": alla[-1][0],
+                "note": "成交活跃度代理（000985 成交量滚动分位，量纲手）；"
+                        "非严格换手率——东财指数换手率列补测后升级"}
+
+    return _mkt_cached("turnover_pctile", _build)
+
+
+ERP_LEDGER = os.path.join(STATE_DIR, "erp_pe_daily.jsonl")
+
+
+def fetch_erp(market, code, st, now):
+    """扩展块·股权风险溢价（月频主口径 + 日频增量积累；用户 2026-11-04 裁定
+    7）。月频 = 乐咕沪深300 滚动市盈率 × 东财 10Y 国债（ERP=1/PE−y10）；日频
+    = 中证官网 000300 P/E2 逐日增量落盘 erp_pe_daily.jsonl（单次仅回 20 日、
+    冷启动不可回填——满 250 日后出日频分位，正是 09「经验数据积累」主旨）。"""
+    if market not in MARKET_CAPS or "erp" not in MARKET_CAPS[market]:
+        return {"state": "not_supported", "source": "",
+                "note": "市场级情绪块仅 A 股口径"}
+
+    def _monthly():
+        import akshare as ak
+        ok, why = source_allowed(st, CLUSTERS["legu-pe"], now)
+        if not ok:
+            raise _Skip(why)
+        df = ak.stock_index_pe_lg(symbol="沪深300")
+        record(st, CLUSTERS["legu-pe"], True, "", now)
+        out = []
+        for _, r in df.iterrows():
+            d, pe = str(r.get("日期", ""))[:10], _fnum(r.get("滚动市盈率"))
+            if d and pe is not None and pe > 0:  # 末两日 NaN 修补滞后如实跳过
+                out.append((d[:7], pe))
+        out.sort()
+        return out
+
+    def _y10():
+        import akshare as ak
+        ok, why = source_allowed(st, CLUSTERS["dc-bond"], now)
+        if not ok:
+            raise _Skip(why)
+        df = ak.bond_zh_us_rate(start_date="20060101")
+        record(st, CLUSTERS["dc-bond"], True, "", now)
+        out = []
+        for _, r in df.iterrows():
+            d, y = str(r.get("日期", ""))[:10], _fnum(r.get("中国国债收益率10年"))
+            if d and y is not None:
+                out.append((d, y))
+        out.sort()
+        return out
+
+    def _daily_accum():
+        import akshare as ak
+        ok, why = source_allowed(st, CLUSTERS["csindex"], now)
+        if not ok:
+            raise _Skip(why)
+        df = ak.stock_zh_index_value_csindex(symbol="000300")
+        record(st, CLUSTERS["csindex"], True, "", now)
+        new_rows = {}
+        for _, r in df.iterrows():
+            d, pe = str(r.get("日期", ""))[:10], _fnum(r.get("市盈率2"))
+            if d and pe is not None and pe > 0:
+                new_rows[d] = round(pe, 3)  # P/E2 计算用股本口径（探针钉）
+        ledger = {}
+        if os.path.exists(ERP_LEDGER):
+            try:
+                with open(ERP_LEDGER, encoding="utf-8") as f:
+                    for line in f:
+                        if not line.strip():
+                            continue
+                        try:
+                            r = json.loads(line)
+                        except ValueError:
+                            continue  # 坏行自愈跳过（outlook 同口径）
+                        if not isinstance(r, dict):  # 合法 JSON 标量行同属坏行
+                            continue
+                        if r.get("date") and r.get("pe2"):
+                            ledger[r["date"]] = r["pe2"]
+            except OSError:
+                ledger = {}
+        if not new_rows:
+            # 空响应只是无增量（临时空回/字段漂移），台账现状原样返回——
+            # 已积累满 250 日不得被一次空响应打回「进行中」
+            return len(ledger)
+        ledger.update(new_rows)
+        rows = [{"date": d, "pe2": v} for d, v in sorted(ledger.items())]
+        tmp = ERP_LEDGER + ".tmp"
+        os.makedirs(os.path.dirname(ERP_LEDGER), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        os.replace(tmp, ERP_LEDGER)
+        return len(rows)
+
+    def _build():
+        erp_series, y10_last, fails = [], None, []
+        try:
+            monthly = _monthly()
+            if len(monthly) < 24:
+                monthly, _ = [], fails.append("legu-pe:行数不足")
+        except ImportError:
+            return {"state": "fetch_failed", "source": "legu-pe",
+                    "note": "akshare 未安装（uv --with 形态装载）"}
+        except Exception as e:
+            if not isinstance(e, _Skip):
+                record(st, CLUSTERS["legu-pe"], False, str(e), now)
+            monthly = []
+            fails.append("legu-pe:%s" % type(e).__name__)
+        if monthly and monthly[-1][0][:4] >= "2015":  # 有月频 PE，补 10Y
+            try:
+                yy = _mkt_cached("y10_series", _y10)  # 同进程一次取齐
+                if yy:
+                    y10_last = yy[-1][1]
+                    ymap = {}
+                    for d, v in yy:  # 月末近似对齐：每月取该月最后一条
+                        ymap[d[:7]] = v
+                else:
+                    fails.append("dc-bond:空")
+            except Exception as e:
+                if not isinstance(e, _Skip):
+                    record(st, CLUSTERS["dc-bond"], False, str(e), now)
+                fails.append("dc-bond:%s" % type(e).__name__)
+            if y10_last is not None:
+                # 月频 ERP 序列：每月 PE 配当月 10Y（ERP=1/PE−y10，百分数）
+                for m, pe in monthly[-60:]:
+                    yv = ymap.get(m)
+                    if yv is not None:
+                        erp_series.append((m, round((1.0 / pe - yv / 100.0)
+                                                    * 100, 2)))
+        n_daily = None
+        try:
+            n_daily = _daily_accum()
+        except Exception as e:
+            if not isinstance(e, _Skip):
+                record(st, CLUSTERS["csindex"], False, str(e), now)
+            fails.append("csindex:%s" % type(e).__name__)
+        blk = {"source": "legu-pe+dc-bond+csindex",
+               "daily_pe_accum": n_daily,
+               "daily_ready": bool(n_daily and n_daily >= 250),
+               "note": "月频口径（乐咕沪深300 滚动 PE × 10Y 国债，ERP=1/PE−y10）；"
+                       "日频=中证官网 000300 P/E2 逐日增量落盘积累（单次仅回 "
+                       "20 日、冷启动不可回填——满 250 日出日频分位）；月频序列"
+                       "末两日 NaN 修补滞后已跳过"}
+        if erp_series:
+            cur = erp_series[-1][1]
+            blk.update({"state": "partial" if fails else "available",
+                        "erp_pct": cur,
+                        "pctile_5y_monthly": _pctile_of(
+                            [v for _, v in erp_series], cur),
+                        "monthly_pe": monthly[-1][1], "y10_pct": y10_last,
+                        "as_of": erp_series[-1][0]})
+        else:
+            blk["state"] = "fetch_failed" if not n_daily else "partial"
+            if fails:
+                blk["note"] = blk["note"] + "；月频链失败：%s" % ";".join(fails)
+        return blk
+
+    return _mkt_cached("erp", _build)
+
+
+def fetch_margin_accounts(market, code, st, now):
+    """扩展块·两融账户参与度（日频·万户；用户 2026-11-04 裁定 6——原「新开户」
+    上游 2023-09 停更，以本口径替代且不冒充新开户）。源：东财
+    RPTA_WEB_MARGIN_DAILYTRADE（akshare stock_margin_account_info；docstring
+    定位陈旧，实测日频全市场，列名以探针实测为准）。T+1 披露。"""
+    if market not in MARKET_CAPS or "margin_accounts" not in MARKET_CAPS[market]:
+        return {"state": "not_supported", "source": "",
+                "note": "市场级情绪块仅 A 股口径"}
+
+    def _build():
+        try:
+            import akshare as ak
+            ok, why = source_allowed(st, CLUSTERS["em-mkt-account"], now)
+            if not ok:
+                raise _Skip(why)
+            df = ak.stock_margin_account_info()
+            record(st, CLUSTERS["em-mkt-account"], True, "", now)
+            rows = []
+            for _, r in df.tail(80).iterrows():
+                d = str(r.get("日期", ""))[:10]
+                tr = _fnum(r.get("参与交易的投资者数量"))
+                if d and tr is not None:
+                    rows.append((d, tr, _fnum(r.get("有融资融券负债的投资者数量"))))
+            rows.sort()
+            if len(rows) < 6:
+                raise ValueError("序列过短：%d" % len(rows))
+            vals = [r[1] for r in rows]
+            blk = {"state": "available", "source": "em-mkt-account",
+                   "traders": vals[-1],
+                   "traders_chg_5d_pct": _chg_pct(vals, 5),
+                   "traders_chg_20d_pct": _chg_pct(vals, 20),
+                   "debt_holders": rows[-1][2], "as_of": rows[-1][0],
+                   "note": "两融账户参与度（日频·户·T+1 披露；单位为该表列原值"
+                           "「户」——2026-11-04 实测 32 万户量级，万户口径会得"
+                           "出 32 亿户的荒谬值）——原「新开户」上游 2023-09 停更"
+                           "（中国结算不再月度披露），用户 2026-11-04 裁定以本"
+                           "口径替代，不冒充新开户"}
+            return blk
+        except ImportError:
+            return {"state": "fetch_failed", "source": "em-mkt-account",
+                    "note": "akshare 未安装（uv --with 形态装载）"}
+        except Exception as e:
+            if not isinstance(e, _Skip):
+                record(st, CLUSTERS["em-mkt-account"], False, str(e), now)
+            return {"state": "fetch_failed", "source": "em-mkt-account",
+                    "note": "取数失败（%s）" % type(e).__name__}
+
+    return _mkt_cached("margin_accounts", _build)
+
+
 BLOCK_WEIGHTS = [("quote", 25), ("daily_bars", 25), ("technical", 25),
                  ("news", 10), ("fundamentals", 10), ("chip", 5)]
 # 扩展块：不进 BLOCK_WEIGHTS 质量分（信息面不是裁决面——置信帽只反映核心行情
 # 链可用性，与情报丰富度正交），可见性由八态状态行与策略 required_evidence 承担。
 # 快照模式文件可选、缺省 missing。某块要进权重属 minor 级语义变更（golden 重建）。
 EXT_BLOCKS = ["moneyflow", "notices", "research", "forecast", "unlock",
-              "holder", "market", "industry", "valuation", "fx"]
+              "holder", "market", "industry", "valuation",
+              # 市场级情绪五块（0.0.19，references/09）：与 index 块一样全市场
+              # 共享一次取数；零权重情报面
+              "margin", "index", "turnover_pctile", "erp", "margin_accounts",
+              "fx"]
 ALL_BLOCKS = [n for n, _ in BLOCK_WEIGHTS] + EXT_BLOCKS
 STATE_SCORE = {"available": 100, "fallback": 85, "partial": 70, "stale": 60,
                "estimated": 55, "missing": 30, "not_supported": 30, "fetch_failed": 25}
@@ -2188,6 +2742,13 @@ def fetch(symbol, snapshot_dir=None):
         blocks["market"] = market_block(qt_indices)
         blocks["industry"] = fetch_industry(market, code, st, now)
         blocks["valuation"] = fetch_valuation(market, code, st, now, qt_full)
+        # 市场级情绪五块（零权重，09）：市场维度数据，_MKT_CACHE 使同进程多股
+        # 共享一次取数（单诊 +2~6 HTTP、批量 +8~14 HTTP；hk 首行守卫 not_supported）
+        blocks["margin"] = fetch_margin(market, code, st, now)
+        blocks["index"] = fetch_index(market, code, st, now)
+        blocks["turnover_pctile"] = fetch_turnover_pctile(market, code, st, now)
+        blocks["erp"] = fetch_erp(market, code, st, now)
+        blocks["margin_accounts"] = fetch_margin_accounts(market, code, st, now)
         blocks["fx"] = fetch_fx(market, st, now)
         save_fetch_state(st)
         market_meta = {"symbol": symbol, "market": market, "code": code,

@@ -44,7 +44,8 @@ BAND_NOTE = ("预测带≠后验判定带：default 轨 ±2% 固定带、positio
              "T+60 记分（references/05）——本带只描述价格分布量级")
 ZERO_WEIGHT_NOTE = ("零权重参考：不进裁决聚合/置信帽/两轨后验记分/RiskGuard/"
                     "策略 YAML；机械降档接入待评审")
-BETA_NOTE = "预测带未剔除大盘 beta（指数链就绪前为裸个股口径，references/08 Phase 5）"
+BETA_NOTE = ("预测带未剔除大盘 beta（个股口径；指数链已就绪，剥离 beta 的"
+             "超额收益带随 references/08 Phase 5 实施）")
 EXP_NOTE = "描述性统计（该股信号后验计数），非绩效因子，不进聚合与台账"
 SIGMA_FLOOR = 0.02   # σ 退化链兜底日波动：宁宽勿窄（宽于 postmortem 退化带
 #                    # 2%×√(h/10) 的隐含 σ_d≈0.63%——预测带是参考量级不是判定带）
@@ -370,15 +371,40 @@ def derive_outlook(evidence, ctx):
     card["math"]["tracks"] = tracks
 
     mf = (b.get("moneyflow") or {}).get("summary") or {}
+    # 市场级情绪五块投影（0.0.19）：市场维度共享数据，取可用块关键字段；
+    # 全缺 → abstained（块状态行在 pack 证据面仍如实可见）
+    _mkt_keys = {
+        "margin": ("balance_yi", "chg_1d_pct", "chg_5d_pct", "chg_20d_pct",
+                   "pctile_70d", "as_of", "source"),
+        "index": ("indices", "source"),
+        "turnover_pctile": ("pctile", "window", "as_of", "source"),
+        "erp": ("erp_pct", "pctile_5y_monthly", "monthly_pe", "y10_pct",
+                "as_of", "daily_ready", "source"),
+        "margin_accounts": ("traders", "traders_chg_5d_pct",
+                            "traders_chg_20d_pct", "debt_holders",
+                            "as_of", "source"),
+    }
+    mkt = {}
+    for name, keys in _mkt_keys.items():
+        blk = b.get(name) or {}
+        if blk.get("state") not in ("available", "partial"):
+            continue
+        # C1 钉：erp 的 partial 可达形态是「仅日频积累、无数值键」（月频链
+        # 失败）——无数值键的块不入卡，防 "ERP None%" 字面量渗进 pack/日表
+        if name == "erp" and blk.get("erp_pct") is None:
+            continue
+        proj = {k: blk.get(k) for k in keys if blk.get(k) is not None}
+        if proj:
+            mkt[name] = proj
     card["emotion"] = {
         "stock": {k: card["math"]["mid_term"].get(k) for k in
                   ("max_ret_20d", "limit_up_count_20d", "turnover_avg_20d",
                    "turnover_abnormal", "turnover_pctile_250", "vr_63d")
                   if card["math"]["mid_term"].get(k) is not None},
         "moneyflow": mf or None,
-        "market": {"state": "abstained",
-                   "note": "市场级情绪块（两融/换手分位/ERP/新开户）待接入"
-                           "（references/09 分期表）"}}
+        "market": ({"state": "estimated", **mkt} if mkt else
+                   {"state": "abstained",
+                    "note": "市场级五块全部不可用（状态行见证据面）"})}
     card["experience"] = {"tracks": experience_tracks(signals, market, code),
                           "note": EXP_NOTE}
     card["deltas"] = derive_deltas((ctx or {}).get("recent_cards") or [], card)
@@ -495,6 +521,10 @@ def render_pack_block(card):
     if not card or card.get("state") != "estimated":
         return ["弃权：%s（零权重参考，不影响裁决）" % (
             card.get("reason", "数据不足") if card else "无卡片")]
+
+    def _d(v):  # C1 收口：投影端滤 None 键后渲染端不得再渗 "None%" 字面量
+        return "—" if v is None else v
+
     L = []
     m = card.get("math", {})
     L.append("σ_d=%s（%s）· 预测带=零漂移 ±σ_d×√h（%s；触及概率为 "
@@ -526,6 +556,28 @@ def render_pack_block(card):
     mfs = " ".join("%s=%s" % (k, v) for k, v in mf.items() if v is not None)
     if mfs:
         L.append("资金面：%s（A 股主力净额亿元 / 港股南向持股比百分点变化）" % mfs)
+    mk = em.get("market") or {}
+    if mk.get("state") == "estimated":
+        parts = []
+        mg = mk.get("margin") or {}
+        if mg:
+            parts.append("两融 %s 亿（Δ5d %s%%·分位 %s%%）" % (
+                _d(mg.get("balance_yi")), _d(mg.get("chg_5d_pct")),
+                _d(mg.get("pctile_70d"))))
+        tp = mk.get("turnover_pctile") or {}
+        if tp:
+            parts.append("全A换手分位 %s%%" % _d(tp.get("pctile")))
+        ep = mk.get("erp") or {}
+        if ep:
+            parts.append("ERP %s%%（分位 %s%%）" % (
+                _d(ep.get("erp_pct")), _d(ep.get("pctile_5y_monthly"))))
+        ma = mk.get("margin_accounts") or {}
+        if ma:
+            parts.append("两融参与 %s 户（Δ5d %s%%）" % (
+                _d(ma.get("traders")), _d(ma.get("traders_chg_5d_pct"))))
+        if parts:
+            L.append("市场级情绪：%s（市场维度共享数据·T+1 披露为主）"
+                     % " · ".join(parts))
     exp = (card.get("experience", {}).get("tracks") or {})
     for prof, bucket in exp.items():
         parts = ["T+%s:%s样本%s" % (h, b.get("n"),
@@ -882,7 +934,74 @@ def selftest():
             clash = fx_keys & real_keys
             assert not clash, "fixture 与真实持仓零重合被破坏：%s" % clash
 
-    # ⑩ 零权重金标准（E4/E5 同构）：evidence 挂 outlook 块/卡片键不得扰动
+    # ⑩-前 市场级情绪五块投影（0.0.19）：可用块入卡、pack 出市场级行；
+    #     全缺 abstained；hk not_supported 不入
+    ev_mkt = ev(blocks={
+        "margin": {"state": "available", "source": "dc-margin",
+                   "balance_yi": 22988.6, "chg_1d_pct": 0.1,
+                   "chg_5d_pct": 0.8, "chg_20d_pct": 2.1,
+                   "pctile_70d": 88.0, "as_of": "2026-11-03"},
+        "turnover_pctile": {"state": "available", "source": "tx-idx",
+                            "pctile": 71.2, "window": 250,
+                            "as_of": "2026-11-03"},
+        "erp": {"state": "available", "source": "legu-pe+dc-bond+csindex",
+                "erp_pct": 3.1, "pctile_5y_monthly": 42.0,
+                "monthly_pe": 16.2, "y10_pct": 2.9, "as_of": "2026-10",
+                "daily_ready": False},
+        "margin_accounts": {"state": "available", "source": "em-mkt-account",
+                            "traders": 324753.0, "traders_chg_5d_pct": 8.1,
+                            "traders_chg_20d_pct": -0.4,
+                            "debt_holders": 280123.0, "as_of": "2026-11-03"},
+        "index": {"state": "available", "source": "tx-idx",
+                  "indices": {"HS300": {"as_of": "2026-11-03",
+                                        "close": 4008.9, "ma60": 3950.2,
+                                        "dist_ma60_pct": 1.5}}}})
+    card_m = derive_outlook(ev_mkt, ctx)
+    mkt = card_m["emotion"]["market"]
+    assert mkt["state"] == "estimated" and set(
+        mkt) >= {"margin", "turnover_pctile", "erp", "margin_accounts",
+                 "index"}, mkt.keys()
+    assert mkt["margin"]["balance_yi"] == 22988.6
+    assert mkt["margin_accounts"]["traders"] == 324753.0
+    assert any(ln.startswith("市场级情绪：") for ln in render_pack_block(card_m))
+    assert card["emotion"]["market"]["state"] == "abstained", \
+        "无市场块 fixture 须 abstained"
+    hk_only = derive_outlook(
+        ev(meta={"symbol": "hk8800", "market": "hk", "code": "8800",
+                 "session": {"phase": "closed"}},
+           blocks={"margin": {"state": "not_supported"},
+                   "index": {"state": "not_supported"},
+                   "turnover_pctile": {"state": "not_supported"},
+                   "erp": {"state": "not_supported"},
+                   "margin_accounts": {"state": "not_supported"}}),
+        dict(ctx, signals=hk_sig))
+    assert hk_only["emotion"]["market"]["state"] == "abstained"
+    # C1 破坏性钉：erp partial「仅日频积累、无数值键」形态不入卡——防
+    # "ERP None%" 字面量渗进 pack/日表（月频链失败是五新源的常态路径）
+    ev_erp_part = ev(blocks={
+        "erp": {"state": "partial", "source": "csindex",
+                "daily_pe_accum": 20, "daily_ready": False},
+        "turnover_pctile": {"state": "available", "source": "tx-idx",
+                            "pctile": 71.2, "window": 250,
+                            "as_of": "2026-11-03"}})
+    card_ep = derive_outlook(ev_erp_part, ctx)
+    mk_ep = card_ep["emotion"]["market"]
+    assert mk_ep["state"] == "estimated" and "erp" not in mk_ep \
+        and "turnover_pctile" in mk_ep, mk_ep.keys()
+    assert "None" not in "".join(render_pack_block(card_ep)), \
+        "pack 不得出现 None 字面量"
+    # C1 扩展钉：margin 缺变动/分位键（短序列残块形态）——渲染端 _d 兜底
+    # 出「—」而非 "None%" 字面量（投影端滤键只堵了入卡侧，渲染侧是第二道）
+    ev_mg_part = ev(blocks={
+        "margin": {"state": "available", "source": "dc-margin",
+                   "balance_yi": 22988.6, "as_of": "2026-11-03"}})
+    card_mg = derive_outlook(ev_mg_part, ctx)
+    mk_mg = card_mg["emotion"]["market"]
+    assert mk_mg["state"] == "estimated" and "margin" in mk_mg \
+        and "chg_5d_pct" not in mk_mg["margin"], mk_mg.keys()
+    _mg_line = "".join(ln for ln in render_pack_block(card_mg)
+                       if ln.startswith("市场级情绪："))
+    assert _mg_line and "None" not in _mg_line and "—" in _mg_line, _mg_line
     #     质量分与置信帽——裁决对走势参考结构性零感知（outlook 无意见通道，
     #     LLM 只能引用其数字作 rationale 素材，与 mid_term 同地位）
     import adjudicate as aj
