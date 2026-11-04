@@ -7,6 +7,58 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.19] - 2026-11-04
+
+### Added
+
+- 市场级情绪五块 + 指数日 K 链共享件一次全落（用户 2026-11-04 裁定 5；
+  [09](references/09-outlook.md) 分期表 v2）：fetch.py 新增五个零权重扩展块
+  ——margin 两融余额（dc `RPTA_RZRQ_LSHJ` 直连主源·全市场·元·单次 70 日，
+  金十转发回退·沪深两所合计差北交所 ~0.33% 如实披露；backlog 原报表名
+  RPT_RZRQ_LSHJ 已失效——改名多一个 A）、index 指数基准（HS300/ALLA/
+  HSI 快照 + MA60 + 距 MA60%；腾讯主源→新浪回退、HSI yf→新浪港股；坑位
+  钉死：腾讯指数 amount 列实为量手非额、000985 新浪断更 2016、yf MultiIndex
+  单列 DataFrame 陷阱、当日行 Volume=0）、turnover_pctile 全A换手分位
+  （000985 量滚动 250 日分位——成交活跃度代理，东财换手率列补测后升级）、
+  erp（月频乐咕沪深300 滚动 PE×东财 10Y，ERP=1/PE−y10，5 年月频分位；日频
+  中证官网 000300 P/E2 增量台账 `~/.vibe-stock/erp_pe_daily.jsonl`，满 250
+  日出日频分位——裁定 7 的经验积累载体）、margin_accounts 两融账户参与度
+  （日频·户；裁定 6：原「新开户」上游 2023-09 停更的替代口径，不冒充新开户）。
+- 市场维度共享取数：fetch 层 `_MKT_CACHE` 同进程一次取数（单诊 +2~6 HTTP、
+  批量 +8~14）；batch/outlook_daily.py build_evidence 注入五块；簇 16→20
+  （jin10/sina_idx/legulegu/csindex 新增，dc-margin/dc-bond/em-mkt-account
+  归 em_datacenter、tx-idx 归 qq）。
+- 消费面：卡片 emotion.market 五块投影（全缺 abstained）+ pack「市场级情绪」
+  行；日表「市场级情绪」节出实数；diagnose render_ext_blocks 五节有界渲染
+  （EXT_PACK_BUDGET 2–5 行）+ 截断 heads 五节头；adjudicate EXT_BLOCKS
+  镜像加宽；diagnose selftest 簇数钉 16→20 与 hk 能力钉集合扩容。
+- 指针：01 扩展块表 +5 行与 backlog 两融转正（东财指数换手率列补测位）；
+  08 Phase 5 预留节指针化（市场级已实施、指数链就绪、超额收益带实施随期别）；
+  07 P3 指数链就绪句；09 分期表 v2 ✅；SKILL（0.0.19+description 十五块）/
+  PIPELINE（21 块）/README 块数口径同步。
+- 版本依据：纯信息面扩展块（零权重、裁决链零改动），按 0.0.x patch 升版。
+
+### Fixed（0.0.19 合入前独立盲审修复）
+
+- C1：erp partial「仅日频积累、无数值键」形态（月频链失败——五新源常态
+  路径）曾把 `ERP None%` 字面量渗进 pack 与日表——投影处按数值键收口
+  （erp 无 erp_pct 不入卡），破坏性实验钉进 outlook selftest（全 pack 禁
+  None 字面量）。
+- W1：`_MKT_CACHE` 只缓存成功数据——fetch_failed 不入缓存（首股瞬态失败
+  曾固化成全批 21 股终局、绕过熔断器「连续 3 败」阈值；重试节流由既有
+  冷却承担）。
+- W2：HSI 新浪回退补 `>=60` 序列守卫（与 yf 主源对称，短序列不出
+  ma60=None 快照、日表不出「距 MA60 None%」）。
+- S1/S4：ERP 台账合法 JSON 标量行（非 dict）按坏行自愈跳过；margin
+  docstring「行内自校验」措辞改为口径声明（未做数值校验不虚称）。
+- W3/S2 声明为既定取舍并写入 09 并发节：ERP 台账 last-writer-wins
+  （增量 20 日重叠、次日自愈）；跨进程无市场级缓存（06 批量 subprocess
+  形态每股全价，后续按当日 jsonl 缓存收口）。
+- 源验证：三份探针实测报告（两融/指数+ERP/新开户，含字段逐字记录、交叉
+  验证与失败形态）存 `.context/probe-*.md` 并摘录进 PR 描述；五块联网实跑
+  冒烟全通（margin 22988.6 亿与三所加总闭合、ERP 6.2%=1/12.8−1.61%、
+  HS300/ALLA 当日 K、HSI 修复后入列）。
+
 ## [0.0.18] - 2026-11-04
 
 ### Added

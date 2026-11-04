@@ -48,7 +48,11 @@ CONFIDENCE_GATE = 0.5
 # 扩展块渲染预算（pack 有界性护栏）：每块条数/行数上限；全局护栏 16k 字符
 EXT_PACK_BUDGET = {"moneyflow": 12, "notices": 12, "research": 10,
                    "forecast": 6, "unlock": 6, "holder": 8, "market": 8,
-                   "industry": 8, "valuation": 6, "fx": 2}
+                   "industry": 8, "valuation": 6,
+                   # 市场级情绪五块（0.0.19，references/09）：市场维度共享数据，
+                   # 有界 2–4 行
+                   "margin": 3, "index": 5, "turnover_pctile": 2, "erp": 4,
+                   "margin_accounts": 2, "fx": 2}
 PACK_CHAR_CAP = 16000
 
 
@@ -258,6 +262,56 @@ def render_ext_blocks(lines, b):
         lines.append(" · ".join("%s %s（%+.2f%%）" % (
             i.get("name"), _nd(i.get("price")), _nz(i.get("change_pct")))
             for i in mk["indices"][:EXT_PACK_BUDGET["market"]]))
+    # —— 市场级情绪五块（0.0.19，references/09；市场维度共享数据、有界）——
+    mg = b.get("margin", {})
+    if mg.get("state") == "available":
+        lines.append("")
+        lines.append("## 两融（%s，%s）" % (mg.get("state"), mg.get("source")))
+        lines.append("两融余额 %s 亿（%s）· Δ1d %s%% / Δ5d %s%% / Δ20d %s%% · "
+                     "70 日分位 %s%%——T+1 披露；杠杆资金情绪只作情报面" % (
+                         _nd(mg.get("balance_yi")), mg.get("as_of"),
+                         _nz(mg.get("chg_1d_pct")), _nz(mg.get("chg_5d_pct")),
+                         _nz(mg.get("chg_20d_pct")),
+                         _nd(mg.get("pctile_70d"))))
+    ix = b.get("index", {})
+    if ix.get("indices"):
+        lines.append("")
+        lines.append("## 指数基准（%s，%s）" % (ix.get("state"), ix.get("source")))
+        for name, s in list(ix["indices"].items())[:EXT_PACK_BUDGET["index"]]:
+            lines.append("%s %s（%s，Δ1d %s%%，MA60 %s，距 MA60 %s%%，%s）" % (
+                name, _nd(s.get("close")), s.get("as_of"),
+                _nz(s.get("chg_1d_pct")), _nd(s.get("ma60")),
+                _nz(s.get("dist_ma60_pct")), s.get("source")))
+    tp = b.get("turnover_pctile", {})
+    if tp.get("state") == "available":
+        lines.append("")
+        lines.append("## 全A换手分位（%s，%s）" % (
+            tp.get("state"), tp.get("source")))
+        lines.append("000985 成交量 %d 日滚动分位 %s%%（%s）——%s" % (
+            tp.get("window") or 0, _nd(tp.get("pctile")), tp.get("as_of"),
+            tp.get("note", "")))
+    ep = b.get("erp", {})
+    if ep.get("state") in ("available", "partial") and ep.get("erp_pct") is not None:
+        lines.append("")
+        lines.append("## 风险溢价 ERP（%s，%s）" % (
+            ep.get("state"), ep.get("source")))
+        lines.append("月频 ERP %s%%（PE %s × 10Y %s%%，%s）· 5 年月频分位 %s%%"
+                     "· 日频积累 %s/%s" % (
+                         _nd(ep.get("erp_pct")), _nd(ep.get("monthly_pe")),
+                         _nd(ep.get("y10_pct")), ep.get("as_of"),
+                         _nd(ep.get("pctile_5y_monthly")),
+                         ep.get("daily_pe_accum") or 0,
+                         "就绪" if ep.get("daily_ready") else "250"))
+    ma = b.get("margin_accounts", {})
+    if ma.get("state") == "available":
+        lines.append("")
+        lines.append("## 两融账户参与度（%s，%s）" % (
+            ma.get("state"), ma.get("source")))
+        lines.append("参与交易投资者 %s 户（%s）· Δ5d %s%% / Δ20d %s%%——%s" % (
+            _nd(ma.get("traders")), ma.get("as_of"),
+            _nz(ma.get("traders_chg_5d_pct")),
+            _nz(ma.get("traders_chg_20d_pct")),
+            "原新开户上游停更的替代口径（不冒充新开户）"))
     fxb = b.get("fx", {})
     if fxb.get("state") == "available":
         lines.append("")
@@ -557,7 +611,9 @@ def render_context_pack(evidence, workdir):
     text = "\n".join(lines)
     if len(text) > PACK_CHAR_CAP:  # 全局护栏：超限整截扩展节（状态行仍可见）
         heads = ("## 资金流", "## 近期公告", "## 研报与评级", "## 业绩预告",
-                 "## 限售解禁", "## 股东户数", "## 大盘指数", "## 汇率", "## 行业板块",
+                 "## 限售解禁", "## 股东户数", "## 大盘指数", "## 两融",
+                 "## 指数基准", "## 全A换手分位", "## 风险溢价 ERP",
+                 "## 两融账户参与度", "## 汇率", "## 行业板块",
                  "## 估值", "## 基本面锚")
         cut = next((i for i, ln in enumerate(lines) if ln.startswith(heads)), None)
         if cut is not None:
@@ -1594,10 +1650,18 @@ def selftest():
             == fx.derive_chip(share, 1_000_000, "yf")["获利比例"]
             == fx.derive_chip(share, 1_000_000, "qq-tx")["获利比例"] == 1.0)  # qq-tx 亦为股
     # 簇绑定：datacenter 家族合簇且独立于行情簇；腾讯三主机互异；新浪流量三源合簇
-    assert len(set(fx.CLUSTERS.values())) == 16, set(fx.CLUSTERS.values())
+    # （0.0.19 市场级五块 +4 簇：jin10 金十转发 / sina_idx 新浪指数 /
+    #   legulegu 乐咕 / csindex 中证官网；dc-margin·dc-bond·em-mkt-account 归
+    #   em_datacenter、tx-idx 归 qq、指数 yf 复用——16→20）
+    assert len(set(fx.CLUSTERS.values())) == 20, set(fx.CLUSTERS.values())
     for k in ("em-fin", "dc-respredict", "dc-forecast", "dc-unlock",
-              "em-fin-hk", "em-hk-ind", "dc-hsgt"):
+              "em-fin-hk", "em-hk-ind", "dc-hsgt", "dc-margin", "dc-bond",
+              "em-mkt-account"):
         assert fx.CLUSTERS[k] == "em_datacenter", k
+    assert fx.CLUSTERS["tx-idx"] == fx.CLUSTERS["qq-tx"] == "qq"
+    assert fx.CLUSTERS["sina-idx"] == "sina_idx" and \
+        fx.CLUSTERS["sina-idx"] not in (fx.CLUSTERS["sina-fin"],
+                                        fx.CLUSTERS["sina-flow"])
     assert fx.CLUSTERS["etnet"] == "etnet" and fx.CLUSTERS["etnet"] not in {
         fx.CLUSTERS[k] for k in ("ak-em", "qt-snap", "yf")}
     assert "dc-holder" not in fx.CLUSTERS, \
@@ -1864,7 +1928,11 @@ def selftest():
     hk_unsupported = [n for n in fx.ALL_BLOCKS
                       if n not in fx.MARKET_CAPS["hk"]]
     assert set(hk_unsupported) == {"chip", "forecast", "unlock", "holder",
-                                   "industry"}, hk_unsupported
+                                   "industry",
+                                   # 市场级情绪五块（0.0.19）：A 股口径，
+                                   # hk 守卫 not_supported
+                                   "margin", "index", "turnover_pctile",
+                                   "erp", "margin_accounts"}, hk_unsupported
     st_hk = {"breakers": {}, "cooldowns": {}}
     for name in hk_unsupported:
         blk = (fx.fetch_valuation("hk", "00700", st_hk, t0, None)
