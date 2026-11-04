@@ -73,7 +73,7 @@
     总览最新/计数仍只算 default 轨）。
   - 新增 `scripts/addon.py --selftest`（冻结族/缺证据 skip/触发族/手数取整/
     三段状态机/冷却不吞在途复核/确认加终态/置信门/包络/破坏性实验），纳入
-    scripts/ 提交前置（四件扩五件，门禁只收严）；diagnose 增加仓轨集成钉
+    scripts/ 提交前置（本轨四件扩五件；outlook 主线并轨后为六件，门禁只收严）；diagnose 增加仓轨集成钉
     （含快照信号不进状态机）、postmortem 增 add_on 记分钉。
   - portfolio.json 契约（[04](references/04-report.md)）增补 `operations`
     成交流水子表（元素键 code/action/time，09 三段状态机的执行事实输入）——
@@ -91,9 +91,29 @@
 - `postmortem.py`：SCORABLE 增 `add_on→bull`；delta_map 增 addon 轨（台账
   归 ledger.json 与 default 同账本）；`archive.HORIZONS_OF` 增 `addon:(1,3,5,10)`；
   个股时间线索引表收 addon 行（default+addon 同表，T+1/3/5/10 同列）。
-- SKILL.md（description/version 0.0.18/判表加行）、PIPELINE.md（回归清单五件）、
-  README（能力节+文档指针）、AGENTS.md（目录表/测试节）、evals/README.md
-  同步指针，无第二事实源。
+- SKILL.md（description/判表加行；version 与门禁件数随主线并轨顺延）、
+  PIPELINE.md（回归清单）、README（能力节+文档指针）、AGENTS.md（目录表/
+  测试节）、evals/README.md 同步指针，无第二事实源。
+
+### Fixed（合入前二次评审修复，I-015）
+
+- **I-015（P0）**：逆势窄门读错裁决轨——`value_trigger` 从 default 轨
+  verdict 找 `strategy:quality_value` 买点，而 quality_value 是
+  `profile: position` 策略（意见只进 `verdict.position.json` → pverdict），
+  逆势轨生产永不触发且被「契约下不可能的 fixture」掩盖。改读 pverdict
+  （缺席时显式 blocker「无中线裁决」）；selftest fixture 改合法形态 +
+  双回归钉（default 轨读到不开门 / pverdict 缺席不开门）；diagnose T11e
+  增逆势集成钉（verdict.position.json + lens 有支撑 → 「可加仓（逆势
+  窄门）」+ add_ref=触发时价登记）。
+- 评审随修（P2 族）：冷却文案硬编码计数改实数；首加「整批上限的一半」
+  在取整时不实——改披露半批原值与取整值；`diagnose` rationale 兜底
+  `or ""` 括号优先级修复；`CONF_GATE` 改 import `adjudicate.
+  CONFIDENCE_GATE`（口径 SSOT 单源）；09→10 改号残留批量清理（10-add-on
+  H1、README 标题、**报告可见文案**「加仓资格冻结（09→10）」、注释族、
+  05 引用）；SKILL 判表挤行拆回、PIPELINE 代码围栏闭合修复；在途未成交
+  文案与机制对齐（不自动过期、挂至后验收口）并写入 10 规约；「20 日高
+  回撤」措辞对齐实现（最高收盘口径）与「skip 解冻」坑位入 10 规约；
+  issue.md I-011 详情内残留 I-010 编号修正。
 
 ## [0.0.18] - 2026-11-04
 

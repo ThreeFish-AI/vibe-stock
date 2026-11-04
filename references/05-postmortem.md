@@ -38,7 +38,7 @@
   相关约 0.71），会使信号提前离开 <30 样本中性门、破坏 Beta(15,15) 收缩。
 - **台账分文件**：default 增量写 `ledger.json`（裸键原样）、position 写
   `ledger.position.json`；addon 增量并入 `ledger.json`（与 default 同账本、
-  同 sources 归因、delta 分桶不串样本——09：加仓建议也要被市场打分）；
+  同 sources 归因、delta 分桶不串样本——10：加仓建议也要被市场打分）；
   裁决器经 `--ledger` 按轨查表（[03](03-synthesis.md)
   双跑制），绩效因子与画像升降档互不串轨。
 - **复权基准（两轨同修，正确性修正）**：outcome 判定与涨跌幅展示基准=

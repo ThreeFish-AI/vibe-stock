@@ -71,7 +71,7 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
   [docs/research/midterm-strategies.md](docs/research/midterm-strategies.md) 与
   [references/08-midterm.md](references/08-midterm.md)。
 
-## 持仓加仓决策轨（09）
+## 持仓加仓决策轨（10）
 
 对 portfolio.json 在册持仓，report 段自动跑 `scripts/addon.py` 确定性加仓门：
 **三道门**（资格只冻不升格：短线/中线卖族、风险角色降档、A-1~A-5 风险链

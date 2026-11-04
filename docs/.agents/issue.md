@@ -19,6 +19,7 @@
 | I-012 | 港股南向持股变动（T+2 交收）被标为当日净买入，money_flow 把 D−2 成交读成当日背离 | ✅ 已完成 | 2026-11-04 | [详情](#I-012) |
 | I-013 | box_60d 含当日 K 线，新低日「精确触箱底」是同义反复，被当作支撑验证 | ✅ 已完成 | 2026-11-04 | [详情](#I-013) |
 | I-014 | 中线波段带 g 为收益率却按价差加减，带宽塌缩到不足 1 港元，selftest 同公式测不出 | ✅ 已完成 | 2026-11-04 | [详情](#I-014) |
+| I-015 | 逆势窄门读错裁决轨：quality_value 买点从 default 轨取，生产永不触发且被非法 fixture 掩盖 | ✅ 已完成 | 2026-11-04 | [详情](#I-015) |
 
 <a id="I-001"></a>
 
@@ -168,3 +169,14 @@
 - **后续防范**：涉及收益率与价格混算的派生价位，selftest 期望值必须独立计算，不得复用被测公式。
 - **同类问题影响**：signals.json 中 position 轨信号的 `key_levels.band_lo/band_hi` 全部受影响（仅展示，不进后验判定带）；盯盘若消费该价位会产生贴价误告警。
 - **注意事项**：修复后带宽会显著变宽（σ_d 6% 时 g 约 0.55），可能整体被 60 日高低点钳制，属预期。
+
+<a id="I-015"></a>
+
+## I-015：逆势窄门读错裁决轨——quality_value 买点从 default 轨 verdict 取，生产永不触发
+
+- **问题描述**：`addon.value_trigger` 从 **default（短线）轨 verdict** 的 `valid_opinions` 找 `strategy:quality_value` 买点，但 `quality_value` 是 `profile: position` 策略——diagnose prepare 契约下其意见只进 `opinions.position.json` → **pverdict**。default 轨 verdict 永不含 quality_value → 门 2 逆势窄门 blocker「quality_value 无买点意见」恒在，逆势轨成不可达死代码；selftest fixture 把 quality_value 塞进 default verdict（契约下不可能的形态）恰好掩盖缺陷，diagnose 集成钉 T11e 也只测顺势与冻结两形态。
+- **表因根因**：双轨架构（0.0.16）下「策略→轨」的路由先于本轨（0.0.19 分支）开发，value_trigger 按策略名直觉取了 default verdict；fixture 手搓 valid_opinions 未按 prepare 契约校验轨归属。
+- **处理方式**：`value_trigger(evidence, pverdict, lens)` 改读中线轨裁决（pverdict 缺席时显式 blocker「无中线裁决」，门不开、保守方向）；selftest fixture 改合法形态（quality_value 进 pverdict）+ 两条回归钉（default 轨读到 quality_value 不开门；pverdict 缺席 blocker）；diagnose T11e 增逆势集成钉（verdict.position.json + lens 有支撑 + 现价<ma20 → 「**可加仓**（逆势窄门）」+ add_ref=触发时价登记）。
+- **后续防范**：任何按策略名取意见的门，fixture 与实现都要显式声明轨归属（default/position）；手搓 verdict fixture 里的 `strategy:*` 意见须与 strategies/*.yaml 的 profile 字段一致——「契约下不可能的 fixture」是最隐蔽的掩蔽源。双轨消费新增点上线前，用真实 prepare 产物（opinions.position.json）做一次集成钉。
+- **同类问题影响**：门 1 的 pverdict 消费（中线卖族冻结）实现正确不受影响；逆势窄门此前从未在生产触发过，无存量错误建议（失败方向保守）。
+- **处理注意事项**：逆势窄门现在要求「有中线裁决」——单轨日（无 verdict.position.json）逆势轨天然关闭、报告落「无中线裁决（pverdict 缺席）」blocker，属设计内保守形态。

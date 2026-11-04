@@ -11,6 +11,7 @@ reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](0
 中线（1–6 个月）因子口径与只降不升风险判据族见 [08-midterm](08-midterm.md)；
 持仓股加仓决策轨（三道门 + 三段确认制）见 [10-add-on](10-add-on.md)；
 在册股短/中期走势参考（零权重卡与收盘批量）见 [09-outlook](09-outlook.md)。
+
 ```text
 ① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；16 块=核心六块
               （计分）+扩展十块（资金流/公告/研报/预告/解禁/股东户数/大盘/
@@ -77,7 +78,8 @@ uv run --no-project $T/scripts/diagnose.py --selftest
 uv run --no-project $T/scripts/postmortem.py --selftest
 uv run --no-project $T/scripts/lens.py --selftest
 uv run --no-project $T/scripts/addon.py --selftest
-uv run --no-project $T/scripts/outlook.py --selftest```
+uv run --no-project $T/scripts/outlook.py --selftest
+```
 
 ## akshare 版本纪律
 

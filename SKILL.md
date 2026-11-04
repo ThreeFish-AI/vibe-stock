@@ -37,7 +37,8 @@ allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
 | 改策略/加策略 | 只动 `strategies/*.yaml`（策略即数据），不碰代码 |
 | 中线视角（1–6 个月，默认双轨） | position 轨：五个中线策略出 opinions.position.json → 第二次 adjudicate → 报告「中线裁决」节 + T+20/60/120 后验；三族只降不升判据走风险角色 risk.json（[08](references/08-midterm.md)） |
 | 持仓股该不该加仓 | report 段自动跑 addon 门（`scripts/addon.py`，三道门+三段确认制），报告持仓者五档 + 「加仓评估」节；规约 [10](references/10-add-on.md) |
-| 在册股走势参考（收盘批量/全集日表/单股刷新） | `batch/outlook_daily.py --daily`（`--force` 全量重取 / `--stock <code>` 单股；`--render` 零取数重渲（[09](references/09-outlook.md)）；诊股时 prepare 自动现算注入 pack 与报告 4c 节（零权重，参考非信号） || 本 Skill 自身缺陷 | 走 RSI 回路（[RSI.md](RSI.md)），不顺手改 |
+| 在册股走势参考（收盘批量/全集日表/单股刷新） | `batch/outlook_daily.py --daily`（`--force` 全量重取 / `--stock <code>` 单股；`--render` 零取数重渲（[09](references/09-outlook.md)））；诊股时 prepare 自动现算注入 pack 与报告 4c 节（零权重，参考非信号） |
+| 本 Skill 自身缺陷 | 走 RSI 回路（[RSI.md](RSI.md)），不顺手改 |
 
 ## 工作流（诊一只票）
 

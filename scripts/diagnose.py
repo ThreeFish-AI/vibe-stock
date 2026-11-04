@@ -1141,7 +1141,7 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None,
     else:
         L.append("- 空仓者：观望，等待方向明确。")
     # 持仓者分支五档（04 §6，档名与 04/09 枚举同口径：持有·含等回踩变体/
-    # 持有观察/减仓/离场）：信号档为基础，addon 轨（09）只在其上给「可加仓」
+    # 持有观察/减仓/离场）：信号档为基础，addon 轨（10）只在其上给「可加仓」
     # 与「等回踩」两档加法建议——冻结/冷却时维持信号档并附原因行
     if final in ("buy", "strong_buy"):
         hold_line = "- 持仓者（持有）：可持有或逢高减仓，跌破止损位离场。"
@@ -1158,7 +1158,7 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None,
     else:
         L.append(hold_line)
         if addon and addon.get("advice") == "frozen":
-            L.append("  - 加仓资格冻结（09）：%s" % "；".join(addon["frozen_reasons"]))
+            L.append("  - 加仓资格冻结（10）：%s" % "；".join(addon["frozen_reasons"]))
         elif addon and addon.get("advice") in ("confirm_add", "abort", "hold",
                                                "cooldown"):
             L.append("  - 加仓轨：%s" % addon["rationale"])
@@ -1172,7 +1172,7 @@ def render_report(evidence, verdict, opinions, stock, risk=None, lens=None,
         L.append("- 阶段/建议：stage=%s · advice=%s%s" % (
             addon.get("stage"), addon.get("advice"),
             " · track=%s" % addon["track"] if addon.get("track") != "none" else ""))
-        L.append("- %s" % addon.get("rationale") or "")
+        L.append("- %s" % (addon.get("rationale") or ""))
         L.append("")
     L.append("## 检查清单")
     checks = [
@@ -1317,7 +1317,7 @@ def cmd_report(args, now=None):
         print("signal(position): action=%s（对立失效 %d · 同日旧版 superseded "
               "%d）" % (paction, pinv, psup))
     if addon_eval and addon_eval.get("advice") == "first_add":
-        # addon 登记（09）：仅首加建议登记（confirm/abort 为同段在途复核，
+        # addon 登记（10）：仅首加建议登记（confirm/abort 为同段在途复核，
         # 不重复采样）；key_levels 附 add_ref/confirm_lo 供状态机与后验消费
         aaction, ainv, asup = register_signal(
             evidence, verdict, opinions, "%s-%s" % (code, date), path,
@@ -3754,7 +3754,7 @@ def _selftest_archive(evidence, verdict, opinions):
                 assert "持仓数量" in root and ("| — | 12.50 |" in row if code == "000001"
                                               else "| — | — |" in row), row
             p = []
-            # T11e 加仓轨集成钉（09）：顺势首加（报告五档 + addon 登记 + 三价附
+            # T11e 加仓轨集成钉（10）：顺势首加（报告五档 + addon 登记 + 三价附
             # add_ref）与资格冻结（卖族无 addon 信号、报告出冻结原因）两形态
             ev_ad = json.loads(json.dumps(evidence))
             ev_ad["meta"]["market"] = "cn"
@@ -3787,14 +3787,21 @@ def _selftest_archive(evidence, verdict, opinions):
                                           "signal": "buy", "confidence": 0.65,
                                           "weight": 1.0}]}
 
-            def report_addon(verdict_obj, minute):
+            def report_addon(verdict_obj, minute, pverdict_obj=None,
+                             lens_obj=None, evidence_obj=None, qty=600):
                 wd2 = os.path.join(td, "w%s" % minute)
-                for name, obj in (("evidence", ev_ad), ("verdict", verdict_obj),
-                                  ("opinions", [])):
+                files = [("evidence", evidence_obj or ev_ad),
+                         ("verdict", verdict_obj), ("opinions", [])]
+                if pverdict_obj is not None:
+                    files.append(("verdict.position", pverdict_obj))
+                    files.append(("opinions.position", []))
+                if lens_obj is not None:
+                    files.append(("lens", lens_obj))
+                for name, obj in files:
                     write(os.path.join(wd2, name + ".json"),
                           json.dumps(obj, ensure_ascii=False))
                 write(pf, json.dumps({"version": 2, "operations": [], "holdings": [
-                    {"code": "000001", "market": "cn", "quantity": 600,
+                    {"code": "000001", "market": "cn", "quantity": qty,
                      "cost_price": 9.0, "currency": "CNY"}]},
                     ensure_ascii=False))
                 buf = io.StringIO()
@@ -3818,7 +3825,7 @@ def _selftest_archive(evidence, verdict, opinions):
                 and sig_ad[0]["horizons"] == [1, 3, 5, 10], sig_ad
             assert sig_ad[0]["key_levels"].get("add_ref") == 9.8 \
                 and sig_ad[0]["key_levels"].get("first_qty") == 100, \
-                sig_ad[0]["key_levels"]  # add_ref 钳制不高于现价（09）·首加半批
+                sig_ad[0]["key_levels"]  # add_ref 钳制不高于现价（10）·首加半批
             v_sell = dict(v_hold, aggregate={**v_hold["aggregate"],
                                              "final_signal": "sell"},
                           risk_guard={"initial": "hold", "final": "sell",
@@ -3829,7 +3836,7 @@ def _selftest_archive(evidence, verdict, opinions):
             assert not [s for s in sigs_now2 if s.get("profile") == "addon"
                         and s["status"] == "pending" and s["id"] != sig_ad[0]["id"]]
             assert "加仓资格冻结" in md2 and "短线终判 sell" in md2, md2[-800:]
-            # 快照 addon 信号不进状态机（09）：标记 snapshot 后重跑，在途态
+            # 快照 addon 信号不进状态机（10）：标记 snapshot 后重跑，在途态
             # 不被快照信号锁定 → 重新评估出 first_add（同 report_id 让位新版）
             sigs3 = json.load(open(SIGNALS, encoding="utf-8"))
             for s in sigs3:
@@ -3838,7 +3845,40 @@ def _selftest_archive(evidence, verdict, opinions):
             write(SIGNALS, json.dumps(sigs3, ensure_ascii=False))
             out3, _, _ = report_addon(v_hold, 42)
             assert "signal(addon): action=add_on" in out3, out3
-            print("  ok 加仓轨集成：顺势首加五档/登记/add_ref 钳制 · 卖族冻结无登记 · 快照信号不锁状态机")
+            # T11e-逆势（P0 回归钉，I-015）：quality_value 买点在**中线轨**
+            # verdict.position.json + lens 有支撑 + 现价<ma20 → 逆势窄门
+            # first_add、add_ref=触发时价；无 pverdict 逆势门不开（负钉）。
+            # 每次运行前把既有 addon 信号标 snapshot，防在途态锁住状态机
+            def _mark_snapshot():
+                sigs_m = json.load(open(SIGNALS, encoding="utf-8"))
+                for s in sigs_m:
+                    if s.get("profile") == "addon":
+                        s["snapshot"] = True
+                write(SIGNALS, json.dumps(sigs_m, ensure_ascii=False))
+
+            ev_val = json.loads(json.dumps(ev_ad))
+            ev_val["blocks"]["quote"] = {"state": "available", "price": 9.0}
+            ev_val["blocks"]["technical"] = {
+                "state": "available", "ma5": 8.5, "ma10": 9.0, "ma20": 9.6,
+                "rsi14": 50.0, "mid_term": {"tsmom_250d": 10.0}}
+            ev_val["blocks"]["daily_bars"]["bars"] = [
+                {"date": "2026-10-%02d" % (7 + i), "close": c} for i, c in
+                enumerate([9.5] * 19 + [9.0])]
+            ev_val["blocks"]["valuation"] = {"state": "available"}
+            v_pos = dict(v_hold, valid_opinions=[
+                {"source": "strategy:quality_value", "signal": "buy",
+                 "confidence": 0.7, "weight": 1.0}])
+            _mark_snapshot()
+            out_v, sigs_v, md_v = report_addon(
+                v_hold, 46, pverdict_obj=v_pos,
+                lens_obj={"tier": "有支撑", "confidence": "high"},
+                evidence_obj=ev_val, qty=1200)
+            assert "**可加仓**（逆势窄门）" in md_v, md_v[-800:]
+            sig_val = [s for s in sigs_v if s.get("profile") == "addon"
+                       and s["status"] == "pending" and not s.get("snapshot")]
+            assert sig_val and sig_val[-1]["key_levels"]["add_ref"] == 9.0, \
+                "逆势 add_ref=触发时价（与登记价同口径）"
+            print("  ok 加仓轨集成：顺势首加五档/登记/add_ref 钳制 · 卖族冻结无登记 · 快照信号不锁状态机 · 逆势窄门走中线轨（P0 回归钉；负路径钉在 addon selftest）")
 
             assert ar.load_portfolio(os.path.join(td, "无此目录"), p) == {} and p == [], \
                 "文件不存在：problems 不追加"

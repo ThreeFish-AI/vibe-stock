@@ -10,14 +10,14 @@ portfolio.py 先例）——不进五信号聚合、不改 RiskGuard、不投方
   门2 触发：顺势轨（多头排列 + bull_trend/shrink_pullback 买点 + 回踩
      在场 + RSI<78 + 不超 ma20+10%）；逆势窄门（quality_value 买点 +
      lens「有支撑」+ 现价<ma20 + 零风险链）。禁用理由：摊薄成本/跌多了/
-     回本心态（09 规约）。
+     回本心态（10 规约）。
   门3 手数与节奏：单次 ≤现仓 1/3（顺势）/ 1/6（逆势），100 股取整，
      首加=批上限的 1/2（半批不足 1 手不拆批不加）→ T+3 确认（信号日后
      前 3 根收盘不破 add_ref−3% 且不创新低）→ 确认加剩余；确认加成交
      （信号日后第 2 笔 buy）进入冷却；同票 60 日 ≤2 次（冷却只拦新登记，
      不拦在途复核）；加仓后浮亏 ≥15% 禁再加（包络）。idle 触发前过 addon
      自身置信门（≥0.5，同 adjudicate.CONFIDENCE_GATE 口径；不要求
-     executable——hold 日加仓是设计内形态，09「定位」）。
+     executable——hold 日加仓是设计内形态，10「定位」）。
 
 执行态从 portfolio.json operations + signals 历史推导（不新增状态文件）：
 operations 是成交事实 SSOT（04 契约），addon 信号 pending 与否是建议在途
@@ -28,6 +28,10 @@ import datetime as _dt
 import json
 import math
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from adjudicate import CONFIDENCE_GATE  # noqa: E402  置信门口径 SSOT（防两处漂移）
 
 # ---------------------------------------------------------------- 常量（判据 SSOT，改判据须同步 references/10 与 CHANGELOG）
 
@@ -38,7 +42,7 @@ VAL_PCT = 90.0              # A-2（→08 ②-4）：PE/PB 5 年分位 >90 冻�
 TSMOM_WARN = 100.0          # A-4（→08 ②-7 收严实现）：250 日动量 >+100% 冻结
 RSI_CAP = 78.0              # 顺势轨：RSI 超买警戒（08 口径）
 MA20_STRETCH = 0.10         # 顺势轨：现价高出 ma20 ≥10% 不追
-PULLBACK_MIN = 0.03         # 顺势轨：距 20 日高回撤 ≥3% 才算回踩在场
+PULLBACK_MIN = 0.03         # 顺势轨：距 20 日最高收盘回撤 ≥3% 才算回踩在场
 MA10_TOL = 1.02             # 顺势轨：现价 ≤ ma10×1.02 视为回踩至均线带
 SIZE_DIVISOR = {"trend": 3, "value": 6}  # 门3：单次上限=现仓/3（顺势）、/6（逆势）
 LOT = 100                   # 手数取整（港股 board lot 贴合为 P2）
@@ -47,8 +51,9 @@ COOLDOWN_DAYS = 60          # 同票加仓信号 60 日限频窗（日历日近�
 MAX_ADDONS_60D = 2          # 同票 60 日加仓信号 ≤2 条
 LOSS_ENVELOPE = 0.15        # 包络：加仓后浮亏 ≥15% 禁再加
 NARROW_CONF = {"high", "medium"}  # 逆势窄门：lens 置信下限
-CONF_GATE = 0.5             # addon 轨置信门（口径同 adjudicate.CONFIDENCE_GATE——
-                            # 不要求 executable：hold 日加仓是设计内形态，09「定位」）
+CONF_GATE = CONFIDENCE_GATE  # addon 轨置信门（=adjudicate.CONFIDENCE_GATE SSOT
+                             # 引用；不要求 executable：hold 日加仓是设计内形态，
+                             # 10「定位」）
 
 
 # ---------------------------------------------------------------- 小工具
@@ -108,7 +113,7 @@ def load_operations(state_dir):
 def risk_chain(evidence, today):
     """A 族风险链确定性判据（字段口径见 references/10；数值判据指回 08）。
     返回 (reasons, detail)：reasons 非空=冻结；detail 逐条给
-    green/red/skip（skip=制度性无数据或字段未接入，09 缺证据口径）。"""
+    green/red/skip（skip=制度性无数据或字段未接入，10 缺证据口径）。"""
     reasons, detail = [], {}
 
     # A-1 临近解禁（→08 ①-3）：60 交易日内 ratio_pct≥3%。not_supported
@@ -158,7 +163,7 @@ def risk_chain(evidence, today):
             detail["A-2"] = "green"
 
     # A-3 EPS 90 日下修：字段在场才判（A 股侧上游常缺席=08 P4 未接入，
-    # 缺席不判；接入后收严为缺席即冻结——收严路径见 09）
+    # 缺席不判；接入后收严为缺席即冻结——收严路径见 10）
     st, data = _blk(evidence, "research")
     eps = ((data.get("consensus") or {}).get("eps_revision_90d") or {}
            if isinstance(data.get("consensus"), dict) else {})
@@ -187,7 +192,7 @@ def risk_chain(evidence, today):
         detail["A-4"] = "green"
 
     # A-5 当期亏损（v1 单期口径：fundamentals 为单期扁平结构，无 history
-    # 序列；fetch 暴露多期后收严为「连续 3 期亏损」——收严路径见 09）
+    # 序列；fetch 暴露多期后收严为「连续 3 期亏损」——收严路径见 10）
     st, data = _blk(evidence, "fundamentals")
     np_ = _f(data.get("归母净利润(亿元)"))
     if st == "not_supported" or np_ is None:
@@ -271,15 +276,21 @@ def trend_trigger(evidence, verdict):
     return (not blockers), blockers, ctx
 
 
-def value_trigger(evidence, verdict, lens):
+def value_trigger(evidence, pverdict, lens):
     """逆势窄门：quality_value 买点 + lens「有支撑」（置信≥medium）+
     现价<ma20。返回 (ok, blockers)。lens 三档在门内作资格输入是 03 透镜
-    红线的显式例外（裁决链外资格门，03/09 已注记）。"""
+    红线的显式例外（裁决链外资格门，03/10 已注记）。
+    数据源必须是中线轨裁决：quality_value 是 profile=position 策略，其
+    买点意见只进 opinions.position.json → pverdict（diagnose prepare
+    契约）——读 default 轨 verdict 恒空，窄门将不可达（I-015 修复）。"""
     _, tech = _blk(evidence, "technical")
     price, ma20 = _price_of(evidence), _f(tech.get("ma20"))
     blockers = []
+    if not pverdict:
+        blockers.append("无中线裁决（pverdict 缺席）")
+        return (not blockers), blockers
     buys = {o.get("source"): o.get("signal") for o in
-            (verdict or {}).get("valid_opinions", [])}
+            (pverdict or {}).get("valid_opinions", [])}
     if buys.get("strategy:quality_value") not in ("buy", "strong_buy"):
         blockers.append("quality_value 无买点意见")
     if not isinstance(lens, dict) or lens.get("tier") != "有支撑":
@@ -320,11 +331,19 @@ def _dt_date(s):
     return _dt.date.fromisoformat(s)
 
 
+def _recent_addons(stock_signals, today):
+    """60 日窗内的 addon 信号（含在途与已收口——按登记条数计，superseded
+    旧版同日重跑亦计，收严方向、10 规约注记）。"""
+    return [s for s in stock_signals if s.get("profile") == "addon"
+            and s.get("date") and
+            0 <= (today - _dt_date(str(s["date"])[:10])).days <= COOLDOWN_DAYS]
+
+
 def stage_state(stock_signals, operations, today):
     """三段确认制状态推导（执行事实=operations，在途建议=pending addon
     信号；不新增状态文件）。返回 (stage, in_flight)。stage ∈
     idle/first_pending/first_filled/completed/cooldown。在途信号优先于
-    限频冷却——冷却只拦新登记，不拦在途的 T+3 确认/撤销复核（09 门 3）；
+    限频冷却——冷却只拦新登记，不拦在途的 T+3 确认/撤销复核（10 门 3）；
     确认加成交（信号日后第 2 笔 buy，按笔计）后 completed 进入冷却。"""
     pend = [s for s in stock_signals
             if s.get("profile") == "addon" and s.get("status") == "pending"]
@@ -335,17 +354,14 @@ def stage_state(stock_signals, operations, today):
                   if str(o.get("code", "")).zfill(5) == str(sig.get("code", "")).zfill(5)
                   and str(o.get("action")) == "buy"
                   and str(o.get("time", ""))[:10] >= sig_day.isoformat()]
-        if len(filled) >= 2:  # 首加 + 确认加均已成交（按笔计，09）
+        if len(filled) >= 2:  # 首加 + 确认加均已成交（按笔计，10）
             return "completed", sig
         if not filled:
             return "first_pending", sig
         # T+3 确认窗（交易日近似：≤5 日历日）：窗内低点守住确认线且未创新低
         # → 确认加；破线或创新低 → 撤销（由调用方用 evidence bars 判窗内低点）
         return "first_filled", sig
-    recent = [s for s in stock_signals if s.get("profile") == "addon"
-              and s.get("date") and
-              0 <= (today - _dt_date(str(s["date"])[:10])).days <= COOLDOWN_DAYS]
-    if len(recent) >= MAX_ADDONS_60D:
+    if len(_recent_addons(stock_signals, today)) >= MAX_ADDONS_60D:
         return "cooldown", None
     return "idle", None
 
@@ -379,7 +395,7 @@ def evaluate_addon(code, market, holding, verdict, pverdict, risk, evidence,
     → addon 不适用）。返回 dict（advice ∈ first_add/hold/wait_pullback/
     confirm_add/abort/frozen/cooldown/none + 渲染所需全部字段）。门 1 先于
     冷却/在途判定（gate_detail 全态可溯源）；冷却只拦新登记、不拦在途的
-    T+3 复核；idle 触发前过 addon 自身置信门（CONF_GATE，09「定位」）。"""
+    T+3 复核；idle 触发前过 addon 自身置信门（CONF_GATE，10「定位」）。"""
     out = {"held": bool(holding and (_f(holding.get("qty")) or 0) > 0),
            "eligible": False, "frozen_reasons": [], "gate_detail": {},
            "track": "none", "triggered": False, "trigger_blockers": [],
@@ -392,7 +408,7 @@ def evaluate_addon(code, market, holding, verdict, pverdict, risk, evidence,
     qty, cost = _f(holding.get("qty")), _f(holding.get("cost"))
     stage, in_flight = stage_state(stock_signals, operations, today)
     out["stage"] = stage
-    # 门 1 先行（09 产出契约：冷却态同样出 gate_detail/冻结原因，不让冷却
+    # 门 1 先行（10 产出契约：冷却态同样出 gate_detail/冻结原因，不让冷却
     # 吞掉资格溯源信息）
     ok, reasons, detail = gate1(verdict, pverdict, risk, evidence, today)
     out["gate_detail"] = detail
@@ -407,7 +423,8 @@ def evaluate_addon(code, market, holding, verdict, pverdict, risk, evidence,
         out["advice"] = "cooldown"
         out["rationale"] = ("60 日内加仓信号已 %d 条（上限 %d），冷却中——"
                             "冷却只拦新登记，不拦在途复核"
-                            % (MAX_ADDONS_60D, MAX_ADDONS_60D))
+                            % (len(_recent_addons(stock_signals, today)),
+                               MAX_ADDONS_60D))
         return out
     if stage == "completed":
         out["advice"] = "cooldown"
@@ -441,11 +458,13 @@ def evaluate_addon(code, market, holding, verdict, pverdict, risk, evidence,
             out["rationale"] = "首加在途，T+3 确认窗未满，不动作"
         return out
     if stage == "first_pending":
-        # 在途建议复核：门仍开才维持，否则撤销提示（登记侧由下一诊覆盖）
+        # 在途建议复核：门仍开才维持，否则撤销提示（登记侧由下一诊覆盖）。
+        # 未成交建议不自动过期——挂至后验到期收口（T+10 后验评估翻态，10 规约）
         out["advice"] = "hold"
-        out["rationale"] = "首加建议在途未执行（门开维持；收盘前未成交按当日收盘复核）"
+        out["rationale"] = ("首加建议在途未执行（门开维持；不自动过期，挂至"
+                            "后验到期收口）")
         return out
-    # idle：门开，先过 addon 置信门（09「定位」：低置信日不出买入侧建议，
+    # idle：门开，先过 addon 置信门（10「定位」：低置信日不出买入侧建议，
     # 与 04 §7「检查没过结论停在保守档」对齐；在途 confirm/abort 复核不受
     # 此门——撤销是风险动作必须送达）
     conf = ((verdict or {}).get("aggregate") or {}).get("confidence")
@@ -455,7 +474,7 @@ def evaluate_addon(code, market, holding, verdict, pverdict, risk, evidence,
                             % (conf, CONF_GATE))
         return out
     t_ok, t_block, t_ctx = trend_trigger(evidence, verdict)
-    v_ok, v_block = value_trigger(evidence, verdict, lens)
+    v_ok, v_block = value_trigger(evidence, pverdict, lens)
     price = t_ctx.get("price")
     if t_ok:
         track = "trend"
@@ -466,7 +485,7 @@ def evaluate_addon(code, market, holding, verdict, pverdict, risk, evidence,
         ma10, ma20 = t_ctx.get("ma10"), t_ctx.get("ma20")
         # 等回踩只在「唯一缺失条件是回踩」时成立（多头排列在场、现价仍在
         # 均线带上方、其余顺势条件全绿）——破位/买点缺席形态落普通 hold
-        # 并列出全部 blockers（09）
+        # 并列出全部 blockers（10）
         if t_ctx.get("pullback") is False and len(t_block) == 1:
             out["advice"] = "wait_pullback"
             out["rationale"] = ("资格开（顺势轨）：多头排列在场，等回踩至 "
@@ -484,13 +503,13 @@ def evaluate_addon(code, market, holding, verdict, pverdict, risk, evidence,
         out["rationale"] = "现仓 %d 股过小，单次上限不足 1 手（%d 股），不拆批" % (qty, size)
         return out
     ma10, ma20 = t_ctx.get("ma10"), t_ctx.get("ma20")
-    # add_ref（09 门 3）：顺势=均线带上沿但不高于触发时现价（深回踩形态以
+    # add_ref（10 门 3）：顺势=均线带上沿但不高于触发时现价（深回踩形态以
     # 现价为锚——锚高于成交价会让确认线必然高于市价，首加即自噬撤销）；
     # 逆势=触发时价（与信号登记价同口径：盘中运行为盘中价，price_kind 标注）
     add_ref = (round(min(max(ma10, ma20), price), 2)
                if track == "trend" and ma10 and ma20 else round(price, 2))
     first = size // 2 // LOT * LOT  # 首加 = 批上限的 1/2（100 股向下取整）
-    if first < LOT:  # 半批不足 1 手：不拆批不加（收严，09）
+    if first < LOT:  # 半批不足 1 手：不拆批不加（收严，10）
         out["advice"] = "hold"
         out["rationale"] = ("单次上限 %d 股的半批不足 1 手（%d 股），不拆批不加"
                             % (size, size // 2))
@@ -505,10 +524,10 @@ def evaluate_addon(code, market, holding, verdict, pverdict, risk, evidence,
     out["add_ref"] = add_ref
     out["confirm_lo"] = round(add_ref * CONFIRM_CUT, 4)
     out["rationale"] = (
-        "%s轨首加 1/2 批：首加 ≤%d 股（整批上限 %d 的一半）@参考 %s；"
-        "T+3 守住 %s 确认加剩余 ≤%d 股，破位或创新低撤销剩余批次（%s）"
-        % ("顺势" if track == "trend" else "逆势窄门", first, size, add_ref,
-           out["confirm_lo"], size - first,
+        "%s轨首加 1/2 批：首加 ≤%d 股（整批上限 %d、半批 %d 股按手取整）"
+        "@参考 %s；T+3 守住 %s 确认加剩余 ≤%d 股，破位或创新低撤销剩余批次（%s）"
+        % ("顺势" if track == "trend" else "逆势窄门", first, size, size // 2,
+           add_ref, out["confirm_lo"], size - first,
            "策略买点在场" if track == "trend" else "价值锚支撑+零风险链"))
     return out
 
@@ -608,19 +627,30 @@ def selftest():
     assert r["advice"] == "wait_pullback", r
     print("  ok 回踩不在场 → wait_pullback")
 
-    # 5) 逆势窄门：现价<ma20 + quality_value + 有支撑
+    # 5) 逆势窄门：现价<ma20 + quality_value（**中线轨 pverdict**——prepare
+    #    契约下 position 策略意见只进 pverdict；旧实现读 default 轨 verdict
+    #    恒空使窄门不可达，I-015 修复）+ 有支撑
     v_ev = ev(technical=tech(ma5=8.5, ma10=9.0, ma20=9.6), quote={"price": 9.0},
               daily_bars={"bars": bars_from([9.5] * 19 + [9.0])},
               unlock={"state": "available", "data": {"upcoming": []}},
               valuation={"state": "available", "data": {}},
               research={"state": "available", "data": {}},
               fundamentals={"state": "available", "data": {}})
-    r = run(evidence=v_ev, verdict=v_value, lens=lens_sup, holding={"qty": 1200, "cost": 9.0})
+    r = run(evidence=v_ev, verdict=verdict_of("hold"), pverdict=v_value,
+            lens=lens_sup, holding={"qty": 1200, "cost": 9.0})
     assert r["advice"] == "first_add" and r["track"] == "value", r
     assert r["size_cap"] == 200 and r["first_qty"] == 100, r  # 1200/6 → 200、半批 100
-    assert r["add_ref"] == 9.0   # 逆势=触发时价（与登记价同口径，09）
-    assert run(evidence=v_ev, verdict=v_value, lens={"tier": "中性"})["advice"] != "first_add"
-    print("  ok 逆势窄门（1/6 手数/锚支撑缺失不开门）")
+    assert r["add_ref"] == 9.0   # 逆势=触发时价（与登记价同口径，10）
+    assert run(evidence=v_ev, verdict=verdict_of("hold"), pverdict=v_value,
+               lens={"tier": "中性"})["advice"] != "first_add"
+    # P0 回归钉：default 轨 verdict 里的 quality_value（prepare 契约下不可能
+    # 出现的形态）与 pverdict 缺席都必须不开门——防再读错轨
+    assert run(evidence=v_ev, verdict=v_value, lens=lens_sup,
+               holding={"qty": 1200, "cost": 9.0})["advice"] != "first_add", \
+        "quality_value 只认 pverdict（中线轨），default 轨读到不算"
+    nb = value_trigger(v_ev, None, lens_sup)
+    assert nb[0] is False and any("无中线裁决" in b for b in nb[1]), nb
+    print("  ok 逆势窄门（pverdict 数据源/1/6 手数/锚支撑缺失不开门）")
 
     # 6) 三段状态机：pending → 窗未满 pending → filled(confirm/abort) / 限频
     sig = {"profile": "addon", "status": "pending", "date": "2026-11-02",
