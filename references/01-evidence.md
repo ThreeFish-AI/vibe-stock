@@ -108,7 +108,7 @@
 | industry | 申万归属(新浪 F10)+同花顺板块表 | sina_flow/ths | not_supported（backlog：HKCVALUE 同业锚） |
 | valuation | A：qt 快照→baidu 历史分位；HK：em-hk-ind 具名列快照(RPT_CUSTOM_HKF10)→baidu 分位（qt 港股位序未验证不入链） | qt/baidu_gushitong；HK=em_datacenter/baidu_gushitong | em-hk-ind+baidu 双路 |
 | margin | 市场级两融余额：dc `RPTA_RZRQ_LSHJ` 直连（全市场·元·单次 70 日）→金十转发回退（沪深两所合计，差北交所 ~0.33%） | dc-margin=em_datacenter；jin10-margin=jin10（新簇） | not_supported（市场级块仅 A 股） |
-| index | 指数基准 HS300/ALLA(000985)/HSI：腾讯 K 主源（amount 列实为量手非额——禁当成交额）→新浪回退（000985 新浪断更 2016 仅腾讯）；HSI yf→新浪港股（yf 当日行 Volume=0） | tx-idx=qq；sina-idx=sina_idx（新簇）；yf | HSI 随 A 股装配（港股诊股同享市场快照） |
+| index | 指数基准 HS300/ALLA(000985)/HSI：腾讯 K 主源（amount 列实为量手非额——禁当成交额）→新浪回退（000985 新浪断更 2016 仅腾讯）；HSI yf→新浪港股（yf 当日行 Volume=0） | tx-idx=qq；sina-idx=sina_idx（新簇）；yf | HSI 随 A 股装配（本块对 hk 为 not_supported——港股诊股「同享」的是既有 market 块的 qt 港股指数快照，非本块） |
 | turnover_pctile | 全A 换手分位（000985 成交量滚动 250 日分位——成交活跃度代理，非严格换手率；东财换手率列补测后升级） | tx-idx=qq | not_supported |
 | erp | 月频 ERP（乐咕沪深300 滚动 PE×东财 10Y，ERP=1/PE−y10）+ 中证官网 000300 P/E2 日频增量落盘 `~/.vibe-stock/erp_pe_daily.jsonl`（单次仅回 20 日不可回填，满 250 日出日频分位） | legu-pe=legulegu（新簇）；dc-bond=em_datacenter；csindex=csindex（新簇） | not_supported |
 | margin_accounts | 两融账户参与度（日频·户·T+1；原「新开户」上游 2023-09 停更，用户 2026-11-04 裁定替代且不冒充新开户） | em-mkt-account=em_datacenter | not_supported |

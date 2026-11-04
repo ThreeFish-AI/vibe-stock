@@ -25,6 +25,7 @@ import os
 import math
 import re
 import sys
+import types
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import archive as ar  # noqa: E402
@@ -50,7 +51,9 @@ EXT_PACK_BUDGET = {"moneyflow": 12, "notices": 12, "research": 10,
                    "forecast": 6, "unlock": 6, "holder": 8, "market": 8,
                    "industry": 8, "valuation": 6,
                    # 市场级情绪五块（0.0.19，references/09）：市场维度共享数据，
-                   # 有界 2–4 行
+                   # 有界 2–4 行。margin/turnover_pctile/erp/margin_accounts 四键
+                   # 仅为口径陈列——各块硬编码单行渲染、无条目维度可切，真正被
+                   # 消费的切片键是 index（indices 条目）与 market（快照行）
                    "margin": 3, "index": 5, "turnover_pctile": 2, "erp": 4,
                    "margin_accounts": 2, "fx": 2}
 PACK_CHAR_CAP = 16000
@@ -1672,6 +1675,32 @@ def selftest():
             == fx.CLUSTERS["sina-industry"] == "sina_flow")
     assert fx.CLUSTERS["sina-flow"] != fx.CLUSTERS["sina-fin"]  # 子域分簇
     print("  ok qt/sina 解析罐体（双路校验两路径）· derive_chip 三态 · 簇绑定")
+    # -- 修复钉：margin 主源「行数不足」必须走回退（I-011）——不得 available·
+    #    source=None 渗透 pack 头、不得给 dc-margin 记假败（形状问题非源故障）--
+    st_m = {"breakers": {"jin10": {"fails": 3, "open_until": t0 + 3600}},
+            "cooldowns": {}}
+    _real_dcm = fx._dc_rows_market
+    _real_ak = sys.modules.get("akshare")
+    sys.modules["akshare"] = types.ModuleType("akshare")  # 防真装环境入网
+    try:
+        fx._dc_rows_market = lambda *a, **k: [  # 10 行有效——不足 21 触发回退
+            {"DIM_DATE": "2026-10-%02d" % (i + 1), "RZRQYE": 2.2e12 + i}
+            for i in range(10)]
+        mg_blk = fx.fetch_margin("cn", "600519", st_m, t0)
+        assert mg_blk["state"] == "fetch_failed", \
+            "主源行数不足须走回退（旧代码 available·source=None 是缺陷）"
+        assert isinstance(mg_blk.get("source"), str) and mg_blk["source"], \
+            "fetch_failed 须带硬编码 source 串（不得渗透 None）：%s" % mg_blk
+        assert st_m["breakers"].get("em_datacenter", {}).get("fails", 0) == 0, \
+            "行数不足不得记簇假败（HTTP 实际成功）"
+    finally:
+        fx._dc_rows_market = _real_dcm
+        fx._MKT_CACHE.pop("margin", None)
+        if _real_ak is None:
+            sys.modules.pop("akshare", None)
+        else:
+            sys.modules["akshare"] = _real_ak
+    print("  ok margin 行数不足→回退介入（不渗透 source=None·不记假败）")
     # -- 修复钉：dc 空结果=事实非失败 · forecast 取最新预告+最近披露 · unlock 升序 --
     st3 = {"breakers": {}, "cooldowns": {}}
     _today = dt.date.today()

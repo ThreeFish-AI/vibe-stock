@@ -99,6 +99,10 @@ CLUSTERS = {
     "em-notice-h": "em_notice",  # 港股公告（np-anotice ann_type=H，同簇加分支）
     "etnet": "etnet",            # ETNet 经济通簇 · 港股盈利预测（www.etnet.com.hk）
     # —— 市场级情绪块（0.0.19，references/09；源实测口径见 PR 描述附探针报告） ——
+    # 取舍：dc-margin/dc-bond/em-mkt-account 三源并入 em_datacenter 既有簇——
+    # 簇=主机故障域（dc-respredict 先例同款），报表级失败（改名/字段漂移）在
+    # 批量下 3 连败会熔断整个 datacenter 家族 300s、波及财务/预告/解禁等核心
+    # 扩展源；失败面加宽属只收严方向，观察后再议是否拆「无证券过滤市场汇总」独立簇
     "dc-margin": "em_datacenter",   # 两融余额全市场汇总（RPTA_RZRQ_LSHJ 直连；
                                     #  backlog 原名 RPT_RZRQ_LSHJ 已失效——改名多一个 A）
     "jin10-margin": "jin10",        # 金十转发簇（cdn.jin10.com，macro_china_ 前缀
@@ -2152,14 +2156,16 @@ def fetch_margin(market, code, st, now):
                       for r in rows]
             series = [(d, v) for d, v in series if d and v]
             series.sort()
-            if len(series) >= 21:
+            if len(series) >= 21:  # <21 出不了 20 日变动——形状问题不记源败
                 src = "dc-margin"
-            else:
-                raise ValueError("主源行数不足：%d" % len(series))
         except Exception as e:
             if not isinstance(e, _Skip):
                 record(st, CLUSTERS["dc-margin"], False, str(e), now)
-        if not series:  # 回退：金十转发（akshare macro_china_* 实为 jin10 cdn）
+            series = []
+        # 回退条件是 src is None（非 not series）：主源「行数不足」残 1–20 行也
+        # 必须走回退，否则 available·source=None 渗透 pack 头、note 错标
+        if src is None:  # 回退：金十转发（akshare macro_china_* 实为 jin10 cdn）
+            series = []  # 主源残行是三所口径，不得与金十两所行混序
             try:
                 import akshare as ak
                 ok, why = source_allowed(st, CLUSTERS["jin10-margin"], now)
@@ -2179,7 +2185,13 @@ def fetch_margin(market, code, st, now):
                         series.append((d, a + b))  # 两列单位均元，直接加总
                 series.sort()
                 record(st, CLUSTERS["jin10-margin"], True, "", now)
-                src = "jin10-margin"
+                if len(series) >= 21:  # 与主源同守卫：短/零配对序列不出 20 日变动
+                    src = "jin10-margin"
+                else:
+                    # HTTP 成功但零配对行/行数不足（列名漂移、两表日期零交集的
+                    # 常见形态）——不得落到下方 vals[-1]，也不得 available 出缺键
+                    return {"state": "fetch_failed", "source": "dc-margin/jin10",
+                            "note": "回退无可配对行或行数不足（%d 行）" % len(series)}
             except ImportError:
                 return {"state": "fetch_failed", "source": "jin10-margin",
                         "note": "akshare 未安装（uv --with 形态装载）"}
@@ -2239,6 +2251,8 @@ def _sina_index_series(symbol, st, now):
 
 
 def _index_snapshot(series):
+    if not series:  # 空序列守卫：快照不可算，防 IndexError 被 caller 误记源败
+        return None
     closes = [c for _, c, _ in series]
     ma60 = round(sum(closes[-60:]) / 60, 2) if len(closes) >= 60 else None
     snap = {"as_of": series[-1][0], "close": closes[-1],
@@ -2276,22 +2290,31 @@ def fetch_index(market, code, st, now):
                 fails.append("%s-tx:%s" % (name, type(e).__name__))
                 src = ""
             if not series and sym == "sh000300":
-                try:
-                    series = _sina_index_series(sym, st, now)
+                try:  # 回退结果同入共享缓存——tx 失效时批量不被每股重打新浪
+                    series = _mkt_cached(
+                        "idx_%s_sina" % sym,
+                        lambda s=sym: _sina_index_series(s, st, now))
                     src = "sina-idx"
                 except Exception as e:
                     if not isinstance(e, _Skip):
                         record(st, CLUSTERS["sina-idx"], False, str(e), now)
                     fails.append("%s-sina:%s" % (name, type(e).__name__))
-            if series:
+            # 与 HSI 同守卫：短序列不出 ma60=None 快照（「距 MA60 0.00%」会
+            # 把无 MA60 误读成贴线），入 fails 如实披露
+            if len(series) >= 60:
                 snap = _index_snapshot(series)
                 snap["source"] = src
                 idx[name] = snap
+            elif series:
+                fails.append("%s:short_series(%d)" % (name, len(series)))
 
         _cn("HS300", "sh000300")
         try:  # ALLA 与换手分位块共享同一序列（缓存键唯一 → 单次 HTTP）
             alla = _mkt_cached("idx_sh000985", _alla)
-            idx["ALLA"] = {**_index_snapshot(alla), "source": "tx-idx"}
+            if len(alla) >= 60:
+                idx["ALLA"] = {**_index_snapshot(alla), "source": "tx-idx"}
+            else:
+                fails.append("ALLA:short_series(%d)" % len(alla))
         except Exception as e:
             if not isinstance(e, _Skip):
                 record(st, CLUSTERS["tx-idx"], False, str(e), now)
@@ -2315,6 +2338,8 @@ def fetch_index(market, code, st, now):
             if len(closes) >= 60:
                 idx["HSI"] = {**_index_snapshot([(d, c, None) for d, c in closes]),
                               "source": "yf"}
+            elif closes:
+                fails.append("HSI:short_series(%d)" % len(closes))
         except Exception as e:
             if not isinstance(e, _Skip):
                 record(st, CLUSTERS["yf"], False, str(e), now)
@@ -2332,10 +2357,12 @@ def fetch_index(market, code, st, now):
                         series.append((d, c, _fnum(r.get("amount"))))
                 if len(series) >= 60:  # 与 yf 主源同守卫：短序列不出 ma60=None 快照
                     idx["HSI"] = {**_index_snapshot(series), "source": "sina-idx"}
+                elif series:
+                    fails.append("HSI:short_series(%d)" % len(series))
             except Exception as e2:
                 if not isinstance(e2, _Skip):
                     record(st, CLUSTERS["sina-idx"], False, str(e2), now)
-                fails.append("HSI:%s" % type(e).__name__)
+                fails.append("HSI:%s" % type(e2).__name__)  # 归因内层异常（e2）
         if not idx:
             return {"state": "fetch_failed", "source": "tx-idx/sina-idx/yf",
                     "note": "指数链全失败：%s" % ";".join(fails)}
@@ -2436,8 +2463,6 @@ def fetch_erp(market, code, st, now):
             d, pe = str(r.get("日期", ""))[:10], _fnum(r.get("市盈率2"))
             if d and pe is not None and pe > 0:
                 new_rows[d] = round(pe, 3)  # P/E2 计算用股本口径（探针钉）
-        if not new_rows:
-            return None
         ledger = {}
         if os.path.exists(ERP_LEDGER):
             try:
@@ -2455,6 +2480,10 @@ def fetch_erp(market, code, st, now):
                             ledger[r["date"]] = r["pe2"]
             except OSError:
                 ledger = {}
+        if not new_rows:
+            # 空响应只是无增量（临时空回/字段漂移），台账现状原样返回——
+            # 已积累满 250 日不得被一次空响应打回「进行中」
+            return len(ledger)
         ledger.update(new_rows)
         rows = [{"date": d, "pe2": v} for d, v in sorted(ledger.items())]
         tmp = ERP_LEDGER + ".tmp"

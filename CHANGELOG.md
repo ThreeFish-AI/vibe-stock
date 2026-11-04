@@ -92,6 +92,31 @@
 - W3/S2 声明为既定取舍并写入 09 并发节：ERP 台账 last-writer-wins
   （增量 20 日重叠、次日自愈）；跨进程无市场级缓存（06 批量 subprocess
   形态每股全价，后续按当日 jsonl 缓存收口）。
+
+### Fixed（0.0.19 合入前二次评审修复，I-011~I-013）
+
+- I-011：margin 取数链两个崩点/渗点——①金十回退「HTTP 成功但零配对行/
+  行数不足」曾落到 `vals[-1]` 抛 IndexError 崩整条诊股链，补 ≥21 行守卫
+  返回 fetch_failed；②主源「行数不足（1–20 行）」的 raise 被吞后回退条件
+  `not series` 永不成立，曾以 available·`source=None` 渗透 pack 头、note
+  错标且给 em_datacenter 记假败——回退条件改 `src is None`，行数不足不记
+  源败（diagnose selftest 钉：回退介入·不渗透·不记假败）。
+- I-012：C1 渲染收口补第二道——投影端滤 None 键只堵了入卡侧，渲染端裸
+  `%s` 仍会把残块的缺键打出 `None%`/`0.00%` 字面量（margin_accounts 6–20
+  行、历史短序列残卡等形态）；pack 市场级行与日表市场级节渲染端统一
+  None→「—」（outlook selftest C1 扩展钉：margin 缺键 fixture 禁 None
+  字面量）；A 股 HS300/ALLA 补 ≥60 行守卫与 HSI 对称（短序列入 fails
+  披露，不出「距 MA60 None%」）。
+- I-013：index/erp 链三处守卫与归因——HSI 短序列补入 `fails`（此前
+  块可 available 却零披露）；HSI 新浪回退失败归因误用外层 yf 异常变量
+  （`e`→`e2`）；csindex 空响应早退曾把已满 250 日的 ERP 台账打回
+  「进行中」——空响应按「无增量」处理、台账现状原样返回；HS300 新浪
+  回退结果同入 `_MKT_CACHE`（tx 失效时批量不被每股重打）；`_index_snapshot`
+  空序列守卫（防 IndexError 被 caller 误记 qq 簇假败）。
+- 随附口径收口（不改行为）：03-synthesis「现十块」→十五块；09 裁定引文
+  四块括注（裁定 6 增补后为五块）；01 index 行 HK 消歧（本块对 hk
+  not_supported）；EXT_PACK_BUDGET 四新键注释为口径陈列；CLUSTERS 注释
+  em_datacenter 失败面加宽取舍。
 - 源验证：三份探针实测报告（两融/指数+ERP/新开户，含字段逐字记录、交叉
   验证与失败形态）存 `.context/probe-*.md` 并摘录进 PR 描述；五块联网实跑
   冒烟全通（margin 22988.6 亿与三所加总闭合、ERP 6.2%=1/12.8−1.61%、

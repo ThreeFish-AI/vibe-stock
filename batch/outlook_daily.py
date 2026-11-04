@@ -239,37 +239,39 @@ def render_daily(state_dir):
             mkt = em["market"]
             break
     if mkt:
+        def _d(v):  # C1 收口：投影端滤 None 键后日表不得渗 "None%" 字面量
+            return "—" if v is None else v
         mg = mkt.get("margin") or {}
         if mg:
             L.append("- 两融余额 %s 亿（%s）· Δ1d %s%% / Δ5d %s%% / Δ20d %s%% · "
                      "70 日分位 %s%%（%s）" % (
-                         mg.get("balance_yi"), mg.get("as_of"),
-                         mg.get("chg_1d_pct"), mg.get("chg_5d_pct"),
-                         mg.get("chg_20d_pct"), mg.get("pctile_70d"),
+                         _d(mg.get("balance_yi")), mg.get("as_of"),
+                         _d(mg.get("chg_1d_pct")), _d(mg.get("chg_5d_pct")),
+                         _d(mg.get("chg_20d_pct")), _d(mg.get("pctile_70d")),
                          mg.get("source")))
         tp = mkt.get("turnover_pctile") or {}
         if tp:
-            L.append("- 全A换手分位 %s%%（%d 日窗，%s）" % (
-                tp.get("pctile"), tp.get("window") or 0, tp.get("as_of")))
+            L.append("- 全A换手分位 %s%%（%s 日窗，%s）" % (
+                _d(tp.get("pctile")), tp.get("window") or 0, tp.get("as_of")))
         ep = mkt.get("erp") or {}
         if ep:
             L.append("- ERP %s%%（月频 PE %s × 10Y %s%%，%s）· 5 年月频分位 "
                      "%s%% · 日频积累 %s" % (
-                         ep.get("erp_pct"), ep.get("monthly_pe"),
-                         ep.get("y10_pct"), ep.get("as_of"),
-                         ep.get("pctile_5y_monthly"),
+                         _d(ep.get("erp_pct")), _d(ep.get("monthly_pe")),
+                         _d(ep.get("y10_pct")), ep.get("as_of"),
+                         _d(ep.get("pctile_5y_monthly")),
                          "就绪" if ep.get("daily_ready") else "进行中"))
         ma = mkt.get("margin_accounts") or {}
         if ma:
             L.append("- 两融账户参与度 %s 户（%s）· Δ5d %s%% / Δ20d %s%%"
-                     % (ma.get("traders"), ma.get("as_of"),
-                        ma.get("traders_chg_5d_pct"),
-                        ma.get("traders_chg_20d_pct")))
+                     % (_d(ma.get("traders")), ma.get("as_of"),
+                        _d(ma.get("traders_chg_5d_pct")),
+                        _d(ma.get("traders_chg_20d_pct"))))
         ix = mkt.get("index") or {}
         for name, s in (ix.get("indices") or {}).items():
             L.append("- 指数 %s %s（%s，距 MA60 %s%%，%s）" % (
-                name, s.get("close"), s.get("as_of"),
-                s.get("dist_ma60_pct"), s.get("source")))
+                name, _d(s.get("close")), s.get("as_of"),
+                _d(s.get("dist_ma60_pct")), s.get("source")))
     else:
         L.append("- abstained——市场级五块本批全部不可用（单块状态见各股诊股"
                  "证据面状态行；references/09）")
