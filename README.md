@@ -57,7 +57,7 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 
 ## 高抛低吸战术仓（11）
 
-高抛低吸的**信号**已有 swing_band（中线 regime 门控）与 box_oscillation（短线）；11 补的是**执行层**：用户在底仓之外开一段战术仓时，事前写死价区来源（系统波段带快照或用户 conviction 区）、底仓/战术仓分账、先抛后接的回补纪律（回补价须低于高抛价且覆盖 3×往返成本）、低吸五门（事件/归因/基本面/价区/确认，缺证据算不过）、仓位算术与失效位、越权声明（硬越权默认禁、软越权须事前逐条声明）。它是用户裁量层：不进裁决链、不改 RiskGuard 与加仓轨、不写信号与台账、不下单；预案存用户本机、不入仓，Agent 只陈述事实、不给买卖档位。规约与空白模板见 [references/11-tactical-swing.md](references/11-tactical-swing.md)。
+高抛低吸的**信号**已有 swing_band（中线 regime 门控）与 box_oscillation（短线）；11 补的是**执行层**：用户在底仓之外开一段战术仓时，事前写死价区来源（swing_band 箱体快照或用户 conviction 区）、底仓/战术仓分账、先抛后接的回补纪律（回补价须低于高抛价且覆盖 3×往返成本）、低吸五门（事件/归因/基本面/价区/确认，缺证据算不过）、仓位算术与失效位、越权声明（硬越权默认禁、软越权须事前逐条声明）。它是用户裁量层：不进裁决链、不改 RiskGuard 与加仓轨、不写信号与台账、不下单；预案存用户本机、不入仓，Agent 只陈述事实、不给买卖档位。规约与空白模板见 [references/11-tactical-swing.md](references/11-tactical-swing.md)。
 
 ## 盘中盯盘（07 子技能）
 
