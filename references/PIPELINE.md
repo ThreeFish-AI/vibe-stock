@@ -1,6 +1,6 @@
 # PIPELINE · 五段流水线与命令速查
 
-路径变量（唯一定义处）：`$T` = skill 根（SKILL.md 所在目录；Claude Code 下即 `${CLAUDE_SKILL_DIR}`）；`$W` = 本次诊股工作区（默认 `.vs/`）；状态目录 `~/.vibe-stock/`（signals.json / ledger.json / fetch_state.json / reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](04-report.md)，不入仓）。本文件只覆盖单股五段流水线；多股批量（指数成分精选/筛 N/资金配置）走 [06-batch-scan](06-batch-scan.md) 子技能（`batch/` 参考实现，命令序见 [batch/README](../batch/README.md)）；在册股票盘中盯盘/收盘复核走 [07-monitor](07-monitor.md) 盯盘子技能（`batch/monitor/` 参考实现）；中线（1–6 个月）因子口径与只降不升风险判据族见 [08-midterm](08-midterm.md)；持仓股加仓决策轨（三道门 + 三段确认制）见 [10-add-on](10-add-on.md)；在册股短/中期走势参考（零权重卡与收盘批量）见 [09-outlook](09-outlook.md)。
+路径变量（唯一定义处）：`$T` = skill 根（SKILL.md 所在目录；Claude Code 下即 `${CLAUDE_SKILL_DIR}`）；`$W` = 本次诊股工作区（默认 `.vs/`）；状态目录 `~/.vibe-stock/`（signals.json / ledger.json / fetch_state.json / reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](04-report.md)，不入仓）。本文件只覆盖单股五段流水线；多股批量（指数成分精选/筛 N/资金配置）走 [06-batch-scan](06-batch-scan.md) 子技能（`batch/` 参考实现，命令序见 [batch/README](../batch/README.md)）；在册股票盘中盯盘/收盘复核走 [07-monitor](07-monitor.md) 盯盘子技能（`batch/monitor/` 参考实现）；中线（1–6 个月）因子口径与只降不升风险判据族见 [08-midterm](08-midterm.md)；持仓股加仓决策轨（三道门 + 三段确认制）见 [10-add-on](10-add-on.md)；在册股短/中期走势参考（零权重卡与收盘批量）见 [09-outlook](09-outlook.md)；持仓股高抛低吸战术仓（用户裁量层预案，不进裁决链）见 [11-tactical-swing](11-tactical-swing.md)。
 
 ```text
 ① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；21 块=核心六块
