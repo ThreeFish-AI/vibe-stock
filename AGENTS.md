@@ -47,7 +47,7 @@
 | references/PIPELINE.md | 五段流水线与命令速查 |
 | strategies/ | 策略 YAML 库 |
 | scripts/ | fetch / adjudicate / diagnose / postmortem / lens / addon / outlook / archive（裁决 · 诊断 · 基本面锚透镜 · 加仓轨 · 走势参考卡 · 报告归档与索引） |
-| batch/ | 批量子技能参考实现（口径以对应规约为准——06 批量 / 09 走势参考收盘批量；除 monitor/ 外不设 selftest 门禁——以 scripts/ 六件全绿 + 口径复核为准） |
+| batch/ | 批量子技能参考实现（口径以对应规约为准——06 批量 / 09 走势参考收盘批量 / 05 收盘评估 launchd 模板 batch/postmortem/；除 monitor/ 外不设 selftest 门禁——以 scripts/ 六件全绿 + 口径复核为准） |
 | batch/monitor/ | 盯盘参考实现 watch/rules（口径以 references/07 为准，自带 --selftest 非阻塞旁路门禁） |
 | evals/ | 合成 Fixture 与黄金样本 |
 | docs/.agents/ | [Issue 记录](docs/.agents/issue.md) 与 [知识索引](docs/.agents/knowledge-map.md) |

@@ -52,6 +52,30 @@ SIGMA_FLOOR = 0.02   # σ 退化链兜底日波动：宁宽勿窄（宽于 postm
 OPS_NOTE = ("成交价为券商裸价、行情为 qfq 复权口径（除权除息期二者有差异）；"
             "零指令纯事实呈现")
 DELTA_KEYS = ("rv60", "ret_20d", "turnover_pctile_250")   # 日差/连向跟踪键
+CLOSE_GATE_HM = (17, 10)   # 收盘定型墙钟门 SSOT（09「时点墙钟门」）：编排层
+#                          # batch/outlook_daily 禁内联该字面量（单源，I-023）
+
+
+def close_gate_open(now_dt):
+    """收盘定型墙钟门（无条件前置，代码闸非使用纪律；--force 由调用方越过）：
+    本地时区 ≥17:10 才放行。坑位：早跑会把未定型收盘价钉成当日卡/错误校准
+    样本，且幂等键（persisted_at 运行日 / 台账键）让当日不再重取（I-014）。"""
+    return (now_dt.hour, now_dt.minute) >= CLOSE_GATE_HM
+
+
+def final_bars(bars, market):
+    """末根未完成过滤（根本防线，--force 越过墙钟门后仍生效）：判窗只用已
+    定型 K——session_phase 判据=末根日==今日且盘中；盘中半根 K 一旦入校准
+    台账即永久错误样本（幂等键永不重判）。"""
+    if bars and fx.session_phase(market, bars[-1]["date"])["last_bar_partial"]:
+        return bars[:-1]
+    return bars
+
+
+def count_new_samples(rows, run_stamp):
+    """本次运行真实新增样本数（I-015③）：按本运行 judged_at 戳计——幂等
+    重跑如实 0，不按满窗计算数虚报。"""
+    return sum(1 for r in rows if r.get("judged_at") == run_stamp)
 
 
 def _f(v):
@@ -686,6 +710,14 @@ def render_pack_block(card):
             L.append("%s 带宽%%：%s" % (label, " / ".join(
                 "T+%s=%s" % (h, v.get("band_pct")) for h, v in hz.items())))
         anchors = t.get("anchors") or {}
+        if not anchors and t.get("anchors_source") == "abstained":
+            # 弃权可见化（0.0.24）：弃权事实与原因进消费面——pack/4c 此前
+            # 只以「锚行结构性缺失」呈现，读者无从区分缺锚与弃权
+            L.append("%s 锚：弃权——%s" % (label, t.get("anchors_note")
+                                           or "无可用锚"))
+        # 锚来源标注（0.0.24）：allocation 回退三价禁被读成登记信号价位
+        src_tag = "（allocation）" if t.get("anchors_source") == \
+            "allocation" else ""
         for name, a in anchors.items():
             touch = a.get("touch") or {}
             tp = " ".join("T+%s:%s%%" % (h, round(p * 100, 1))
@@ -693,8 +725,8 @@ def render_pack_block(card):
             # 方向显式化：锚在现价上方=上穿触及、下方=回落触及（first-passage
             # 屏障对称，数值同式——不标方向会把「回落触及」误读成「涨到」）
             arrow = "↑上穿" if (a.get("dist_pct") or 0) > 0 else "↓回落"
-            L.append("%s 锚 %s=%s（距 %s%%%s）" % (
-                label, name, a.get("value"), a.get("dist_pct"),
+            L.append("%s 锚%s %s=%s（距 %s%%%s）" % (
+                label, src_tag, name, a.get("value"), a.get("dist_pct"),
                 " · %s触及 %s" % (arrow, tp) if tp else ""))
     em = card.get("emotion", {})
     stk = " ".join("%s=%s" % (k, v) for k, v in (em.get("stock") or {}).items())
@@ -1020,6 +1052,24 @@ def selftest():
     assert any("target1" in ln and "↑上穿触及" in ln for ln in lines)
     assert any("stop" in ln and "↓回落触及" in ln for ln in lines)
     assert any(ln.startswith("资金面：") for ln in lines)
+    # 弃权可见化钉（0.0.24）：position 无锚卡（card_np 即该形态）须出注记行
+    # ——弃权事实进消费面，不得以锚行结构性缺失静默呈现
+    assert any(ln.startswith("中线") and "锚：弃权——" in ln and
+               "禁现算" in ln for ln in render_pack_block(card_np)), \
+        "position 弃权须在 pack 可见"
+    assert any(ln.strip().startswith("中线") and "锚：弃权——" in ln
+               for ln in render_report_section(card_np)), \
+        "position 弃权须进报告 4c 节"
+    # allocation 回退锚来源标注钉（0.0.24）：sim 股三价禁被读成登记信号价位
+    card_fb = derive_outlook(ev(), dict(ctx, signals=[], fallback_levels={
+        "stop": round(closes[-1] * 0.95, 2),
+        "entry_ref": round(closes[-1] * 0.98, 2),
+        "target1": round(closes[-1] * 1.06, 2)}))
+    assert card_fb["math"]["tracks"]["default"]["anchors_source"] == \
+        "allocation"
+    assert any(ln.startswith("短线") and "锚（allocation）" in ln
+               for ln in render_pack_block(card_fb)), \
+        "allocation 回退锚须在 pack 标注来源"
     assert render_pack_block({"state": "abstained", "reason": "x"}) == \
         ["弃权：x（零权重参考，不影响裁决）"]
     assert render_report_section(None) == []
@@ -1224,6 +1274,34 @@ def selftest():
     ev_with["outlook_card"] = card               # 顶层冗余键（前向兼容面）
     assert aj.evidence_cap(ev_with) == aj.evidence_cap(ev_base), \
         "outlook 卡不得扰动质量分/置信帽（E4 同构）"
+    # 收官钉（0.0.24 · I-023）：强制防线收编进纯函数件——墙钟门/末根过滤/
+    # 真实增量计数此前住编排层（batch 无 selftest，回归无门禁可拦）；
+    # touch 对称补钉（规约声称「对称/单调」，此前只有单调）
+    assert close_gate_open(dt.datetime(2026, 11, 4, 17, 10)) and \
+        close_gate_open(dt.datetime(2026, 11, 4, 23, 59))
+    assert not close_gate_open(dt.datetime(2026, 11, 4, 17, 9)) and \
+        not close_gate_open(dt.datetime(2026, 11, 4, 9, 30)), \
+        "墙钟门 17:10 边界（含）双侧钉"
+    _sp_orig = fx.session_phase
+    fx.session_phase = lambda m, d, now=None: \
+        {"last_bar_partial": d == "2026-11-05"}
+    try:
+        assert final_bars([{"date": "2026-11-04"}, {"date": "2026-11-05"}],
+                          "cn") == [{"date": "2026-11-04"}], \
+            "末根未完成须滤（--force 越过墙钟门后的根本防线）"
+        assert final_bars([{"date": "2026-11-04"}], "cn") == \
+            [{"date": "2026-11-04"}], "已定型末根不动"
+        assert final_bars([], "cn") == []
+    finally:
+        fx.session_phase = _sp_orig
+    _cnt_rows = [{"judged_at": "t1"}, {"judged_at": "t2"},
+                 {"judged_at": "t2"}, {}]
+    assert count_new_samples(_cnt_rows, "t2") == 2 and \
+        count_new_samples(_cnt_rows, "t9") == 0, \
+        "增量按本运行 judged_at 戳计——幂等重跑如实 0（I-015③）"
+    assert lens_mod.touch_probability(10.0, 10.5, 0.3) == \
+        lens_mod.touch_probability(10.0, round(10.0 / 1.05, 4), 0.3), \
+        "触及概率对称（对数等距上下锚同值——屏障距离 b=max(r/p,p/r) 对称）"
     # 确定性
     assert derive_outlook(ev(), ctx) == card
     print("  ok 预测带数学/单调 · 触及概率复用 lens · 锚按轨（禁现算充锚）· "

@@ -7,6 +7,50 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.24] - 2026-11-05
+
+### Added
+
+- **走势参考机制查漏补缺**（18-agent 五维度审查 + 对抗复核 24 条发现定案；
+  用户四项裁定：P0 部署立即修 / postmortem 独立槽 / 中期锚可见化+登记评审 /
+  盘中携带补显式句）：
+  ① **postmortem 收盘评估槽（I-022，经验面数据链断点修复）**：新模板
+  `batch/postmortem/com.threefish.vibestock.postmortem.plist`（周一至五
+  18:05，错峰 outlook 槽 30min——0.0.24 起该槽为 collect+自动校准双窗约
+  8–14 分钟、postmortem 不走 FetchLock，时段分离按双窗上界校核）——
+  signals 全库 105 条零 evaluated、69 条
+  pending 大量到期无人评估的空转形态实证（经验面 21/21 空桶根因）；05 新增
+  「收盘后评估节奏」节与「两把尺分立」双向指针句。
+  ② **--daily 自动接校准（I-022 后半）**：收盘批量成功后默认自动
+  --calibrate（--no-calibrate 跳过；--stock 不触发）——校准台账不再依赖
+  手动增厚，launchd 17:35 槽零改动生效；--calibrate 对「历史卡有、
+  latest_cards 10 日窗无」的退册/断档股补 warn（此前静默缺样本）。
+  ③ **三道防线收编进 scripts/outlook.py（I-023）**：墙钟门 close_gate_open（17,10 单源
+  常量，编排层禁内联）、末根未完成过滤 final_bars、校准真实增量计数
+  count_new_samples——此前住无 selftest 的 batch 编排层、回归无门禁可拦；
+  outlook selftest 新增钉：墙钟门边界双态/末根过滤接线/增量计数幂等 0/
+  触及概率对称（规约声称对称/单调、此前只有单调）。
+  ④ **弃权可见化与锚来源标注（I-025）**：position 无锚卡在 pack/4c 出
+  固定注记行（「锚：弃权——…禁现算充锚」——此前只以锚行结构性缺失静默
+  呈现）；allocation 回退锚行注「（allocation）」来源（sim 股三价禁被读成
+  登记信号价位）；--stock 宇宙外股明确提示重派生（I-024，此前误报
+  「当日卡齐备（0 只）」）。
+  ⑤ **规约/指针同步包（I-026）**：09/03 红线句「RiskGuard 接入留待单独
+  评审」与 P3 已落地矛盾收口（LLM 判据 ②-8 已落地、机械布尔仍随 07 P2/RSI
+  合流）；01/PIPELINE 熔断簇 16→20 指针化（SSOT=fetch.py CLUSTERS）；
+  PIPELINE akshare 升版四件→六件、①段市场级共享枚举修正（fx 港股专属非
+  共享、margin 漏标）；09 补 allocation 回退锚登记/--stock/--calibrate
+  命令族/盘中决策携带显式句（07 P2 升级链同款）；ERP 250 日接管标注
+  「实现待满窗前落地」（daily_ready 死端旗标，ETA 2027-10）；09 分期表新增
+  中期锚覆盖增强再评审项（用户裁定：default 三价/250 日高低点充锚与
+  「禁现算」裁定的关系是评审核心）；07 P4 补事件流→outlook 经验面消费
+  指针与 watch 宇宙退休前瞻。
+- **部署修复（I-021，非代码）**：launchd 调度路径技能目录 clone 滞后
+  main 十提交（0.0.18）实证修复——已 pull 至最新并 --render 重渲 11-04
+  日表（市场级五块实数自 jsonl 卡恢复）、--calibrate 重渲 calibration.md
+  （qfq/重叠坑位披露补齐）；09 launchd 行新增「部署同步纪律」句。
+- 版本依据：机制补缺四件 + 文档同步族，零裁决链变更，按 0.0.x patch。
+
 ## [0.0.23] - 2026-11-04
 
 ### Fixed

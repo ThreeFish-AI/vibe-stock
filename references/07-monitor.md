@@ -191,6 +191,11 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
 
 - T1 轻量刷新：触发股重拉日 K → derive_technical 重算 → snapshot 通道拼新
   evidence → `prepare --evidence` 直入出新 context-pack（五段流水线零改动）。
+- **走势参考携带（0.0.24 显式句，用户裁定）**：T1 context-pack 与 P2 建议
+  卡**必含**走势参考节（[09](09-outlook.md) 消费面——prepare
+  恒现算出卡承载，零权重参考非信号）；坑位——snapshot 通道（fetch 快照
+  兜底形态）会让 prepare 跳过出卡，实施时须保出卡不随 snapshot 丢失
+  （盘中通知面仍只报事实+待收盘复核，决策支持按本路由进 P2 建议卡）。
 - T2 局部重诊（会话内）：重放该股全部过门 opinions + 按触发事实覆写
   risk.json（机械布尔预写，LLM 只补 rationale）；证据剧变才重产全意见 →
   adjudicate 原命令重裁决 → 建议卡（候选动作 + 与上一裁决差异 + T+1 可卖
@@ -247,7 +252,7 @@ whipsaw 路径判据用日 K high/low（tick 缺口不影响判定）。
 | P1 | watch.py（universe/once/loop/close/verify-hk）+ rules.py + launchd 模板 + selftest | ✅ 0.0.15 |
 | P2 | T1/T2 升级链、建议卡、意见保鲜门、record_fill --validate 常驻 | 预留 |
 | P3 | record_fill 写回、sim SSOT 实施、review_events、HS300 MA60 自动取数 | 预留 |
-| P4 | 机械降档判据进 scripts/（RSI-20261102-01 修法合流）、事件并入 ledger/postmortem、交易日历 | RSI 评审 |
+| P4 | 机械降档判据进 scripts/（RSI-20261102-01 修法合流）、事件并入 ledger/postmortem（事件流经验消费另见 [09](09-outlook.md) 经验面——盘中事件至今在 outlook 链零消费，P4 打通时评审并入路径）、交易日历、watch 宇宙退休机制（清仓股永留 watch 档无封顶——每观察票日付 1 链日 K+1 条 moneyflow） | RSI 评审 |
 
 ## 回归门禁
 

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- vibe-stock 信号后验收盘评估 LaunchAgent 模板（references/05-postmortem.md
+     「收盘后评估节奏」；I-022）。安装：
+     1) 替换三类占位：__UV_PATH__ = `command -v uv` 绝对路径（launchd 不继承
+        shell PATH）；__SK_PATH__ = 本仓 clone 绝对路径；__HOME__ = 家目录；
+     2) mkdir -p __HOME__/.vibe-stock/postmortem/logs（launchd 不建日志父目录）；
+     3) 复制到 ~/Library/LaunchAgents/ 后 launchctl bootstrap gui/$(id -u) <路径>。
+     语义：周一至五 18:05 单槽全量评估 pending 信号（signals.json →
+     evaluated，经验面/绩效因子的唯一数据源）；与 outlook 17:35 槽错峰
+     30 分钟——0.0.24 起该槽为 collect+自动校准双窗合计约 8–14 分钟、迟缓
+     日尾部可近 17:50，而 postmortem 取数不走 FetchLock（fetch_state.json
+     无锁读改写，重叠即互相覆盖熔断账本），时段分离是唯一防线、槽位按双窗
+     上界校核。取数预算=持有 pending 信号的股去重数×1 条日 K 链（到期判定
+     在取数后，position T+120 使符号滞留约 120 交易日；当前 69 pending≈21
+     符号），如实计入诊股熔断账本。一次性命令：跑完即退、无 KeepAlive
+     （失败不重拉——到期样本次日槽位补评，I-016 到期收盘门天然幂等）；
+     节假日误拉浪费 ≈pending 符号数条日 K 链（评估零动作）。
+     RunAtLoad=false：只靠日历槽不做投机拉起；注释内不写连续连字符（标准
+     XML 可解析）。使用纪律（I-005）：17:30–18:10 勿并发跑 report——
+     signals.json 读改写尚无文件锁，时段分离是现行防线。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+        "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.threefish.vibestock.postmortem</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__UV_PATH__</string>
+        <string>run</string>
+        <string>--no-project</string>
+        <string>--with</string>
+        <string>akshare==1.20.*</string>
+        <string>--with</string>
+        <string>efinance</string>
+        <string>--with</string>
+        <string>yfinance</string>
+        <string>__SK_PATH__/scripts/postmortem.py</string>
+    </array>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.vibe-stock/postmortem/logs/postmortem.err.log</string>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.vibe-stock/postmortem/logs/postmortem.out.log</string>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>18</integer>
+            <key>Minute</key>
+            <integer>5</integer>
+            <key>Weekday</key>
+            <integer>1</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>18</integer>
+            <key>Minute</key>
+            <integer>5</integer>
+            <key>Weekday</key>
+            <integer>2</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>18</integer>
+            <key>Minute</key>
+            <integer>5</integer>
+            <key>Weekday</key>
+            <integer>3</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>18</integer>
+            <key>Minute</key>
+            <integer>5</integer>
+            <key>Weekday</key>
+            <integer>4</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>18</integer>
+            <key>Minute</key>
+            <integer>5</integer>
+            <key>Weekday</key>
+            <integer>5</integer>
+        </dict>
+    </array>
+    <key>ThrottleInterval</key>
+    <integer>600</integer>
+</dict>
+</plist>

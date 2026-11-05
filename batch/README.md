@@ -17,8 +17,9 @@
 | wf_deepdive.mjs | C | 对抗核验 + 三 lens 独立评审 + 确定性合分（宿主 Workflow 脚本） |
 | portfolio.py | D | 手数贴合 + 三段建仓 + 三价纪律 + 一致性校验 |
 | render_index.py | — | 主报告 index.md 渲染（数字全部从 SSOT 派生，勿手改产物） |
-| outlook_daily.py | — | 在册股走势参考收盘批量（口径以 [09](../references/09-outlook.md) 为准：universe import watch、FetchLock 单窗逐股取数、收盘卡幂等 upsert、全集日表渲染；`--render` 零取数） |
+| outlook_daily.py | — | 在册股走势参考收盘批量（口径以 [09](../references/09-outlook.md) 为准：universe import watch、FetchLock 单窗逐股取数、收盘卡幂等 upsert、全集日表渲染；`--daily` 成功后自动接 `--calibrate`（`--no-calibrate` 跳过）；`--render` 零取数） |
 | outlook/com.threefish.vibestock.outlook.plist | — | 收盘批量 launchd 模板（周一至五 17:35 单槽；安装三步见模板注释；语义见 09 分期表 P2） |
+| postmortem/com.threefish.vibestock.postmortem.plist | — | 信号后验收盘评估 launchd 模板（周一至五 18:05 单槽；安装三步见模板注释；节奏与预算见 [05](../references/05-postmortem.md)「收盘后评估节奏」） |
 
 `wf_*.mjs` 是宿主工作流脚本形态（phase/agent/parallel/pipeline/log/args 全局，
 文件头注释写明参数化路径——`scan_root`/`skill_dir`（及 `codes`/`shortlist`）
