@@ -356,10 +356,13 @@ def calibrate(state_dir, force=False):
         if name.endswith(".jsonl"):
             cards.extend(ol.load_cards(state_dir, name[:-6]))
     samples = ol.calibration_samples(cards, bars_by_code)
-    # F-4：历史卡全集 vs latest_cards（10 日窗）——窗外的股（退册/断档>10日）
-    # 无 bars 可判且此前完全静默，其历史卡样本永久缺席须可观测
-    ghost = sorted({(str(c.get("market")), str(c.get("code"))) for c in cards}
-                   - set(bars_by_code))
+    # F-4：历史卡全集 vs latest_cards（10 日窗）差集——窗外的股（退册/
+    # 断档>10 日）从未尝试取数，其历史卡样本永久缺席须可观测；对照取
+    # latest 而非 bars_by_code（后者不含本轮取数失败股——失败者已有逐股
+    # warn，混入会把瞬时故障误报成退册/断档）；键两侧均 _norm 归一（港股
+    # 补 5 位，防 4 位码历史卡永差集）
+    ghost = sorted({(c.get("market"), _norm(c.get("market"), c.get("code", "")))
+                    for c in cards} - set(latest))
     for m, code in ghost:
         print("warn: %s %s 不在 latest_cards（10 日窗）——未拉日 K，该股历史"
               "卡校准样本缺席（退册/断档>10 日？）" % (m, code))

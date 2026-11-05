@@ -16,14 +16,16 @@
   盘中携带补显式句）：
   ① **postmortem 收盘评估槽（I-022，经验面数据链断点修复）**：新模板
   `batch/postmortem/com.threefish.vibestock.postmortem.plist`（周一至五
-  17:50，错峰 outlook 槽 15min）——signals 全库 105 条零 evaluated、69 条
+  18:05，错峰 outlook 槽 30min——0.0.24 起该槽为 collect+自动校准双窗约
+  8–14 分钟、postmortem 不走 FetchLock，时段分离按双窗上界校核）——
+  signals 全库 105 条零 evaluated、69 条
   pending 大量到期无人评估的空转形态实证（经验面 21/21 空桶根因）；05 新增
   「收盘后评估节奏」节与「两把尺分立」双向指针句。
   ② **--daily 自动接校准（I-022 后半）**：收盘批量成功后默认自动
   --calibrate（--no-calibrate 跳过；--stock 不触发）——校准台账不再依赖
   手动增厚，launchd 17:35 槽零改动生效；--calibrate 对「历史卡有、
   latest_cards 10 日窗无」的退册/断档股补 warn（此前静默缺样本）。
-  ③ **三道防线收编进第五件（I-023）**：墙钟门 close_gate_open（17,10 单源
+  ③ **三道防线收编进 scripts/outlook.py（I-023）**：墙钟门 close_gate_open（17,10 单源
   常量，编排层禁内联）、末根未完成过滤 final_bars、校准真实增量计数
   count_new_samples——此前住无 selftest 的 batch 编排层、回归无门禁可拦；
   outlook selftest 新增钉：墙钟门边界双态/末根过滤接线/增量计数幂等 0/

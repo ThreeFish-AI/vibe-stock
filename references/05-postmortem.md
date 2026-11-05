@@ -97,10 +97,14 @@
 
 - **收盘后评估节奏（0.0.24 · I-022）**（条件——评估无自动运行机制时经验面
   与绩效因子恒空：实测 69 条 pending 大量到期、evaluated 为零的空转形态；
-  做法——launchd 周一至五 17:50 单槽全量评估，模板
+  做法——launchd 周一至五 18:05 单槽全量评估，模板
   [batch/postmortem/com.threefish.vibestock.postmortem.plist](../batch/postmortem/com.threefish.vibestock.postmortem.plist)
-  （安装三步见模板注释）；错峰 outlook 17:35 槽 15 分钟（FetchLock 无重叠窗）；
-  预算≈当日到期股数条日 K 链、如实计入诊股熔断账本；到期收盘门（I-016）
+  （安装三步见模板注释）；错峰 outlook 17:35 槽 30 分钟——0.0.24 起该槽为
+  collect+自动校准双窗合计约 8–14 分钟，且 postmortem 取数不走 FetchLock
+  （fetch_state.json 无锁读改写，重叠即互相覆盖熔断账本），时段分离是唯一
+  防线、槽位按双窗上界校核；预算=持有 pending 信号的股去重数×1 条日 K 链
+  （到期判定在取数后，position T+120 使符号滞留约 120 交易日）、如实计入
+  诊股熔断账本；到期收盘门（I-016）
   天然幂等——失败次日槽位补评；坑位——17:30–18:10 勿并发跑 report
   （signals.json 读改写尚无文件锁，I-005 时段分离是现行防线）。
 - **两把尺分立（无条件全局规则）**：本文件的判定带（default 恒 ±2%、

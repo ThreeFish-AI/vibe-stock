@@ -266,10 +266,10 @@
 
 - **问题描述**：signals.json 105 条信号 evaluated=0（69 条 pending 最早 09-29、10-28 起大量到期），outlook 经验面 21/21 空桶、日表「经验」列全「—」、position 轨绩效因子全空——用户需求「从每天跟踪到的数据经验」的经验维度名存实亡；--calibrate 亦无调度锚（台账只靠手动增厚）。
 - **表因根因**：postmortem 是纯手动件（05 规约无节奏句、无 launchd 槽）；--daily 与 --calibrate 是互斥手动子命令，launchd 17:35 槽只跑 --daily。
-- **处理方式**：① 新模板 `batch/postmortem/com.threefish.vibestock.postmortem.plist`（周一至五 17:50，错峰 outlook 槽 15min，FetchLock 无重叠窗；到期收盘门 I-016 天然幂等、失败次日补评），05 新增「收盘后评估节奏」节（预算≈到期股数条日 K 链 + 17:30–18:10 勿并发跑 report 的 I-005 纪律句）；② --daily 成功后自动接 --calibrate（--no-calibrate 跳过、--stock 不触发、锁竞争不视为批量失败）；③ --calibrate 对「历史卡有、latest_cards 10 日窗无」的退册/断档股补 warn（此前静默缺样本）。
-- **后续防范**：evaluated 长期为零时先查 launchd 17:50 槽日志（postmortem/logs/）。
+- **处理方式**：① 新模板 `batch/postmortem/com.threefish.vibestock.postmortem.plist`（周一至五 18:05，错峰 outlook 槽 30min——0.0.24 起该槽为 collect+自动校准双窗约 8–14 分钟、postmortem 不走 FetchLock，时段分离按双窗上界校核；到期收盘门 I-016 天然幂等、失败次日补评），05 新增「收盘后评估节奏」节（预算=持有 pending 信号的股去重数×1 条日 K 链 + 17:30–18:10 勿并发跑 report 的 I-005 纪律句）；② --daily 成功后自动接 --calibrate（--no-calibrate 跳过、--stock 不触发、锁竞争不视为批量失败）；③ --calibrate 对「历史卡有、latest_cards 10 日窗无」的退册/断档股补 warn（此前静默缺样本）。
+- **后续防范**：evaluated 长期为零时先查 launchd 18:05 槽日志（postmortem/logs/）。
 - **同类问题影响**：盯盘事件流（monitor: 前缀）仍是经验面零消费数据源——07 P4 打通时评审并入路径（09 经验面句已指针化）。
-- **注意事项**：17:50 槽取数正经消耗诊股熔断额度；节假日误拉无害（无到期信号即零评估零取数）。
+- **注意事项**：18:05 槽取数正经消耗诊股熔断额度；节假日误拉浪费 ≈pending 符号数条日 K 链（评估零动作）。
 
 <a id="I-023"></a>
 
@@ -277,7 +277,7 @@
 
 - **问题描述**：I-014/I-015 修复的五项防线中三项——墙钟门 (17,10) 双处内联字面量、末根未完成过滤接线（bars[:-1]）、校准真实增量计数——全部住 batch/outlook_daily.py（AGENTS 明文不设 selftest 门禁），任何回归无门禁可拦；09 又把墙钟门定义为「无条件前置代码闸」，强制防线与门禁豁免层形成规约张力。
 - **表因根因**：修复时按「编排层写流程、纯函数件写计算」分工，但防线谓词被当作流程留在编排层。
-- **处理方式**：谓词收编进第五件硬门禁件 scripts/outlook.py：`CLOSE_GATE_HM` 单源常量 + `close_gate_open(now_dt)`、`final_bars(bars, market)`（包 fetch.session_phase）、`count_new_samples(rows, run_stamp)`；outlook_daily import 使用（禁内联）；outlook selftest 新增钉：墙钟门 17:10 边界双侧、末根过滤接线（monkeypatch session_phase 破坏性基准）、增量计数幂等重跑如实 0、触及概率对称（09 声称对称/单调、此前只有单调——屏障距离 b=max(r/p,p/r) 对数等距口径）。
+- **处理方式**：谓词收编进硬门禁件 scripts/outlook.py（六件之一）：`CLOSE_GATE_HM` 单源常量 + `close_gate_open(now_dt)`、`final_bars(bars, market)`（包 fetch.session_phase）、`count_new_samples(rows, run_stamp)`；outlook_daily import 使用（禁内联）；outlook selftest 新增钉：墙钟门 17:10 边界双侧、末根过滤接线（monkeypatch session_phase 破坏性基准）、增量计数幂等重跑如实 0、触及概率对称（09 声称对称/单调、此前只有单调——屏障距离 b=max(r/p,p/r) 对数等距口径）。
 - **后续防范**：新防线谓词一律住 scripts/ 纯函数件；编排层只留调用与文案。
 - **同类问题影响**：无（fetch.session_phase 谓词本身已有 diagnose 表驱动钉）。
 - **注意事项**：--force 越过墙钟门后末根过滤仍生效（根本防线语义保持）。

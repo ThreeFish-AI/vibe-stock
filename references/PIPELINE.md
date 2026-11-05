@@ -76,7 +76,7 @@ uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance \
 uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
   python $T/batch/outlook_daily.py --daily [--force]
 
-# 信号后验收盘评估（launchd 17:50 槽同款；evaluated 是经验面/绩效因子唯一
+# 信号后验收盘评估（launchd 18:05 槽同款；evaluated 是经验面/绩效因子唯一
 #     数据源——节奏与预算见 05「收盘后评估节奏」）
 uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \
   $T/scripts/postmortem.py
