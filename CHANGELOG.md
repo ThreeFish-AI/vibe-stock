@@ -8,7 +8,7 @@
 
 ### Added
 
-- **高抛低吸战术仓执行规约（references/11，纯文档，零代码）**：高抛低吸的信号早已有 swing_band（中线 regime 门控）与 box_oscillation（短线），缺的是执行层——用户在底仓之外开战术仓时事前写死什么。11 定义：①价区来源二选一并声明（system_band 取中线裁决节波段带快照、下沿只许上移不许下移；user_conviction 用固定价格且强制越权声明）；②底仓/战术仓分账（回补 ≤ 已高抛未回补，战术仓 ≤30% 沿 swing_band 卫星仓，成交 note 标 `sleeve=tactical` 并披露与 10 状态机/包络的耦合）；③高抛腿与回补纪律（回补价 ≤ 高抛价 ×（1−3×往返成本），不追高回补，不做网格）；④低吸五门（事件/归因/基本面/价区/确认，缺证据一律算不过，确认借 10 三段确认制）；⑤仓位算术（股数 = min(预算÷风险÷1.4, 预算÷(2×风险))，标防御性设定·estimated）与失效位、20 交易日时间止损；⑥越权声明（硬越权默认禁：风险角色 veto、A-1 解禁临近、五门不过；软越权须事前逐条声明）；⑦记分与证据强度如实；⑧预案文件契约（本机 `~/.vibe-stock/playbook/`、不入仓，公开仓零个人参数）与 Agent 读出约定（只陈述事实，不给档位、不改 verdict、不落 reports/monitor/signals）。附空白模板与合成示例。SKILL.md 判表/头部规约列表/description 触发语/version、PIPELINE/README/AGENTS 目录速查/knowledge-map 指针同步。
+- **高抛低吸战术仓执行规约（references/11，纯文档，零代码）**：高抛低吸的信号早已有 swing_band（中线 regime 门控）与 box_oscillation（短线），缺的是执行层——用户在底仓之外开战术仓时事前写死什么。11 定义：①价区来源二选一并声明（system_band 取中线裁决节波段带快照、下沿只许上移不许下移；user_conviction 用固定价格且强制越权声明）；②底仓/战术仓分账（回补 ≤ 已高抛未回补，战术仓 ≤30% 沿 swing_band 卫星仓，成交 note 标 `sleeve=tactical` 并披露与 10 状态机/包络的耦合）；③高抛腿与回补纪律（回补价 ≤ 高抛价 ×（1−3×往返成本），不追高回补，不做网格）；④低吸五门（事件/归因/基本面/价区/确认，缺证据一律算不过，确认借 10 三段确认制）；⑤仓位算术（股数 = 预算÷(2×风险)，2× 为跳空穿越口径，标防御性设定·estimated）与失效位、20 交易日时间止损；⑥越权声明（硬越权默认禁：风险角色 veto、A-1 解禁临近、五门不过；软越权须事前逐条声明）；⑦记分与证据强度如实；⑧预案文件契约（本机 `~/.vibe-stock/playbook/`、不入仓，公开仓零个人参数）与 Agent 读出约定（只陈述事实，不给档位、不改 verdict、不落 reports/monitor/signals）。附空白模板与合成示例。SKILL.md 判表/头部规约列表/description 触发语/version、PIPELINE/README/AGENTS 目录速查/knowledge-map 指针同步；04 portfolio.json 契约表 operations 补可选键 `note`（自由文本人工备注，仓内不消费，契约其余语义不变）。
 - 设计取舍：不新增策略 YAML、不造第二套价位 SSOT；不新增读取预案的代码（战术仓无系统消费方，读本机文件只增敏感面与门禁义务）；股数算术若干跑暴露错误再另开纯函数 + selftest。
 
 ### Changed
