@@ -54,6 +54,6 @@
 | 元素（operations） | `code` | 字符串 | 同 holdings 元素 code 形态（状态机按 zfill(5) 归一比对） |
 | 元素（operations） | `action` | 字符串 | `buy` / `sell`（状态机消费 `buy`；outlook 锚同读） |
 | 元素（operations） | `time` | 字符串 | ISO 8601 日期时间（到秒；取前 10 位为成交日期，如 `2026-11-04T14:00:00+08:00`） |
-| 元素（operations） | `market`/`price` | 可选 | outlook 锚只读不改；`qty` 仓内暂不消费（预留）。坑位：[07](07-monitor.md) sim-portfolio.json 的 `operations` 是**另一文件另一 schema**（`side`/`ts`/`lots` 命名），勿混写 |
+| 元素（operations） | `market`/`price` | 可选 | outlook 锚只读不改；`qty` 仓内暂不消费（预留）；`note` 为自由文本人工备注，仓内不消费（战术仓成交以 `sleeve=tactical` 起头，见 [11](11-tactical-swing.md)）。坑位：[07](07-monitor.md) sim-portfolio.json 的 `operations` 是**另一文件另一 schema**（`side`/`ts`/`lots` 命名），勿混写 |
 - **契约漂移可观测**（适用：report / postmortem 重建索引时加载 portfolio.json）：做法——文件不存在、合法空表静默；文件存在但损坏、顶层非对象、缺 `holdings` 或非列表、元素缺字符串 `code`/`market` 被跳过、`code`/`market` 不合报告目录形态（总览行匹配不到）、元素 `quantity`/`cost_price` 缺失或非有限数值（含超 float 上限整数字面量——float() 抛 OverflowError，单元格将标 —）时，打一行 `warn:`（只含键名、类型与条数，不回显持仓值），降级渲染不变，索引重建不中断。坑位：降级会把契约漂移伪装成「无持仓」或整列 —（I-006 即总览持仓列对全部持仓渲染 —、零告警），所以「文件存在却渲染不出持仓值」一律出声；告警只为可观测，不得据此改值或中断。
 - **改动合入前对真实文件实测**（适用：改动消费 portfolio.json 这类仓外维护、仓内无写入方的状态文件——loader、渲染或本契约）：做法——合入前须对真实文件做 schema 探查（只回显键名、类型与条数，不回显金额、数量等值），再经 loader 端到端重建一次索引核对持仓列；selftest Fixture 按本节契约构造，不按实现自设形状。坑位：Fixture 与 loader 出自同一假设会互证全绿，而真实文件全 —（I-006）；执行方够不到真实文件（隔离 clone、子代理）时由持有该文件的本机会话探查后附结果，不以合成 Fixture 代替；探查输出贴进 PR、Issue 或日志前确认不带值（红线：敏感信息零落盘）。
