@@ -1,83 +1,24 @@
 # 04 · 决策报告（模板与渲染口径）
 
-渲染实现：[scripts/diagnose.py](../scripts/diagnose.py) `render_report`
-（结构以实现为准，本文件讲规则）；落盘与索引：[scripts/archive.py](../scripts/archive.py)，
-布局见下文「落盘与跟踪」（本文件是布局规则唯一定义处）。
+渲染实现：[scripts/diagnose.py](../scripts/diagnose.py) `render_report`（结构以实现为准，本文件讲规则）；落盘与索引：[scripts/archive.py](../scripts/archive.py)，布局见下文「落盘与跟踪」（本文件是布局规则唯一定义处）。
 
 ## 结构（结论先行）
 
-1. **结论**：最终信号 + 置信 + 共识等级 + 可执行与否 + 一句理由摘要 +
-   完整裁决链（聚合初判 → RiskGuard 各步 → 置信帽）+ 分歧概览 + 意见分布。
-   理由摘要支撑终裁信号（RiskGuard 与置信帽之后的 final）。条件：结论句挂
-   理由时；做法：终裁≠初判且由 RiskGuard 改判 → 优先挂 risk.json.rationale 摘要
-   并注明「初判 X 经 RiskGuard 改判为 Y」；否则取与终裁同信号（其次同方向族）的
-   最高置信意见 rationale，置信帽压档（strong_*→buy/sell）时径取同方向族；都
-   没有则不挂（不硬凑）；坑位：按聚合初判选理由会在 RiskGuard 改判后挂出与终裁
-   反向的意见（sell 结论配 hold 理由）。
-2. **证据状态**：全部块状态/来源表（核心六块标权重、扩展块标 0 分）——
-   缺失可见落在产品面；forecast/unlock 有数据时附「近期事件」（披露日历/
-   解禁批次）；港股 fx 块 available 时另附「## 汇率（人民币敞口）」情报节
-   （HKD/CNY 当前/近 20 日/年内变动——汇率仅情报面，不进信号判定，见
-   [01 · 汇率仅情报面](01-evidence.md)）。
-3. **关键价位**：现价 / 20 日高低 / MA20 / 参考买点 / 止损 / 目标。三价与
-   [06 · 三价纪律](06-batch-scan.md) 同源：止损 = max(−5% 线, 0.99×20 日低)
-   **取紧**、参考买点 = max(lo20, 0.97×现价)、目标 = hi20，报告渲染与
-   register_signal 落账的 `key_levels={entry_ref, stop, target1}` 同一函数
-   取数（单一事实源）；现价缺失不落 `key_levels`（总览价位列标 —，向后
-   兼容不迁移）。盘中取数时现价注明「（盘中价）」，取数时段口径见
-   [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)。
-4. **目标可达性**（条件：`--cost` 触发 lens；lens abstained 或未给 --cost
-   时不出节、不硬凑）：参考价隐含 PE(TTM) 与 5 年分位（免汇率比值法，
-   estimated）、共识目标价位置/离散度/≥参考价家数、EPS 90 日修正方向、
-   12 个月波动触及概率（必须注明「波动可达≠基本面支持」）+ 三档结论与置信 +
-   「不进裁决聚合/置信帽/两轨后验（期限正交）」声明；数字 SSOT 在
-   lens.json，报告只渲染不重算。
-4b. **中线裁决**（条件：workdir 存在 `verdict.position.json`；做法：在目标
-   可达性节后渲染「## 中线裁决（profile=position · T+20/60/120）」——中线
-   终裁/置信/裁决链/分歧 + 波段带三键（`_mid_key_levels`：band_lo/band_hi/
-   trail_ref=MA60，带宽 g=max(2σ_d×√21, 3×往返成本)，与 position 信号
-   `key_levels` 同一函数取数）+ 三层下行门文字化 + 期限正交声明；无
-   position 文件不出节（单轨形态逐字节兼容）；坑位：波段带是纪律参考线
-   不是止损指令——报告不得把它写成离场价，三层下行门（箱体下沿−5% 总回撤/
-   regime 失效/基本面证伪走 risk.json）是唯一离场口径（[08](08-midterm.md)）。
-4c. **短/中期走势参考**（条件：workdir 存在 `outlook.json` 且卡片身份与
-   证据一致（零权重软校验——不符只跳节+warn，不 exit 2；分级依据：裁决
-   事实面身份闸门防串目录，信息面可观测即可）；做法：在中线裁决节后渲染
-   「## 短/中期走势参考（零权重 · 不进裁决）」——数学面（双轨 σ√h 预测带
-   +锚位触及概率）、情绪面、经验计数、日差连向、用户锚（实盘股脱敏投影），
-   数字 SSOT 在 outlook.json、报告只渲染不重算；band/beta/零权重三声明
-   齐全（预测带≠后验判定带两把尺）；坑位：不得把预测带写成止损/目标
-   指令——本节是参考不是建议（[09](09-outlook.md)）；abstained 不出节）。
-5. **风险与利好**：逐条挂反对意见与支持意见的 rationale（有据可查）。条件：
-   `report` 渲染（读 workdir 的 opinions.json 与 risk.json）；做法：风险栏=卖出族
-   意见 + 风险角色 risk.json.rationale（标注 veto/downgrade 触发态），利好栏=买入族
-   意见，逐条带 source 与 signal/置信，空栏如实写「（无登记）」；rationale 的 SSOT
-   是 opinions.json（verdict.valid_opinions 只存四键），按 source 接回且只挂过验票
-   门的意见（`partition` 同一判据）；坑位：按 source 集合朴素过滤会把同 source
-   表外写法意见的 rationale 混挂进来。
-6. **操作建议**：空仓者与持仓者分开、按最终信号给纪律性动作（不追高/止损位）；
-   持仓者分支五档——可加仓（轨道/手数上限/add_ref/确认与撤销条件，仅
-   [10](10-add-on.md) 加仓轨触发时）/ 持有（含「等回踩」变体）/ 持有观察 /
-   减仓 / 离场；持仓股另出「### 加仓评估（addon）」节（三道门逐项
-   green/red/skip 可溯源）。
-7. **检查清单**：核心证据齐备 / 无高严重度分歧 / 置信 ≥0.5 / 未偏离 MA20 过远
-   ——未通过项如实打叉，检查没过照样出报告，但结论停在保守档。
+1. **结论**：最终信号 + 置信 + 共识等级 + 可执行与否 + 一句理由摘要 + 完整裁决链（聚合初判 → RiskGuard 各步 → 置信帽）+ 分歧概览 + 意见分布。理由摘要支撑终裁信号（RiskGuard 与置信帽之后的 final）。条件：结论句挂理由时；做法：终裁≠初判且由 RiskGuard 改判 → 优先挂 risk.json.rationale 摘要并注明「初判 X 经 RiskGuard 改判为 Y」；否则取与终裁同信号（其次同方向族）的最高置信意见 rationale，置信帽压档（strong_*→buy/sell）时径取同方向族；都没有则不挂（不硬凑）；坑位：按聚合初判选理由会在 RiskGuard 改判后挂出与终裁反向的意见（sell 结论配 hold 理由）。
+2. **证据状态**：全部块状态/来源表（核心六块标权重、扩展块标 0 分）——缺失可见落在产品面；forecast/unlock 有数据时附「近期事件」（披露日历/解禁批次）；港股 fx 块 available 时另附「## 汇率（人民币敞口）」情报节（HKD/CNY 当前/近 20 日/年内变动——汇率仅情报面，不进信号判定，见 [01 · 汇率仅情报面](01-evidence.md)）。
+3. **关键价位**：现价 / 20 日高低 / MA20 / 参考买点 / 止损 / 目标。三价与 [06 · 三价纪律](06-batch-scan.md) 同源：止损 = max(−5% 线, 0.99×20 日低)**取紧**、参考买点 = max(lo20, 0.97×现价)、目标 = hi20，报告渲染与 register_signal 落账的 `key_levels={entry_ref, stop, target1}` 同一函数取数（单一事实源）；现价缺失不落 `key_levels`（总览价位列标 —，向后兼容不迁移）。盘中取数时现价注明「（盘中价）」，取数时段口径见 [01 · 盘中口径](01-evidence.md#盘中口径未完成-k-线)。
+4. **目标可达性**（条件：`--cost` 触发 lens；lens abstained 或未给 --cost 时不出节、不硬凑）：参考价隐含 PE(TTM) 与 5 年分位（免汇率比值法，estimated）、共识目标价位置/离散度/≥参考价家数、EPS 90 日修正方向、12 个月波动触及概率（必须注明「波动可达≠基本面支持」）+ 三档结论与置信 + 「不进裁决聚合/置信帽/两轨后验（期限正交）」声明；数字 SSOT 在 lens.json，报告只渲染不重算。4b. **中线裁决**（条件：workdir 存在 `verdict.position.json`；做法：在目标可达性节后渲染「## 中线裁决（profile=position · T+20/60/120）」——中线终裁/置信/裁决链/分歧 + 波段带三键（`_mid_key_levels`：band_lo/band_hi/trail_ref=MA60，带宽 g=max(2σ_d×√21, 3×往返成本)，与 position 信号 `key_levels` 同一函数取数）+ 三层下行门文字化 + 期限正交声明；无 position 文件不出节（单轨形态逐字节兼容）；坑位：波段带是纪律参考线不是止损指令——报告不得把它写成离场价，三层下行门（箱体下沿−5% 总回撤/regime 失效/基本面证伪走 risk.json）是唯一离场口径（[08](08-midterm.md)）。4c. **短/中期走势参考**（条件：workdir 存在 `outlook.json` 且卡片身份与证据一致（零权重软校验——不符只跳节+warn，不 exit 2；分级依据：裁决事实面身份闸门防串目录，信息面可观测即可）；做法：在中线裁决节后渲染「## 短/中期走势参考（零权重 · 不进裁决）」——数学面（双轨 σ√h 预测带+锚位触及概率）、情绪面、经验计数、日差连向、用户锚（实盘股脱敏投影），数字 SSOT 在 outlook.json、报告只渲染不重算；band/beta/零权重三声明齐全（预测带≠后验判定带两把尺）；坑位：不得把预测带写成止损/目标指令——本节是参考不是建议（[09](09-outlook.md)）；abstained 不出节）。
+5. **风险与利好**：逐条挂反对意见与支持意见的 rationale（有据可查）。条件：`report` 渲染（读 workdir 的 opinions.json 与 risk.json）；做法：风险栏=卖出族意见 + 风险角色 risk.json.rationale（标注 veto/downgrade 触发态），利好栏=买入族意见，逐条带 source 与 signal/置信，空栏如实写「（无登记）」；rationale 的 SSOT 是 opinions.json（verdict.valid_opinions 只存四键），按 source 接回且只挂过验票门的意见（`partition` 同一判据）；坑位：按 source 集合朴素过滤会把同 source 表外写法意见的 rationale 混挂进来。
+6. **操作建议**：空仓者与持仓者分开、按最终信号给纪律性动作（不追高/止损位）；持仓者分支五档——可加仓（轨道/手数上限/add_ref/确认与撤销条件，仅 [10](10-add-on.md) 加仓轨触发时）/ 持有（含「等回踩」变体）/ 持有观察 / 减仓 / 离场；持仓股另出「### 加仓评估（addon）」节（三道门逐项 green/red/skip 可溯源）。
+7. **检查清单**：核心证据齐备 / 无高严重度分歧 / 置信 ≥0.5 / 未偏离 MA20 过远——未通过项如实打叉，检查没过照样出报告，但结论停在保守档。
 8. **附**：各意见（含绩效因子加权，附 rationale 原文）与诊断记录。
-9. **免责段**（无条件全局规则：金融用途安全边界）——固定文案见 DISCLAIMER，
-   任何报告不得省略。
+9. **免责段**（无条件全局规则：金融用途安全边界）——固定文案见 DISCLAIMER，任何报告不得省略。
 
 ## 规约
 
-- 每个判断可溯源：结论句引用意见 rationale，意见引用证据块数值。RiskGuard
-  改判时结论句引用 risk.json.rationale（选取规则见上文结构第 1 条）。
-- 报告不复述哨兵原文；新闻只以事实转述进风险/利好。rationale 是 LLM 产出、
-  可入报告，入报告前剥哨兵标记、尖括号/方括号/反引号转全角并折成单行——
-  方括号全角化掐断 markdown 链接/图片注入；附录诊断行的 source/原始输出同为
-  LLM 产出，走同一通道处置（报告任何位置不复述哨兵原文）。证据块 note 同为
-  多行风险源：入报告表前折单行——多行会拆坏表格，也可能伪造单日文件的
-  版本/节头。
-- 可执行门槛：buy 族登记为可执行建议须置信 ≥0.5（CONFIDENCE_GATE），
-   否则降为 watch 并注明。
+- 每个判断可溯源：结论句引用意见 rationale，意见引用证据块数值。RiskGuard 改判时结论句引用 risk.json.rationale（选取规则见上文结构第 1 条）。
+- 报告不复述哨兵原文；新闻只以事实转述进风险/利好。rationale 是 LLM 产出、可入报告，入报告前剥哨兵标记、尖括号/方括号/反引号转全角并折成单行——方括号全角化掐断 markdown 链接/图片注入；附录诊断行的 source/原始输出同为 LLM 产出，走同一通道处置（报告任何位置不复述哨兵原文）。证据块 note 同为多行风险源：入报告表前折单行——多行会拆坏表格，也可能伪造单日文件的版本/节头。
+- 可执行门槛：buy 族登记为可执行建议须置信 ≥0.5（CONFIDENCE_GATE），否则降为 watch 并注明。
 
 ## 落盘与跟踪
 
@@ -91,64 +32,15 @@
 └── _legacy/                 migrate-reports 归档的旧平铺文件（不删）
 ```
 
-- **单日多版本**（适用：每次 `diagnose.py report`）：做法——追加进
-  `<code>.<market>/<date>.md`（date = 生成日墙钟，与版本时刻、信号 `created_at`
-  同取一次 now），版本头 `## vN · HH:MM:SS`、节头 `### `；标题与免责段全文各一次；
-  某节与上一个有内容版本逐字相同写 `同 vK。`（K = 该内容连续未变区间的首版，
-  中间变过即重新计），节缺失即本版无此节；迁移还原的丢失版正文为 `（报告已被覆盖，无法恢复）`。
-  坑位：定位某条信号的报告只认 `report_path` + `report_version`，不要从
-  `report_id`（日级分组键）拼路径；文件名日期是生成日、后验基准是 `signal.date`
-  （交易日），周末/盘前运行二者可不同。
-- **身份闸门**（适用：report 写盘前）：做法——证据身份（`stock_code`：港股统一
-  5 位）须与 `--stock` 归一后一致，代码须合规范形态，signals.json 须可解析，任一
-  不符 exit 2 且零写入。坑位：`.vs/` 残留上一只票的证据是最常见触发。
-- **时间线索引分轨**（0.0.16 起）：单股 index.md 拆两张表——短线表
-  （default 轨，T+1/3/5/10）恒在；中线表（position 轨，T+20/60/120）有
-  中线信号才出。总览表短线列（最新信号/诊断次数/pending/三价）只算
-  default 轨（中线信号不得顶替短线列），表尾恒增「中线信号→动作/中线
-  pending」两列（取组内最新 position 信号，无则 —）。三价列按轨取
-  key_levels：default=entry_ref/stop/target1、position=band_lo/band_hi/
-  trail_ref（键名不互覆，监控侧按 profile 过滤，见 [07](07-monitor.md)）。
-- **时间线索引**（适用：report / postmortem 之后）：做法——`index.md` 由
-  signals.json 整体重建（只覆盖 cn/hk），总览表列股票、股票名称、最新日期、
-  最新信号→动作、置信、诊断次数、pending、持仓数量与持仓成本（条件：
-  `~/.vibe-stock/portfolio.json` 存在且解析出非空持仓表才加——文件结构以下文
-  [portfolio.json 契约](#portfoliojson-契约)为准，加载时归一
-  `<code>.<market>` → {qty, cost}，合法空表
-  视同缺失（清仓收起两列）；成本按登记币种原样显示（HKD 不折算，人民币
-  敞口见报告汇率节））与参考买点 / 止损 / 目标1（恒在，取组内最新 signal 的
-  `key_levels`），单股表新→旧列版本、信号→动作、置信、登记价、状态与
-  T+1/3/5/10 涨跌及判定；内容未变不重写。持仓合并口径：portfolio.json 是
-  用户手维的持仓 SSOT——渲染时只读合并、永不写回、不复制进 signals.json
-  （索引是 signals.json 与 portfolio.json 两个 SSOT 的合并派生视图，清仓/
-  加仓后 signals 不留过期持仓）。坑位：索引是派生视图，手改会在下次重建时
-  丢失（要持仓/价位列就写 portfolio.json / 依赖注册落账，不手补列）；信号
-  与后验的事实源始终是 signals.json；portfolio.json 缺失/损坏/无可用持仓
-  整体跳过持仓两列，老信号无 `key_levels` 与脏持仓字段（非数值/非有限
-  quantity/cost_price，含 NaN/Infinity 与超 float 上限整数）一律标 — 降级，
-  索引重建不得中断
-  （文件存在但与契约不符时另打 `warn:` 行，见下文契约节）；
-  股票名称解析顺序：信号组内最新非空 `stock_name`
-  （登记时刻历史名）→ `~/.vibe-stock/names.json` 显示名缓存（report 取到
-  名称时写穿，存量信号经此显名）→ `—`（名称是行情面数据，A 股 qt 全量
-  快照 / 港股 qt 紧凑快照，取数失败如实缺省）。
-- **存量迁移**（适用：分级布局引入前（0.0.6 及以前）的平铺 `<code>-<date>.md`；须在升级后首次
-  report 之前执行，否则当日新报告会让旧平铺文件被判 conflict 需人工处理）：做法——
-  `diagnose.py migrate-reports` 默认 dry-run；`--apply` 依次写单日文件 → CAS 校验后
-  备份 `signals.json.bak-<ts>` 并改写 `report_path`/`report_version`（丢失版加
-  `report_lost: true`）→ 原文件移入 `_legacy/` → 重建索引；按 `report_id` 认领信号，
-  与文件 mtime 同刻（≤2s）的最后一条为内容版。坑位：迁移期间勿并发跑 report /
-  postmortem（signals.json 无锁，CAS 只能发现不能合并）；目标已存在且内容不同、
-  或平铺文件无可解析 `## ` 节头（非本工具产物/截断）均记 conflict 原样跳过，
-  需人工处理；mtime 漂移（备份恢复/编辑器重存）时回退按最后
-  运行归属内容版并列 anomaly，缺可用 created_at 的信号跳过认领不改写；回退按
-  .bak 逐 signal_id 恢复，勿整文件覆盖。
+- **单日多版本**（适用：每次 `diagnose.py report`）：做法——追加进 `<code>.<market>/<date>.md`（date = 生成日墙钟，与版本时刻、信号 `created_at` 同取一次 now），版本头 `## vN · HH:MM:SS`、节头 `### `；标题与免责段全文各一次；某节与上一个有内容版本逐字相同写 `同 vK。`（K = 该内容连续未变区间的首版，中间变过即重新计），节缺失即本版无此节；迁移还原的丢失版正文为 `（报告已被覆盖，无法恢复）`。坑位：定位某条信号的报告只认 `report_path` + `report_version`，不要从 `report_id`（日级分组键）拼路径；文件名日期是生成日、后验基准是 `signal.date`（交易日），周末/盘前运行二者可不同。
+- **身份闸门**（适用：report 写盘前）：做法——证据身份（`stock_code`：港股统一 5 位）须与 `--stock` 归一后一致，代码须合规范形态，signals.json 须可解析，任一不符 exit 2 且零写入。坑位：`.vs/` 残留上一只票的证据是最常见触发。
+- **时间线索引分轨**（0.0.16 起）：单股 index.md 拆两张表——短线表（default 轨，T+1/3/5/10）恒在；中线表（position 轨，T+20/60/120）有中线信号才出。总览表短线列（最新信号/诊断次数/pending/三价）只算 default 轨（中线信号不得顶替短线列），表尾恒增「中线信号→动作/中线 pending」两列（取组内最新 position 信号，无则 —）。三价列按轨取 key_levels：default=entry_ref/stop/target1、position=band_lo/band_hi/trail_ref（键名不互覆，监控侧按 profile 过滤，见 [07](07-monitor.md)）。
+- **时间线索引**（适用：report / postmortem 之后）：做法——`index.md` 由 signals.json 整体重建（只覆盖 cn/hk），总览表列股票、股票名称、最新日期、最新信号→动作、置信、诊断次数、pending、持仓数量与持仓成本（条件：`~/.vibe-stock/portfolio.json` 存在且解析出非空持仓表才加——文件结构以下文 [portfolio.json 契约](#portfoliojson-契约)为准，加载时归一 `<code>.<market>` → {qty, cost}，合法空表视同缺失（清仓收起两列）；成本按登记币种原样显示（HKD 不折算，人民币敞口见报告汇率节））与参考买点 / 止损 / 目标1（恒在，取组内最新 signal 的 `key_levels`），单股表新→旧列版本、信号→动作、置信、登记价、状态与 T+1/3/5/10 涨跌及判定；内容未变不重写。持仓合并口径：portfolio.json 是用户手维的持仓 SSOT——渲染时只读合并、永不写回、不复制进 signals.json（索引是 signals.json 与 portfolio.json 两个 SSOT 的合并派生视图，清仓/加仓后 signals 不留过期持仓）。坑位：索引是派生视图，手改会在下次重建时丢失（要持仓/价位列就写 portfolio.json / 依赖注册落账，不手补列）；信号与后验的事实源始终是 signals.json；portfolio.json 缺失/损坏/无可用持仓整体跳过持仓两列，老信号无 `key_levels` 与脏持仓字段（非数值/非有限 quantity/cost_price，含 NaN/Infinity 与超 float 上限整数）一律标 — 降级，索引重建不得中断（文件存在但与契约不符时另打 `warn:` 行，见下文契约节）；股票名称解析顺序：信号组内最新非空 `stock_name`（登记时刻历史名）→ `~/.vibe-stock/names.json` 显示名缓存（report 取到名称时写穿，存量信号经此显名）→ `—`（名称是行情面数据，A 股 qt 全量快照 / 港股 qt 紧凑快照，取数失败如实缺省）。
+- **存量迁移**（适用：分级布局引入前（0.0.6 及以前）的平铺 `<code>-<date>.md`；须在升级后首次 report 之前执行，否则当日新报告会让旧平铺文件被判 conflict 需人工处理）：做法——`diagnose.py migrate-reports` 默认 dry-run；`--apply` 依次写单日文件 → CAS 校验后备份 `signals.json.bak-<ts>` 并改写 `report_path`/`report_version`（丢失版加 `report_lost: true`）→ 原文件移入 `_legacy/` → 重建索引；按 `report_id` 认领信号，与文件 mtime 同刻（≤2s）的最后一条为内容版。坑位：迁移期间勿并发跑 report / postmortem（signals.json 无锁，CAS 只能发现不能合并）；目标已存在且内容不同、或平铺文件无可解析 `## ` 节头（非本工具产物/截断）均记 conflict 原样跳过，需人工处理；mtime 漂移（备份恢复/编辑器重存）时回退按最后运行归属内容版并列 anomaly，缺可用 created_at 的信号跳过认领不改写；回退按 .bak 逐 signal_id 恢复，勿整文件覆盖。
 
 ### portfolio.json 契约
 
-`~/.vibe-stock/portfolio.json` 由仓外登记流程手维，仓内没有写入方。本节是它的
-文件契约唯一定义处：[archive.py](../scripts/archive.py) `load_portfolio`、selftest
-Fixture 与 [I-006](../docs/.agents/issue.md#I-006) 以本节为准，不另立字段表。
+`~/.vibe-stock/portfolio.json` 由仓外登记流程手维，仓内没有写入方。本节是它的文件契约唯一定义处：[archive.py](../scripts/archive.py) `load_portfolio`、selftest Fixture 与 [I-006](../docs/.agents/issue.md#I-006) 以本节为准，不另立字段表。
 
 | 位置 | 键 | 类型 | 语义 |
 | :--- | :--- | :--- | :--- |
@@ -163,20 +55,5 @@ Fixture 与 [I-006](../docs/.agents/issue.md#I-006) 以本节为准，不另立�
 | 元素（operations） | `action` | 字符串 | `buy` / `sell`（状态机消费 `buy`；outlook 锚同读） |
 | 元素（operations） | `time` | 字符串 | ISO 8601 日期时间（到秒；取前 10 位为成交日期，如 `2026-11-04T14:00:00+08:00`） |
 | 元素（operations） | `market`/`price` | 可选 | outlook 锚只读不改；`qty` 仓内暂不消费（预留）。坑位：[07](07-monitor.md) sim-portfolio.json 的 `operations` 是**另一文件另一 schema**（`side`/`ts`/`lots` 命名），勿混写 |
-- **契约漂移可观测**（适用：report / postmortem 重建索引时加载 portfolio.json）：
-  做法——文件不存在、合法空表静默；文件存在但损坏、顶层非对象、缺 `holdings`
-  或非列表、元素缺字符串 `code`/`market` 被跳过、`code`/`market` 不合报告目录
-  形态（总览行匹配不到）、元素 `quantity`/`cost_price` 缺失或非有限数值
-  （含超 float 上限整数字面量——float() 抛 OverflowError，单元格将标 —）
-  时，打一行 `warn:`（只含键名、类型与条数，
-  不回显持仓值），降级渲染不变，索引重建不中断。坑位：降级会把契约漂移伪装成
-  「无持仓」或整列 —（I-006 即总览持仓列对全部持仓渲染 —、零告警），所以
-  「文件存在却渲染不出持仓值」一律出声；告警只为可观测，不得据此改值或中断。
-- **改动合入前对真实文件实测**（适用：改动消费 portfolio.json 这类仓外维护、
-  仓内无写入方的状态文件——loader、渲染或本契约）：做法——合入前须对真实文件做
-  schema 探查（只回显键名、类型与条数，不回显金额、数量等值），再经 loader
-  端到端重建一次索引核对持仓列；selftest Fixture 按本节契约构造，不按实现自设
-  形状。坑位：Fixture 与 loader 出自同一假设会互证全绿，而真实文件全 —（I-006）；
-  执行方够不到真实文件（隔离 clone、子代理）时由持有该文件的本机会话探查后附结果，
-  不以合成 Fixture 代替；探查输出贴进 PR、Issue 或日志前确认不带值（红线：敏感
-  信息零落盘）。
+- **契约漂移可观测**（适用：report / postmortem 重建索引时加载 portfolio.json）：做法——文件不存在、合法空表静默；文件存在但损坏、顶层非对象、缺 `holdings` 或非列表、元素缺字符串 `code`/`market` 被跳过、`code`/`market` 不合报告目录形态（总览行匹配不到）、元素 `quantity`/`cost_price` 缺失或非有限数值（含超 float 上限整数字面量——float() 抛 OverflowError，单元格将标 —）时，打一行 `warn:`（只含键名、类型与条数，不回显持仓值），降级渲染不变，索引重建不中断。坑位：降级会把契约漂移伪装成「无持仓」或整列 —（I-006 即总览持仓列对全部持仓渲染 —、零告警），所以「文件存在却渲染不出持仓值」一律出声；告警只为可观测，不得据此改值或中断。
+- **改动合入前对真实文件实测**（适用：改动消费 portfolio.json 这类仓外维护、仓内无写入方的状态文件——loader、渲染或本契约）：做法——合入前须对真实文件做 schema 探查（只回显键名、类型与条数，不回显金额、数量等值），再经 loader 端到端重建一次索引核对持仓列；selftest Fixture 按本节契约构造，不按实现自设形状。坑位：Fixture 与 loader 出自同一假设会互证全绿，而真实文件全 —（I-006）；执行方够不到真实文件（隔离 clone、子代理）时由持有该文件的本机会话探查后附结果，不以合成 Fixture 代替；探查输出贴进 PR、Issue 或日志前确认不带值（红线：敏感信息零落盘）。
