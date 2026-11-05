@@ -3,7 +3,7 @@
 定位：五段流水线（[01](01-evidence.md)–[05](05-postmortem.md)）与批量编排
 （[06](06-batch-scan.md)）之上的**监控编排层**——盘中价格面轮询、确定性触发
 规则、本地事实告警、收盘复核；不触碰单股裁决链。参考实现在
-[batch/monitor/](../batch/monitor/)（口径以本文件为准）。版本要求 ≥0.0.15。
+[batch/monitor/](../batch/monitor/)（口径以本文件为准）。版本要求 ≥0.0.25。
 
 ## 定位与边界（无条件全局规则：监控层只提示不执行）
 
@@ -27,17 +27,22 @@
   「最新」= 目录名日期最大且 rows 非空）∪ 信号观察票（signals.json 有最新
   信号的 codes）。kind 标注 real / sim / watch，排序实盘优先。
 - **脱敏（无条件全局规则：敏感信息零落盘红线）**：`monitor/universe.json` 只投影阈值与派生量
-  （stop/target1/entry_ref/limit_pct），成本与数量**绝不落盘**——运行期现算
-  现用；台账只落 `high_since_entry` 与距线百分比（P2 trailing）。selftest
+  （stop/target1/entry_ref/limit_pct + 波段带三键 band_lo/band_hi/trail_ref +
+  信号档位投影 signal_action/pos_signal_action），成本与数量**绝不落盘**——
+  运行期现算现用（`annotate_runtime` 在宇宙落盘之后的内存态注入 `_cost/_qty/_ma20`，
+  磁盘产物零污染）；台账与 state 只落 `high_since_entry`、armed 布尔与距线百分比
+  （P2 trailing）——**成本、可反推成本的派生量（武装线值/距成本涨幅）、数量、
+  金额一律不落任何 monitor/ 产物**（权重提示只落百分比）。selftest
   fixture 一律合成标的与虚构数值，并带「fixture 与真实 portfolio.json 零重合」
   负断言（坑位：脱敏断言只查产物不查输入时，真实持仓会经测试数据入公开仓）。
 - 价位锚 SSOT：优先 signals.json 组内最新 `key_levels`；模拟股无信号时回退
   allocation 三价常量并标 `levels_source`；两者皆缺 → 该股降级为仅 ±%/触板
   监控并显式告警（不静默失效）。
-- 价位锚分轨（0.0.16 起）：锚只取 **default 轨**信号的 key_levels
-  （`latest_signals` 按 profile 过滤）——position 轨的波段带三键
-  （band_lo/band_hi/trail_ref）语义不同，混入会覆盖短线止损/目标锚；
-  波段带锚的带内状态规则见下「升级链」P2 补充。
+- 价位锚分轨（0.0.16 起；0.0.25 波段带接入）：default 三价锚只取 **default 轨**
+  信号的 key_levels（`latest_signals` 按 profile 过滤）；position 轨的波段带三键
+  （band_lo/band_hi/trail_ref）语义不同，**以独立行键并行投影**（band_levels_source
+  标注，无 position 信号整组缺省不判、禁现算充锚）——不塞 key_levels 字段，
+  与短线止损/目标锚不互覆；带内状态规则见「升级链」波段带节（0.0.25 已实施）。
 - 触板限幅（已知简化）：创业/科创 20%、北交 30%、主板 10%、主板 ST 减半；
   创业/科创 ST 不减半。涨停价精确计算有四舍五入坑，判定一律用近触板
   （限幅 − 0.3pp）。
@@ -74,14 +79,19 @@
   增量 ≤10 次/股），不全局提频。
 - **熔断隔离（无条件全局规则：盯盘不耗诊股额度）**：轮询失败只计本地退避
   （180→540→600 封顶，跨日归零），不写共享 `fetch_state.json` 熔断账本；仅
-  `--close`/`--verify-hk` 拉日 K 时经全局锁 `fetch_state.lock` 写账本。两把锁
+  `--close`/`--verify-hk`/当日 technical 预热（0.0.25 起，宇宙日 K 拉取 ≈
+  real+sim 票数/日）拉日 K 时经全局锁 `fetch_state.lock` 写账本（预热锁竞争
+  30s 让路不硬等且**让路不计次**（锁竞争消耗重试会 ~10min 烧穿全日判据），
+  重试计数在 state.tech、耗尽出一次性 data_stale 事件）。
+  坑位：em 簇冷却时预热全 skip → data_stale 判据禁用是设计内常态，不重试
+  打爆。两把锁
   均为 flock 咨询锁：持有进程退出即由内核释放，不支持抢占存活持有者，取数锁
   竞争 120s 超时即挂起并告警（不静默跳过）；watch 单实例锁
   `monitor/watch.lock` 防 launchd 双开。坑位：全诊 prepare 不识别全局锁，
   「盯盘期间不跑全诊」仍是使用纪律（I-005 教训），P4 RSI 评审决定是否统一
   锁入口。
 
-## 触发规则（P1 已实施；确定性纯函数，离线可测）
+## 触发规则（P1 已实施；0.0.25 增机械判据族；确定性纯函数，离线可测）
 
 | 规则 | 条件 → 动作 | 口径依据 |
 | --- | --- | --- |
@@ -96,6 +106,10 @@
 | frozen / resumed / gap_move | 价量连续 5 轮不变 → 挂起该票；复牌差异 ≥3% 提醒；当日再冻结只留痕不通知 | 停牌检测；午休冻结豁免且轮次清零（cn 11:30–13:00、hk 12:00–13:00） |
 | market_halted / market_resumed | 当轮全组快照最大日期 ≠ 今日 → 该市场停轮；出现今日时间戳即解除 | 休市工作日静态快照防线（单票停牌的陈旧时间戳交给冻结检测，不误杀全市场） |
 | hk_delayed / source_dropped / storm_digest | 见数据面延迟口径 / 缺行口径 / 风暴闸 | 如实标注 |
+| ma20_break（0.0.25） | price < ma20×0.98 首报（episode：回线复位再破再报；mech_risk downgrade=medium）；**前置门**：当日 technical 预热新鲜（末根 data_date==今日），缺省整族禁用 | 07 P2 预钉；盘中根 ma20 为 estimated 口径，收盘以完整根终判（勿复用缓存值——两把尺） |
+| trailing_armed / trailing_exit（0.0.25） | high_since_entry ≥ 成本×1.15 → 武装（oneshot）；先前已武装态下 price < ma20 → 退出（当日一次，day_flag） | 06 三价纪律「+15% 后改 trailing」；armed/high 是跨日持续态（state 顶层 trailing 键，日期归零会隔日漏报）；退出只认先前武装态（武装当轮在线下不算新破）；facts 禁落成本派生量 |
+| band_lo_touch / band_hi_touch / band_trail_break（0.0.25） | price ≤ band_lo / ≥ band_hi（day_flag 电平：回落复位再报）；收盘 close < trail_ref 收盘直判（台账 notify=False + 日报行） | 07 P2 波段带预钉（0.0.16 规约先行）；锚取 position 轨 key_levels 独立行键投影；纪律参考线非止损指令（08 三层下行门是唯一离场口径） |
+| data_stale（0.0.25，watch 级） | technical 预热重试耗尽（末根非当日/源熔断）→ 一次性/日运维事件 | P2 前置门显式化：受影响票 MA20/跟踪止损判据当日禁用（不虚构判据），收盘复核以完整根重算 |
 
 - **抑制链（全部留痕 suppress_reason）**：同股同规则 30min 冷却 → 单股日
   通知上限（默认 6）→ 组合风暴闸（10min 窗口 ≥8 条 → 压制，窗口滚动后补一条
@@ -104,10 +118,15 @@
   最易触发、止损最密集之时，风险事实不得被信息类事件挤掉）。事件台账
   append-only 记全量（含被压制事件），通知只是投递面。
 - **通知口径（无条件全局规则：不构成投资建议红线，通知面不承载指令）**：
-  只报事实（股票/事件/价位/百分比/距离），零成本绝对值、零指令性建议（「减
-  仓」「离场」等指令词一律进 P2 建议卡并带免责尾注）；全部通知（含运维类：
-  锁竞争、进程异常、源缺行）尾注统一「待收盘复核·非投资建议」，由 notify()
-  单点追加。
+  只报事实（股票/事件/价位/百分比/距离）+ 事件级「××复核」短语（用户
+  2026-11-05 裁定，修订 0.0.15「零短语」与 0.0.24「只报事实」两句）——条件：
+  仅 `_REVIEW_HINT` 规约表登记的 rule 可带（≤6 字、措辞限定「复核」，沿
+  波段带「低吸/高抛复核」预钉先例）；做法：短语由事件 `review` 字段承载
+  （rules `_emit` 单点注入、随台账落全量含被压制行）、fmt_facts 尾拼，
+  运维类规则零短语；坑位：指令词（减仓/离场/加仓等）仍一律禁入通知面——
+  进 P2 建议卡并带免责尾注，零成本绝对值不变。全部通知（含运维类：锁竞
+  争、进程异常、源缺行、收盘复核完成）尾注统一「待收盘复核·非投资建议」，
+  由 notify() 单点追加。
 
 ## 收盘复核（--close）
 
@@ -115,16 +134,31 @@
   与 `--loop` 同一把时点门，未到点拒跑（坑位：盘中拉到的日 K 末根是盘中价，
   终判与源抽检都会错判且 close_done 会固化错误结论——2026-11-02 15:43 手动
   实测误报源偏差）。
-- 事件股 + 全部在盯港股重拉日 K（fetch_daily_bars 整链复用）→ 终判：止损确认（close<stop）/
+- 事件股 + 全部在盯港股 + 波段带锚票 + 有成本票（trailing high 收盘归并——
+  data_stale 日盘中判据禁用时当日 high 只能收盘补；≈持仓数请求，与既有量级
+  同阶）重拉日 K（fetch_daily_bars 整链复用）→ 终判：止损确认（close<stop）/
   whipsaw 坐实（low<stop≤close）/撤回；目标1 站上/回落；T2 触价坐实。末根
   日期 ≠ 今日 → 该股「挂起次日补判」（不拿昨日根错判）。
 - `monitor/day-summary/<date>.md` 是派生视图（events/ticks 台账是事实源），
   幂等重渲（当日无事件也出，覆盖区间可审计），含盯盘覆盖区间（首末 tick +
-  缺口：相邻 tick 间隔 >2×interval 且不在午休窗）、次日盯盘重点（未处理机械
+  缺口：相邻 tick 间隔 >2×interval 且不在午休窗）、**操作复核节**（0.0.25：
+  当日价位类事件按股归并 × 既有纪律映射的确定性投影——06 三价/持有期纪律、
+  波段带纪律参考线注记、04 持仓者五档投影（signals 最新 action 机械映射
+  `_TIER_TEXT`，只投影不重裁决、以报告原文为准）、权重分桶提示（A/港各以
+  本桶**实盘**市值作分母——限 kind=real：06 漂移锚是实盘组合纪律，sim 推演
+  盘混入会稀释实盘权重且无操作意义、单仓 >16% → 「次日减至 ≤14%」06 漂移锚，单票桶分母
+  无分散意义跳过）；纯函数离线可测，零 LLM）、次日盯盘重点（未处理机械
   降档事件）、「走势参考（上一张收盘卡 · <date>）」附件节（09 P2：由
   close_pass 自身消费 outlook jsonl 重算，当日卡 17:35 批量才出、收盘复核
   只见 <today 卡）、固定免责尾注。`close_done` 按日归零（跨日继承会让次日
   起收盘复核静默跳过）。
+- **收盘直判与跟踪态更新（0.0.25）**：position 轨票收盘 close < trail_ref →
+  `band_trail_break` 台账留痕（notify=False）+ 操作复核行（收盘批量的通知面
+  是运维条「收盘复核完成：终判 N 只 · 操作复核与全文见 day-summary/<date>.md」，
+  不逐票打扰）；band_trail_break 事件经复核覆盖集（PRICE_RULES 外补
+  trailing_armed/band_trail_break——与终判集分立，勿混扩）进操作复核行；
+  trailing 跟踪态以当日完整根 high 归并更新（自部署日起累积，不回溯建仓前
+  历史，如实口径）。
 - 港股源每日抽检随 --close 执行（见数据面）。锁竞争失败 → 显式告警挂起
   重跑，不静默跳过。
 
@@ -179,10 +213,15 @@
 ```text
 universe.json            盯盘宇宙（当日派生，脱敏；跨日自动重派生）
 state.json               运行时状态（rules 去抖/冷却/风暴闸 + 源退避 + hk_source，
-                         日期变更整体归零；原子写）
+                         rules 态日期变更整体归零；trailing 跟踪态（armed/high）
+                         与 hk_source 跨日保留——armed 是持仓持续态，日归零会
+                         隔日漏报 trailing_exit；tech 预热计数同日继承；原子写）
 ticks/<date>.jsonl       逐轮快照台账（行情时刻 + 本地时刻双时间戳）
-events/<date>.jsonl      事件台账（append-only，含被压制事件与原因）
-day-summary/<date>.md    收盘日报（派生视图，幂等重渲）
+events/<date>.jsonl      事件台账（append-only，含被压制事件与原因；0.0.25 起
+                         价位类事件带 review 复核短语字段）
+day-summary/<date>.md    收盘日报（派生视图，幂等重渲；含操作复核节）
+technical-cache.json     当日 technical 预热缓存（ma20/data_date/state，全派生
+                         量脱敏；P2 机械判据前置门数据通道）
 logs/                    launchd stdout/stderr
 watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
 ```
@@ -195,7 +234,8 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
   卡**必含**走势参考节（[09](09-outlook.md) 消费面——prepare
   恒现算出卡承载，零权重参考非信号）；坑位——snapshot 通道（fetch 快照
   兜底形态）会让 prepare 跳过出卡，实施时须保出卡不随 snapshot 丢失
-  （盘中通知面仍只报事实+待收盘复核，决策支持按本路由进 P2 建议卡）。
+  （盘中通知面报事实+事件级「××复核」短语（2026-11-05 裁定修订），决策支持
+  仍按本路由进 P2 建议卡）。
 - T2 局部重诊（会话内）：重放该股全部过门 opinions + 按触发事实覆写
   risk.json（机械布尔预写，LLM 只补 rationale）；证据剧变才重产全意见 →
   adjudicate 原命令重裁决 → 建议卡（候选动作 + 与上一裁决差异 + T+1 可卖
@@ -212,11 +252,14 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
   ≤5 票、实盘优先、超额降级 T0+收盘终判留痕。
 - 机械降档判据单权威：代码判据（RSI PR）合入当版，本文件覆写表即改指针。
 - P2 规则预钉（前置门：缓存 technical 数据日 == 今日，否则当日禁用 + data_stale
-  告警）：ma20_break（price < ma20×0.98 → 注入 downgrade=medium）、trailing
-  （high_since_entry ≥ 成本×1.15 武装、武装后破 ma20 → trailing_exit 收盘终判）、
-  HS300/HSI 收盘破 MA60 → 全组合降档评估提示（指数链已就绪：0.0.19 index 块
-  出 HS300/HSI 快照与 MA60，[01](01-evidence.md)——实施仍随 P2/P3 期别）。
-- P2 波段带带内状态（0.0.16 规约先行，实施随 P2）：position 轨信号
+  告警）——**ma20_break 与 trailing 已于 0.0.25 实施**（前置门数据通道=当日
+  technical 预热缓存，见「熔断隔离」句；trailing 武装线成本运行期现算：
+  real=portfolio cost_price、sim=allocation 配置日价（cost≡lots×100×price，
+  P3 sim-portfolio.json 落地后切换口径））；HS300/HSI 收盘破 MA60 → 全组合
+  降档评估提示仍预留（指数链已就绪：0.0.19 index 块出 HS300/HSI 快照与
+  MA60，[01](01-evidence.md)；实施形态钉死：--close 经 fetch_index 现取
+  （2–4 请求）、as_of≠今日（盘后 1h 内末根常为 T-1）如实标注不判定）。
+- P2 波段带带内状态（0.0.16 规约先行，**0.0.25 已实施**）：position 轨信号
   `key_levels` 的 band_lo/band_hi/trail_ref 三键作监控锚——band_lo 触发
   「低吸复核」提示、band_hi 触发「高抛复核」提示、收盘破 trail_ref 提示
   「波段结束复核」；只发本地事实告警（尾注免责与既有事件同），不执行、
@@ -225,6 +268,28 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
   「次日减至 ≤14%」提示；做法——A 股桶（CNY）与港股桶（HKD）各自以本桶市值为
   分母算 16% 线，不做 HKD/CNY 折算，fx 不进判定（SKILL 红线 4）；坑位——跨币种
   合并算权重会把汇率带进判定；16%/14% 持有期漂移锚与 06 建仓带 14.5% 是两把尺。
+  （0.0.25 已实施：限实盘持仓分桶；trailing 武装态暂无 disarm/清仓复位机制
+  ——armed 终身为真、清仓票条目残留 state，复位语义随 0.0.26+ 评审。）
+  （0.0.25 已实施：收盘操作复核节内落地，单票桶分母无分散意义跳过。）
+- **事件升级三级语义表（0.0.25 规约钉死；T1/T2 实施随 0.0.26+ PR）**：
+  | 级 | 语义 | 形态 | 状态 |
+  | --- | --- | --- | --- |
+  | T0 | 事实事件+复核短语（价位/百分比/距离，机械判据族含 mech_risk 降档事实） | 台账 `level` 字段现恒 "T0"，launchd 无人值守可跑 | ✅ P1/0.0.25 |
+  | T1 | 轻量刷新：触发股重拉日 K → derive_technical 重算 → snapshot 通道拼新 evidence → `prepare --evidence` 直入出新 context-pack（五段流水线零改动） | 会话消费输入（pack 非建议） | 预留 |
+  | T2 | 会话内局部重诊：重放过门 opinions + 按触发事实覆写 risk.json（机械布尔预写、LLM 只补 rationale）→ adjudicate 原命令重裁决 → 建议卡 | 会话在场（手动触发先行；exit 2 自动接管后置） | 预留 |
+- **P2 建议卡产物契约（0.0.25 规约钉死，实施随 0.0.26+）**：schema
+  `monitor-advice/1`，落位 `monitor/advice/<date>/<code>.md`；必含四要素
+  （候选动作（04 五档分类学措辞）+ 与上一裁决差异 + T+1 可卖份额 + 走势参考节
+  （0.0.24 必含句））+ 免责尾注；**脱敏边界（无条件规则：monitor/ 落盘产物
+  零成本/零数量/零可反推派生量）**——T+1 可卖份额原值、距成本涨幅、武装线值
+  等只在会话呈现态给值或走 04 全诊报告通道，落盘产物至多落百分比与档位词；
+  意见保鲜门（下条）与只降不升三重锚（上条）是其硬前置，违例拒出建议卡、
+  降级纯事实通报。
+- **T2 会话触发入口（0.0.25 钉死形态）**：手动触发先行——用户在会话点名
+  （如「盯盘复核 00268」）→ 会话按本节 T2 流程执行（重放意见→覆写 risk→
+  adjudicate 重裁决→建议卡）；exit 2 自动接管（watch 触发即退出交还会话）
+  与 launchd 补拉槽协调（上文坑位④）后置 0.0.26+ 评审；无人值守自动拉起
+  LLM 属 M3 且须用户显式开启预算闸。
 
 ## sim 组合 SSOT（P3 预留——用户裁定「一并建」，schema 先钉死）
 
@@ -250,14 +315,16 @@ whipsaw 路径判据用日 K high/low（tick 缺口不影响判定）。
 | --- | --- | --- |
 | P0 | SKILL.md 边界修订（本文件 + 判表 + 指针同步） | ✅ 0.0.15 |
 | P1 | watch.py（universe/once/loop/close/verify-hk）+ rules.py + launchd 模板 + selftest | ✅ 0.0.15 |
-| P2 | T1/T2 升级链、建议卡、意见保鲜门、record_fill --validate 常驻 | 预留 |
-| P3 | record_fill 写回、sim SSOT 实施、review_events、HS300 MA60 自动取数 | 预留 |
+| P2 | T1/T2 升级链、建议卡、意见保鲜门、record_fill --validate 常驻——**机械判据族（ma20/trailing/波段带三键）、权重提示、操作复核节与通知复核短语已 0.0.25 提前实施**（规约句与产物契约已钉死）；T1/T2 升级链与建议卡实施随 0.0.26+ | 部分实施 |
+| P3 | record_fill 写回、sim SSOT 实施、review_events、HS300 MA60 自动取数（实施形态已钉：--close 经 fetch_index 现取） | 预留 |
 | P4 | 机械降档判据进 scripts/（RSI-20261102-01 修法合流）、事件并入 ledger/postmortem（事件流经验消费另见 [09](09-outlook.md) 经验面——盘中事件至今在 outlook 链零消费，P4 打通时评审并入路径）、交易日历、watch 宇宙退休机制（清仓股永留 watch 档无封顶——每观察票日付 1 链日 K+1 条 moneyflow） | RSI 评审 |
 
 ## 回归门禁
 
-`batch/monitor/rules.py --selftest`（36 checks）与 `watch.py --selftest`
-（42 checks，含 launchd 模板回归钉、outlook 17:35 槽模板钉、走势参考附件钉
-与 position 轨 profile 过滤钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
+`batch/monitor/rules.py --selftest`（57 checks）与 `watch.py --selftest`
+（75 checks，含 launchd 模板回归钉、outlook 17:35 槽模板钉、走势参考附件钉、
+position 轨 profile 过滤钉、复核短语文案钉（含运维类负断言）、运行期注入
+零落盘钉、technical 前置门钉、收盘终判新分支钉、操作复核/权重分桶渲染钉
+与 trailing 跨日保留钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
 scripts/ 六件硬门禁成员（AGENTS.md 测试段非阻塞旁路门禁），P4 机械判据合流
 scripts/ 后归六件 selftest 接管。判据只许收严（门禁只收严红线）。

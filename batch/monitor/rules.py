@@ -8,6 +8,9 @@ tick × 宇宙行（价位锚）× 当日状态；输出 = 事件列表（含通
 红线落地：事件只描述事实（价位/百分比/距离），不带成本绝对值与指令性
 建议；量能不进 P1 判据（外推口径坑位见 01/07）；盘中结论一律
 「待收盘复核」。机械风险事实（mech_risk）只降不升，P2 升级链消费。
+0.0.25 起事件可带「××复核」级短语（07「通知口径」修订：措辞限定「复核」，
+禁减仓/离场/加仓等指令词）——随事件落台账（含被压制行），通知面由
+fmt_facts 追加。
 """
 import argparse
 import datetime as dt
@@ -29,12 +32,28 @@ DEFAULT_CFG = {
     "stock_daily_notify_cap": 6,   # 单股每日通知上限（超出只进台账）
     "limit_margin_pp": 0.3,    # 近触板判定：限幅 − 0.3 个百分点
     "hk_delay_min": 15,        # 港股快照延迟降级阈值（用户裁定：接受延迟但如实标注）
+    "ma20_break_ratio": 0.98,  # MA20 破位判定系数（07 P2 预钉：price < ma20×0.98）
+    "trailing_arm_pct": 1.15,  # 跟踪止损武装线（06 三价纪律：+15% 后改 trailing）
+    "tech_warmup_max_tries": 3,  # 当日 technical 预热重试上限（耗尽出 data_stale）
 }
 
 # 免冷却的一次性事件（当日每股每方向至多一次，用 day-flag 去重）
 _ONESHOT = ("gap_open", "limit_hit", "frozen", "resumed", "gap_move",
             "market_halted", "market_resumed", "hk_delayed", "t2_pending_fill",
-            "target_hit", "abnormal_move")   # 后两者为 episode 语义，去重靠 day_flags
+            "target_hit", "abnormal_move",   # 后两者为 episode 语义，去重靠 day_flags
+            "trailing_armed", "trailing_exit", "band_lo_touch", "band_hi_touch")
+
+# 事件级「××复核」短语（07「通知口径」0.0.25 修订：措辞限定「复核」、≤6 字，
+# 禁减仓/离场/加仓等指令词——沿 07 波段带「低吸/高抛复核」预钉先例）。
+# 运维类规则一律不登记（selftest 负断言钉）。
+_REVIEW_HINT = {
+    "stop_break": "止损复核", "stop_break_confirmed": "止损复核",
+    "whipsaw": "止损复核", "target_hit": "止盈复核",
+    "abnormal_move": "消息面复核", "t2_pending_fill": "T2成交复核",
+    "ma20_break": "均线复核", "trailing_armed": "跟踪止损复核",
+    "trailing_exit": "跟踪止损复核", "band_lo_touch": "低吸复核",
+    "band_hi_touch": "高抛复核", "band_trail_break": "波段结束复核",
+}
 
 # 午休窗口（分钟，UTC+8）：午休价量冻结是常态，不进停牌检测（session_phase
 # 的 intraday 判定含午休——见 fetch.SESSIONS 坑位）
@@ -46,11 +65,12 @@ def _iso(now):
 
 
 def fresh_state(date_str):
-    """当日状态骨架（日期变更即整体归零——盯盘状态是日粒度的）。"""
+    """当日状态骨架（日期变更即整体归零——盯盘状态是日粒度的；跨日的
+    trailing 跟踪态在 watch 侧 st 顶层承载，不在此键内）。"""
     return {"date": date_str, "cooldowns": {}, "streak": {}, "episode": {},
             "day_flags": {}, "frozen": {}, "suspended": {}, "halted": {},
             "notify_log": [], "stock_notify_count": {}, "digest_pending": {},
-            "hk_delay_notified": False}
+            "hk_delay_notified": False, "ma20_ep": {}}
 
 
 def _market_open_minutes(market, now):
@@ -112,6 +132,9 @@ def _emit(events, state, cfg, now, code, market, kind, rule, facts,
           "mech_risk": mech_risk, "facts": facts}
     if suppress_reason:
         ev["suppress_reason"] = suppress_reason
+    hint = _REVIEW_HINT.get(rule)
+    if hint:
+        ev["review"] = hint   # 事件语义属性：随台账落全量（含被压制行），不受抑制链影响
     ev = _gate_notify(ev, code, state, cfg, now, bypass_cooldown)
     events.append(ev)
 
@@ -123,9 +146,11 @@ def _streak(state, key, hit):
     return n
 
 
-def evaluate(ticks, universe, state, cfg, now):
+def evaluate(ticks, universe, state, cfg, now, trailing=None):
     """一轮规则评估。ticks=[{code,market,price,prev_close,open,high,low,
-    change_pct,ts_utc8,lag_min,...}]；universe rows 以 (code,market) 索引。
+    change_pct,ts_utc8,lag_min,...}]；universe rows 以 (code,market) 索引
+    （0.0.25 起可带运行期注入键 _ma20/_cost，缺省即 P2 机械判据自然禁用）。
+    trailing=跨日跟踪态 {code:{armed,high}}（watch 侧 st 顶层持久化，原地更新）。
     返回 (events, state)；state 原地更新（调用方负责持久化）。"""
     cfg = {**DEFAULT_CFG, **(cfg or {})}
     events = []
@@ -235,6 +260,74 @@ def evaluate(ticks, universe, state, cfg, now):
             else:
                 state["day_flags"][tk] = False
 
+        # ---- P2 机械判据族（0.0.25；前置门=watch 侧 technical 预热当日性，
+        #      _ma20 缺省即整族禁用——data_stale 日不判，不虚构判据）----
+        ma20 = row.get("_ma20")
+        if ma20 is not None:
+            # MA20 破位（episode：回线上复位再破再报；机械降档事实只降不升）
+            ep20 = state["ma20_ep"].setdefault(code, {"touched": False})
+            if t["price"] < ma20 * cfg["ma20_break_ratio"]:
+                if not ep20["touched"]:
+                    ep20["touched"] = True
+                    _emit(events, state, cfg, now, code, market, kind, "ma20_break",
+                          {"price": t["price"], "ma20": ma20,
+                           "dist_pct": round((t["price"] / ma20 - 1) * 100, 2),
+                           "note": "盘中根口径（estimated），收盘以完整根终判"},
+                          mech_risk={"downgrade": True, "severity": "medium"})
+            else:
+                ep20["touched"] = False
+
+            # 跟踪止损（06 三价纪律：high_since_entry ≥ 成本×1.15 武装，武装后
+            # 破 MA20 → trailing_exit 当日一次）。成本运行期注入（row["_cost"]），
+            # facts 只落派生量——成本与武装线值绝不落台账（脱敏红线）
+            tr = None
+            if trailing is not None and row.get("_cost"):
+                # 坑位：空 dict 为 falsy——「trailing or {}」会换一次性 dict 丢状态，
+                # 跨日持久化态必须显式判 None
+                tr = trailing.get(code)
+                if tr is None:
+                    tr = trailing[code] = {"armed": False, "high": t["price"]}
+                was_armed = bool(tr.get("armed"))   # 退出只认「先前已武装」态：
+                # 武装当轮价格本就在 MA20 下方不算新「破」（06：+15% 改锚后破线离场）
+                tr["high"] = max(tr.get("high") or 0.0, t["price"])
+                if not tr.get("armed") and tr["high"] >= row["_cost"] \
+                        * cfg["trailing_arm_pct"]:
+                    tr["armed"] = True
+                    _emit(events, state, cfg, now, code, market, kind,
+                          "trailing_armed",
+                          {"high_since_entry": tr["high"],
+                           "dist_ma20_pct": round((t["price"] / ma20 - 1) * 100, 2),
+                           "note": "浮盈达武装线（06：+15% 后改 trailing，"
+                                   "收盘破 MA20 终判口径）"})
+                ex_flag = "%s|trailing_exit" % code
+                if was_armed and t["price"] < ma20 \
+                        and not state["day_flags"].get(ex_flag):
+                    state["day_flags"][ex_flag] = True
+                    _emit(events, state, cfg, now, code, market, kind,
+                          "trailing_exit",
+                          {"price": t["price"], "ma20": ma20,
+                           "high_since_entry": tr["high"],
+                           "dist_ma20_pct": round((t["price"] / ma20 - 1) * 100, 2)})
+
+        # ---- 波段带带内状态（0.0.25 实施 07 P2 预钉；position 轨锚并行投影、
+        #      与 default 三价不互覆；day_flag 电平：回落复位再报）----
+        for edge, rule in (("band_lo", "band_lo_touch"), ("band_hi", "band_hi_touch")):
+            lvl = row.get(edge)
+            if lvl is None:
+                continue
+            bf = "%s|%s" % (code, rule)
+            hit = t["price"] <= lvl if edge == "band_lo" else t["price"] >= lvl
+            if hit:
+                if not state["day_flags"].get(bf):
+                    state["day_flags"][bf] = True
+                    _emit(events, state, cfg, now, code, market, kind, rule,
+                          {"price": t["price"], edge: lvl,
+                           "dist_pct": round((t["price"] / lvl - 1) * 100, 2),
+                           "note": "position 轨波段带（纪律参考线非止损指令，"
+                                   "08 三层下行门是唯一离场口径）"})
+            else:
+                state["day_flags"][bf] = False
+
         # ---- 跳空（首轮判定，一次性）----
         thr = cfg["move_pct_cn"] if market == "cn" else cfg["move_pct_hk"]
         gap_flag = "%s|%s|gap_open" % (code, market)
@@ -343,9 +436,15 @@ def evaluate_hk_delay(max_lag_min, state, cfg, now):
 # ---------------------------------------------------------------- selftest
 
 def _mk(code="600001", market="cn", kind="real", stop=26.00, target1=30.00,
-        entry_ref=None, limit_pct=10.0):
-    return {"code": code, "market": market, "kind": kind, "stop": stop,
-            "target1": target1, "entry_ref": entry_ref, "limit_pct": limit_pct}
+        entry_ref=None, limit_pct=10.0, band_lo=None, band_hi=None,
+        _ma20=None, _cost=None):
+    row = {"code": code, "market": market, "kind": kind, "stop": stop,
+           "target1": target1, "entry_ref": entry_ref, "limit_pct": limit_pct}
+    for k, v in (("band_lo", band_lo), ("band_hi", band_hi),
+                 ("_ma20", _ma20), ("_cost", _cost)):
+        if v is not None:
+            row[k] = v
+    return row
 
 
 def _tick(code="600001", market="cn", price=25.90, prev=27.15, opn=27.0,
@@ -517,6 +616,104 @@ def selftest():
     ev = evaluate_hk_delay(18.0, st, cfg, t0)
     check("港股延迟降级一次性", ev and ev[0]["rule"] == "hk_delayed"
           and not evaluate_hk_delay(20.0, st, cfg, t0))
+
+    # 7b) 事件级「××复核」短语（0.0.25）：注入族 + 被压制行仍带 + 运维类零短语
+    check("fresh_state 含 ma20_ep 键", "ma20_ep" in fresh_state("2026-11-03"))
+    st = fresh_state("2026-11-03")
+    ev, _ = evaluate([_tick()], [_mk()], st, cfg, t0)
+    hint = {e["rule"]: e.get("review") for e in ev}
+    check("止损事件带复核短语", hint.get("stop_break") == "止损复核")
+    st = fresh_state("2026-11-03")
+    ev, _ = evaluate([_tick(price=30.9, chg=6.0, high=31.0, low=27.0, opn=27.2)],
+                     [_mk()], st, cfg, t0)
+    check("触目标带止盈复核短语",
+          any(e["rule"] == "target_hit" and e.get("review") == "止盈复核"
+              for e in ev))
+    st["stock_notify_count"]["600001"] = 6   # 压到单股日上限：短语仍随台账落
+    evaluate([_tick(price=29.5, chg=1.0)], [_mk()], st, cfg, mins(1))
+    ev, _ = evaluate([_tick(price=30.5, chg=1.0)], [_mk()], st, cfg, mins(2))
+    sup = [e for e in ev if e.get("suppress_reason") == "stock_daily_cap"]
+    check("被压制事件仍带复核短语",
+          sup and sup[0].get("review") == "止盈复核")
+    ops_rules = ("gap_open", "limit_hit", "frozen", "resumed", "gap_move",
+                 "market_halted", "market_resumed", "hk_delayed", "storm_digest",
+                 "source_dropped", "data_stale")
+    check("运维类规则零复核短语",
+          not any(r in _REVIEW_HINT for r in ops_rules))
+
+    # 8a) MA20 破位（episode：首报降档 medium，回线复位再破再报；缺 _ma20 不判）
+    st = fresh_state("2026-11-03")
+    row20 = _mk(stop=None, target1=None, _ma20=28.00)
+    ev, _ = evaluate([_tick(price=27.30, chg=-1.0)], [row20], st, cfg, t0)
+    mb = [e for e in ev if e["rule"] == "ma20_break"]
+    check("MA20 破位首报+机械降档 medium",
+          mb and mb[0]["mech_risk"] == {"downgrade": True, "severity": "medium"}
+          and mb[0].get("review") == "均线复核" and "dist_pct" in mb[0]["facts"])
+    ev, _ = evaluate([_tick(price=27.31, chg=-1.0)], [row20], st, cfg, mins(1))
+    check("破位持续不重报", not any(e["rule"] == "ma20_break" for e in ev))
+    ev, _ = evaluate([_tick(price=27.60, chg=-1.0)], [row20], st, cfg, mins(2))
+    ev, _ = evaluate([_tick(price=27.29, chg=-1.0)], [row20], st, cfg, mins(3))
+    check("回线复位后再破再报", any(e["rule"] == "ma20_break" for e in ev))
+    ev, _ = evaluate([_tick(price=25.90)], [_mk(stop=None, target1=None)], st, cfg,
+                     mins(4))
+    check("缺 _ma20 整族禁用（data_stale 日不判）",
+          not any(e["rule"] == "ma20_break" for e in ev))
+
+    # 8b) 跟踪止损：+15% 武装（跨日态）→ 武装后破 MA20 退出；facts 零成本派生量
+    st = fresh_state("2026-11-03")
+    tr = {}
+    rowt = _mk(stop=None, target1=None, _ma20=11.00, _cost=10.00)
+    ev, _ = evaluate([_tick(price=11.60, chg=1.0, high=11.7, low=11.5, opn=11.5)],
+                     [rowt], st, cfg, t0, trailing=tr)
+    check("浮盈达武装线触发武装事件",
+          any(e["rule"] == "trailing_armed" and e.get("review") == "跟踪止损复核"
+              for e in ev) and tr["600001"]["armed"] is True)
+    check("武装当轮在 MA20 上方不出退出事件",
+          not any(e["rule"] == "trailing_exit" for e in ev))
+    ar = [e for e in ev if e["rule"] == "trailing_armed"][0]
+    check("武装事件 facts 零成本派生量（脱敏）",
+          "gain" not in json.dumps(ar["facts"]) and "arm_level" not in
+          json.dumps(ar["facts"]) and "cost" not in json.dumps(ar["facts"]))
+    ev, _ = evaluate([_tick(price=11.65, chg=1.0)], [rowt], st, cfg, mins(1),
+                     trailing=tr)
+    check("high 跨轮 max 更新", tr["600001"]["high"] == 11.65
+          and not any(e["rule"] == "trailing_exit" for e in ev))
+    ev, _ = evaluate([_tick(price=10.90, chg=1.0)], [rowt], st, cfg, mins(2),
+                     trailing=tr)
+    check("武装后破 MA20 出退出事件",
+          any(e["rule"] == "trailing_exit" and e["notify"] for e in ev))
+    ev, _ = evaluate([_tick(price=10.89, chg=1.0)], [rowt], st, cfg, mins(3),
+                     trailing=tr)
+    check("退出事件当日一次", not any(e["rule"] == "trailing_exit" for e in ev))
+    st2 = fresh_state("2026-11-03")
+    tr2 = {}
+    ev, _ = evaluate([_tick(price=10.50, chg=1.0)], [rowt], st2, cfg, t0,
+                     trailing=tr2)
+    ev, _ = evaluate([_tick(price=10.90, chg=1.0)], [rowt], st2, cfg, mins(1),
+                     trailing=tr2)
+    check("未武装破 MA20 不出退出事件",
+          not any(e["rule"] == "trailing_exit" for e in ev)
+          and not tr2.get("600001", {}).get("armed"))
+
+    # 8c) 波段带带内状态（day_flag 电平：回落复位再报；缺锚不判）
+    st = fresh_state("2026-11-03")
+    rowb = _mk(stop=None, target1=None, band_lo=25.00, band_hi=31.00)
+    ev, _ = evaluate([_tick(price=24.90, chg=-1.0)], [rowb], st, cfg, t0)
+    check("触及下沿低吸复核",
+          any(e["rule"] == "band_lo_touch" and e.get("review") == "低吸复核"
+              for e in ev))
+    ev, _ = evaluate([_tick(price=24.80, chg=-1.0)], [rowb], st, cfg, mins(1))
+    check("下沿持续在线不重报", not any(e["rule"] == "band_lo_touch" for e in ev))
+    evaluate([_tick(price=25.50, chg=-1.0)], [rowb], st, cfg, mins(2))
+    ev, _ = evaluate([_tick(price=24.95, chg=-1.0)], [rowb], st, cfg, mins(3))
+    check("回升复位后再触再报", any(e["rule"] == "band_lo_touch" for e in ev))
+    ev, _ = evaluate([_tick(price=31.10, chg=1.0)], [rowb], st, cfg, mins(4))
+    check("触及上沿高抛复核",
+          any(e["rule"] == "band_hi_touch" and e.get("review") == "高抛复核"
+              for e in ev))
+    ev, _ = evaluate([_tick(price=30.00, chg=1.0)],
+                     [_mk(stop=None, target1=None)], st, cfg, mins(5))
+    check("缺波段带锚不判", not any(e["rule"].startswith("band_") for e in ev))
 
     # 8) 风暴闸：9 只齐触 → 第 9 条压制（digest 带代码）→ 无新事件也能补发摘要
     st = fresh_state("2026-11-03")
