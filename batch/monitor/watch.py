@@ -2,9 +2,10 @@
 """盯盘守卫（P1）——在册股票盘中监控：宇宙派生 / 价格面轮询 / 触发告警 /
 收盘复核。口径以 references/07-monitor.md 为准（本文件是参考实现）。
 
-红线落地：只提示不执行（无任何交易接口）；本地通知只报事实（零成本
-绝对值、零指令性建议，尾注「待收盘复核·非投资建议」）；永不写
-signals.json（当日信号登记唯一归每晚全诊）；盘中结论以收盘复核为准。
+红线落地：只提示不执行（无任何交易接口）；本地通知报事实 + 事件级
+「××复核」短语（0.0.25 修订：措辞限定「复核」、禁减仓/离场/加仓等指令词；
+零成本绝对值；尾注「待收盘复核·非投资建议」）；永不写 signals.json
+（当日信号登记唯一归每晚全诊）；盘中结论以收盘复核为准。
 
 用法（sk = skill 根目录）：
   uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance \\
@@ -38,7 +39,8 @@ REVIEW_MIN = {"cn": 910, "hk": 970}   # 收盘复核时点 15:10 / 16:10（盘�
 DISCLAIMER = ("本监控由 vibe-stock 生成，仅供学习与研究参考，不构成投资建议；"
               "系统不下单。")
 
-# 通知文案（事实级；指令性建议一律不进通知——07「通知口径」）
+# 通知文案（事实级；指令性建议一律不进通知——07「通知口径」0.0.25 修订：
+# 事件级「××复核」短语由 ev.review 承载、fmt_facts 尾拼，运维类零短语）
 _RULE_TEXT = {
     "stop_break": "跌破止损线", "stop_break_confirmed": "持续跌破止损线（2 轮确认）",
     "whipsaw": "击穿后收回（待收盘终判）", "target_hit": "触及目标价1",
@@ -48,6 +50,10 @@ _RULE_TEXT = {
     "market_halted": "休市停轮", "market_resumed": "解除停轮",
     "hk_delayed": "港股行情延迟", "storm_digest": "事件聚合",
     "source_dropped": "行情缺行",
+    "ma20_break": "跌破 MA20（0.98×）", "trailing_armed": "浮盈武装跟踪止损",
+    "trailing_exit": "跟踪止损破 MA20", "band_lo_touch": "触及波段带下沿",
+    "band_hi_touch": "触及波段带上沿", "band_trail_break": "收盘破波段带 trail_ref",
+    "data_stale": "technical 预热未得当日数据",
 }
 
 
@@ -62,7 +68,8 @@ def monitor_paths(state_dir):
     return {"root": m, "universe": os.path.join(m, "universe.json"),
             "state": os.path.join(m, "state.json"),
             "ticks": os.path.join(m, "ticks"), "events": os.path.join(m, "events"),
-            "summary": os.path.join(m, "day-summary"), "logs": os.path.join(m, "logs")}
+            "summary": os.path.join(m, "day-summary"), "logs": os.path.join(m, "logs"),
+            "tech_cache": os.path.join(m, "technical-cache.json")}
 
 
 def ensure_state(state_dir, today):
@@ -81,11 +88,17 @@ def ensure_state(state_dir, today):
     for k, v in vrules.fresh_state(today).items():   # 老版本 state 升级不缺键
         rs.setdefault(k, v)
     same_day = st.get("date") == today
+    tech = st.get("tech") if same_day else None
     return {"date": today, "rules": rs,
             "src_fail": st.get("src_fail", {}) if same_day else {},
             "hk_source": st.get("hk_source"),
             "close_done": st.get("close_done", False) if same_day else False,
-            "next_due": st.get("next_due", {}) if same_day else {}}
+            "next_due": st.get("next_due", {}) if same_day else {},
+            # trailing 跟踪态跨日保留（07 0.0.25：armed/high 是持仓持续态，
+            # 日归零会系统性漏报隔日 trailing_exit）；tech 预热计数同日继承
+            "trailing": st.get("trailing") or {},
+            "tech": tech if tech and tech.get("date") == today
+            else {"date": today, "tries": 0, "stale_notified": False}}
 
 
 def save_state(state_dir, st):
@@ -213,11 +226,12 @@ def latest_allocation(state_dir):
     return None
 
 
-def latest_signals(state_dir):
+def latest_signals(state_dir, profile="default"):
     """signals.json 组内最新信号（价位锚 SSOT）：{code: {...}}（append 序，
-    后写覆盖前写 = 组内最新）。只取 default 轨——position 轨的波段带键
-    （band_lo/band_hi/trail_ref）语义不同，混入会覆盖短线止损/目标锚
-    （07「价位锚分轨」句；波段带锚走 P2 带内状态规则，另行接入）。"""
+    后写覆盖前写 = 组内最新）。按轨取（profile="default" 三价锚 /
+    "position" 波段带三键——0.0.25 起波段带锚并行投影、与 default 三价
+    不互覆，07「价位锚分轨」句）。投影带 action/family（收盘操作复核的
+    五档机械映射代理——只投影不重裁决）。"""
     path = os.path.join(state_dir, "signals.json")
     out = {}
     if not os.path.exists(path):
@@ -228,11 +242,12 @@ def latest_signals(state_dir):
     except (OSError, ValueError):
         return out
     for s in sigs:
-        if s.get("profile", "default") != "default":
+        if s.get("profile", "default") != profile:
             continue
         out[s["code"]] = {"market": s.get("market"), "name": s.get("stock_name"),
                           "key_levels": s.get("key_levels") or {},
-                          "date": s.get("date")}
+                          "date": s.get("date"),
+                          "action": s.get("action"), "family": s.get("family")}
     return out
 
 
@@ -264,6 +279,7 @@ def derive_universe(state_dir):
                 "stop": r.get("stop"), "entry_ref": r.get("entry_ref"),
                 "target1": r.get("target1")}
     sigs = latest_signals(state_dir)
+    psigs = latest_signals(state_dir, profile="position")   # 波段带三键并行投影
     names = {}
     names_path = os.path.join(state_dir, "names.json")
     if os.path.exists(names_path):
@@ -293,9 +309,20 @@ def derive_universe(state_dir):
             warnings.append("%s %s 无价位锚（signals/allocation 均缺），降级为仅 "
                             "%%/触板监控" % (code, name))
             source = "none"
+        pkl = (psigs.get(code) or {}).get("key_levels") or {}
         rows.append({"code": code, "market": market, "kind": kind, "name": name,
                      "stop": levels["stop"], "target1": levels["target1"],
                      "entry_ref": levels["entry_ref"], "levels_source": source,
+                     # 波段带三键独立行键（不塞 key_levels——07「价位锚分轨」：
+                     # position 锚与 default 三价并行不互覆；无 position 信号
+                     # 则整组缺省不判，禁现算充锚）
+                     "band_lo": pkl.get("band_lo"), "band_hi": pkl.get("band_hi"),
+                     "trail_ref": pkl.get("trail_ref"),
+                     "band_levels_source": "signals" if pkl else "none",
+                     # 收盘操作复核的五档投影代理（只投影不重裁决，以报告原文为准）
+                     "signal_action": (sigs.get(code) or {}).get("action"),
+                     "signal_family": (sigs.get(code) or {}).get("family"),
+                     "pos_signal_action": (psigs.get(code) or {}).get("action"),
                      "limit_pct": limit_pct_cn(code, name) if market == "cn" else None,
                      "signal_date": (sigs.get(code) or {}).get("date")})
     order = {"real": 0, "sim": 1, "watch": 2}
@@ -322,6 +349,117 @@ def load_universe(state_dir, regenerate=False):
         os.makedirs(p["root"], exist_ok=True)
         varchive.write_json_atomic(p["universe"], uni)
     return uni
+
+
+# ------------------------------------------------- technical 预热（0.0.25 P2 前置门数据通道）
+
+def load_tech_cache(state_dir):
+    p = monitor_paths(state_dir)
+    if not os.path.exists(p["tech_cache"]):
+        return {}
+    try:
+        with open(p["tech_cache"], encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _data_stale_event(now, lacking, total):
+    """一次性 data_stale 运维事件（watch 级手工构造，仿 source_dropped——
+    不带复核短语）。MA20/跟踪止损判据对缺数票当日禁用（_ma20 缺省自然跳过）。"""
+    return {"ts": now.isoformat(timespec="seconds"), "code": "*", "market": "*",
+            "kind": "*", "rule": "data_stale", "level": "T0", "notify": True,
+            "mech_risk": None,
+            "facts": {"lacking": len(lacking), "total": total,
+                      "codes": lacking[:8],
+                      "note": "technical 预热重试耗尽（末根非当日/源熔断），"
+                              "MA20/跟踪止损判据今日禁用，收盘复核以完整根重算"}}
+
+
+def warmup_technical(state_dir, uni, st, cfg, now=None):
+    """当日 technical 预热：FetchLock + fetch_state 账本下拉宇宙日 K →
+    ma20 派生 → technical-cache.json（只落派生量，脱敏红线）。不可得
+    （末根非今日/源熔断）重试 ≤tech_warmup_max_tries，耗尽出一次性
+    data_stale 事件。返回 (cache, events)——events 由调用方并入当轮台账。
+    盘中根 ma20 为 estimated 口径，收盘终判以完整根重算。"""
+    now = now or _now()
+    today = now.date().isoformat()
+    p = monitor_paths(state_dir)
+    cache = load_tech_cache(state_dir)
+    if cache.get("date") != today:
+        cache = {"date": today, "generated_at": now.isoformat(timespec="seconds"),
+                 "codes": {}}
+    tech_st = st.setdefault("tech", {})
+    if tech_st.get("date") != today:
+        tech_st.update({"date": today, "tries": 0, "stale_notified": False})
+    rows = [r for r in uni["rows"] if r.get("kind") in ("real", "sim")]
+    lacking = [r for r in rows
+               if (cache["codes"].get(r["code"]) or {}).get("data_date") != today]
+    if not lacking:
+        return cache, []
+    if tech_st["tries"] >= cfg.get("tech_warmup_max_tries", 3):
+        if not tech_st.get("stale_notified"):
+            tech_st["stale_notified"] = True
+            return cache, [_data_stale_event(now, [r["code"] for r in lacking],
+                                             len(rows))]
+        return cache, []
+    tech_st["tries"] += 1
+    lock = FetchLock(state_dir)
+    if not lock.acquire(timeout=30):   # 与 --close/outlook 批量竞争：让路不硬等
+        tech_st["tries"] -= 1   # 让路不计次（P2-4：锁竞争消耗重试会 ~10min 烧穿全日判据）
+        return cache, []
+    try:
+        fs = vfetch.load_fetch_state()
+        for r in lacking:
+            bars, _state, _src, _tried = vfetch.fetch_daily_bars(
+                r["market"], r["code"], fs, int(now.timestamp()))
+            last_date = str(bars[-1].get("date", ""))[:10] if bars else None
+            ma20 = vfetch._ma([b["close"] for b in bars], 20) if bars else None
+            cache["codes"][r["code"]] = {
+                "ma20": ma20, "data_date": last_date,
+                "state": "ok" if last_date == today and ma20 is not None else "stale"}
+        vfetch.save_fetch_state(fs)
+    finally:
+        lock.release()
+    cache["generated_at"] = now.isoformat(timespec="seconds")
+    os.makedirs(p["root"], exist_ok=True)
+    varchive.write_json_atomic(p["tech_cache"], cache)
+    still = [r for r in rows
+             if (cache["codes"].get(r["code"]) or {}).get("data_date") != today]
+    if still and tech_st["tries"] >= cfg.get("tech_warmup_max_tries", 3) \
+            and not tech_st.get("stale_notified"):
+        tech_st["stale_notified"] = True
+        return cache, [_data_stale_event(now, [r["code"] for r in still],
+                                         len(rows))]
+    return cache, []
+
+
+def annotate_runtime(rows, state_dir, cache):
+    """运行期现算现用注入（脱敏红线：成本/数量绝不落盘——注入发生在宇宙
+    落盘之后的内存态，磁盘产物零污染）。real 成本=portfolio cost_price
+    （archive.load_portfolio）；sim 每股成本=allocation 配置日价
+    （cost/(lots×100)≡price 实证，P3 sim-portfolio.json 落地后切换口径）；
+    ma20←当日预热缓存（缺省即 P2 机械判据自然禁用）。数量仅供权重分桶
+    现算（收盘操作复核），同样不落盘。"""
+    problems = []
+    real = varchive.load_portfolio(state_dir, problems)
+    alloc = latest_allocation(state_dir)
+    sim_rows = {a["code"]: a for a in (alloc["rows"] if alloc else [])}
+    today = (cache or {}).get("date")
+    for r in rows:
+        key = "%s.%s" % (r["code"], r["market"])
+        if r.get("kind") == "real":
+            ent = real.get(key) or {}
+            r["_cost"] = ent.get("cost")
+            r["_qty"] = ent.get("qty")
+        elif r.get("kind") == "sim":
+            a = sim_rows.get(r["code"]) or {}
+            r["_cost"] = a.get("price") if a.get("price") else (
+                a["cost"] / (a["lots"] * 100)
+                if a.get("cost") and a.get("lots") else None)
+            r["_qty"] = a["lots"] * 100 if a.get("lots") else None
+        c = (cache.get("codes") or {}).get(r["code"]) or {}
+        r["_ma20"] = c.get("ma20") if c.get("data_date") == today else None
 
 
 # ---------------------------------------------------------------- 价格面
@@ -461,46 +599,73 @@ def next_delay(st, market, base_interval):
 
 # ---------------------------------------------------------------- 事件派发
 
-def fmt_facts(rule, facts, name):
+def fmt_facts(rule, facts, name, review=None):
     if rule in ("stop_break", "stop_break_confirmed"):
-        return "%s 现价 %.2f 已低于止损线 %.2f（-%.2f%%）" % (
+        s = "%s 现价 %.2f 已低于止损线 %.2f（-%.2f%%）" % (
             name, facts["price"], facts["stop"], facts["depth_pct"])
-    if rule == "whipsaw":
-        return "%s 现价 %.2f 回到止损线 %.2f 上方" % (name, facts["price"], facts["stop"])
-    if rule == "target_hit":
-        return "%s 现价 %.2f 触及目标价1 %.2f" % (name, facts["price"], facts["target1"])
-    if rule == "abnormal_move":
-        return "%s 现价 %.2f 涨跌幅 %.1f%%" % (name, facts["price"], facts["change_pct"])
-    if rule == "gap_open":
-        return "%s 跳空开盘 %.2f（昨收 %.2f，%.1f%%）" % (
+    elif rule == "whipsaw":
+        s = "%s 现价 %.2f 回到止损线 %.2f 上方" % (name, facts["price"], facts["stop"])
+    elif rule == "target_hit":
+        # 坑位（I-027）：标签序号与数值连读会被看成「触及目标价1 19.43」——
+        # 「目标价1=%.2f」用等号钉住归属
+        s = "%s 现价 %.2f 触及目标价1=%.2f" % (name, facts["price"], facts["target1"])
+    elif rule == "abnormal_move":
+        s = "%s 现价 %.2f 涨跌幅 %.1f%%" % (name, facts["price"], facts["change_pct"])
+    elif rule == "gap_open":
+        s = "%s 跳空开盘 %.2f（昨收 %.2f，%.1f%%）" % (
             name, facts["open"], facts["prev_close"], facts["gap_pct"])
-    if rule == "limit_hit":
-        return "%s %s（涨跌幅 %.1f%%，限幅 %.0f%%）" % (
+    elif rule == "limit_hit":
+        s = "%s %s（涨跌幅 %.1f%%，限幅 %.0f%%）" % (
             name, "近涨停" if facts["direction"] == "up" else "近跌停",
             facts["change_pct"], facts["limit_pct"])
-    if rule == "t2_pending_fill":
-        return "%s 盘中低点 %.2f 触及 T2 限价 %.2f（推演成交 %.2f，未写回）" % (
+    elif rule == "t2_pending_fill":
+        s = "%s 盘中低点 %.2f 触及 T2 限价 %.2f（推演成交 %.2f，未写回）" % (
             name, facts["low"], facts["entry_ref"], facts["fill_price_assumed"])
-    if rule == "frozen":
-        return "%s 价量连续 %d 轮不变，疑似停牌" % (name, facts["rounds"])
-    if rule in ("resumed", "gap_move"):
-        return "%s 复牌现价 %.2f（冻结价 %.2f）" % (
+    elif rule == "frozen":
+        s = "%s 价量连续 %d 轮不变，疑似停牌" % (name, facts["rounds"])
+    elif rule in ("resumed", "gap_move"):
+        s = "%s 复牌现价 %.2f（冻结价 %.2f）" % (
             name, facts["price"], facts.get("frozen_price", facts["price"]))
-    if rule == "storm_digest":
-        return "风暴闸压制 %d 条事件：%s（明细见台账）" % (
+    elif rule == "storm_digest":
+        s = "风暴闸压制 %d 条事件：%s（明细见台账）" % (
             facts["suppressed_count"],
             "；".join("%s %s" % (_RULE_TEXT.get(k, k), ",".join(v))
-                     for k, v in sorted(facts["kinds"].items())))
-    if rule == "market_halted":
-        return "%s 全组快照日期 %s 非今日，判休市停轮" % (name, facts["snapshot_date"])
-    if rule == "market_resumed":
-        return "%s 快照恢复今日时间戳，解除停轮" % name
-    if rule == "hk_delayed":
-        return "港股行情延迟 %.0f 分钟（阈值 %d），降级为延迟盯盘" % (
+                      for k, v in sorted(facts["kinds"].items())))
+    elif rule == "market_halted":
+        s = "%s 全组快照日期 %s 非今日，判休市停轮" % (name, facts["snapshot_date"])
+    elif rule == "market_resumed":
+        s = "%s 快照恢复今日时间戳，解除停轮" % name
+    elif rule == "hk_delayed":
+        s = "港股行情延迟 %.0f 分钟（阈值 %d），降级为延迟盯盘" % (
             facts["max_lag_min"], facts["threshold_min"])
-    if rule == "source_dropped":
-        return "%s 行情缺行/校验未过，本轮失明：%s" % (name, ",".join(facts["codes"]))
-    return "%s %s" % (name, json.dumps(facts, ensure_ascii=False))
+    elif rule == "source_dropped":
+        s = "%s 行情缺行/校验未过，本轮失明：%s" % (name, ",".join(facts["codes"]))
+    elif rule == "ma20_break":
+        s = "%s 现价 %.2f 跌破 MA20=%.2f（%.2f%%，盘中根口径）" % (
+            name, facts["price"], facts["ma20"], facts["dist_pct"])
+    elif rule == "trailing_armed":
+        s = "%s 盘中高点 %.2f 触发跟踪止损武装（+15%% 口径，破 MA20 终判）" % (
+            name, facts["high_since_entry"])
+    elif rule == "trailing_exit":
+        s = "%s 现价 %.2f 跌破 MA20=%.2f（跟踪止损已武装）" % (
+            name, facts["price"], facts["ma20"])
+    elif rule == "band_lo_touch":
+        s = "%s 现价 %.2f 触及波段带下沿=%.2f（%.2f%%）" % (
+            name, facts["price"], facts["band_lo"], facts["dist_pct"])
+    elif rule == "band_hi_touch":
+        s = "%s 现价 %.2f 触及波段带上沿=%.2f（%.2f%%）" % (
+            name, facts["price"], facts["band_hi"], facts["dist_pct"])
+    elif rule == "band_trail_break":
+        s = "%s 收盘 %.2f 跌破波段带 trail_ref=%.2f" % (
+            name, facts["close"], facts["trail_ref"])
+    elif rule == "data_stale":
+        s = "technical 预热未得当日数据（%d/%d 票），MA20/跟踪止损判据今日禁用" % (
+            facts.get("lacking", 0), facts.get("total", 0))
+    else:
+        s = "%s %s" % (name, json.dumps(facts, ensure_ascii=False))
+    if review:
+        s = "%s ·%s" % (s, review)   # 事件级复核短语（07 通知口径 0.0.25 修订）
+    return s
 
 
 def dispatch(events, uni_rows, no_notify, hk_delayed=False):
@@ -512,7 +677,8 @@ def dispatch(events, uni_rows, no_notify, hk_delayed=False):
         if not ev.get("notify"):
             continue
         label = names.get(ev["code"]) or names.get(ev.get("market"), "")
-        msg = fmt_facts(ev["rule"], ev["facts"], label or ev["code"])
+        msg = fmt_facts(ev["rule"], ev["facts"], label or ev["code"],
+                        review=ev.get("review"))
         if hk_delayed and ev.get("market") == "hk":
             msg = "(延迟行情) " + msg
         notify(msg,
@@ -529,6 +695,13 @@ def run_round(state_dir, uni, st, cfg, no_notify, now=None):
     interval = cfg.get("interval_s", 180)
     all_events, all_ticks, hk_delayed = [], [], False
     due = st.setdefault("next_due", {})
+    # 当日 technical 预热（0.0.25 P2 前置门数据通道）：只在交易时段尝试，
+    # 非交易日/盘后不烧重试次数；成功后当日短路（cache 全新鲜即零请求）
+    if any(vfetch.session_phase(m, None, now)["phase"] == "intraday"
+           for m in ("cn", "hk")):
+        cache, tech_events = warmup_technical(state_dir, uni, st, cfg, now=now)
+        all_events += tech_events
+        annotate_runtime(uni["rows"], state_dir, cache)
     for market in ("cn", "hk"):
         rows_m = [r for r in uni["rows"] if r["market"] == market]
         if not rows_m or st["rules"]["halted"].get(market):
@@ -570,7 +743,8 @@ def run_round(state_dir, uni, st, cfg, no_notify, now=None):
                 hk_delayed = max(lags) > cfg["hk_delay_min"]
                 all_events += vrules.evaluate_hk_delay(max(lags), st["rules"],
                                                        cfg, now)
-        events, _ = vrules.evaluate(ticks, uni["rows"], st["rules"], cfg, now)
+        events, _ = vrules.evaluate(ticks, uni["rows"], st["rules"], cfg, now,
+                                    trailing=st.get("trailing"))
         all_events += events
         all_ticks += ticks
         if meta.get("indices"):
@@ -588,7 +762,8 @@ def run_round(state_dir, uni, st, cfg, no_notify, now=None):
 # ---------------------------------------------------------------- 收盘复核
 
 PRICE_RULES = {"stop_break", "stop_break_confirmed", "whipsaw", "target_hit",
-               "t2_pending_fill"}
+               "t2_pending_fill", "ma20_break", "trailing_exit",
+               "band_lo_touch", "band_hi_touch"}
 
 
 def classify_close(ev_stocks, bars_by_code, uni_rows, today):
@@ -627,9 +802,56 @@ def classify_close(ev_stocks, bars_by_code, uni_rows, today):
                 and bar["low"] <= row["entry_ref"]:
             item["verdicts"].append("T2 触价坐实（推演成交 %.2f，写回属 P3）"
                                     % min(bar["open"], row["entry_ref"]))
+        # 0.0.25 新判据终判：一律用当日完整根现算（盘中根 ma20 是 estimated，
+        # 勿复用缓存值——两把尺坑位）
+        closes = [b["close"] for b in bars]
+        ma20_full = vfetch._ma(closes, 20)
+        if "ma20_break" in kinds:
+            if ma20_full is not None:
+                # 系数引 rules DEFAULT_CFG（SSOT）：盘中触发与收盘终判同一把尺
+                hit = bar["close"] < ma20_full * vrules.DEFAULT_CFG["ma20_break_ratio"]
+                item["verdicts"].append("MA20 破位收盘%s（%.2f / MA20 %.2f，完整根）"
+                                        % ("确认" if hit else "撤回",
+                                           bar["close"], ma20_full))
+            else:
+                item["verdicts"].append("MA20 完整根不足 20 根，无法终判（挂全诊）")
+        if "trailing_exit" in kinds:
+            if ma20_full is not None:
+                hit = bar["close"] < ma20_full
+                item["verdicts"].append("跟踪止损破线收盘%s（%.2f / MA20 %.2f）"
+                                        % ("确认" if hit else "撤回",
+                                           bar["close"], ma20_full))
+            else:
+                item["verdicts"].append("跟踪止损终判缺 MA20 完整根（挂全诊）")
+        for edge, label, lo_hit in (("band_lo", "波段带下沿", True),
+                                    ("band_hi", "波段带上沿", False)):
+            rule = "band_lo_touch" if lo_hit else "band_hi_touch"
+            if rule in kinds and row.get(edge) is not None:
+                lvl = row[edge]
+                hit = bar["close"] <= lvl if lo_hit else bar["close"] >= lvl
+                item["verdicts"].append("%s 收盘%s（%.2f / %.2f）"
+                                        % (label, "坐实" if hit else "收回",
+                                           bar["close"], lvl))
         if not item["verdicts"]:
             item["verdicts"].append("盘中事件收盘全部撤回（以全诊为准）")
         out.append(item)
+    return out
+
+
+def trail_break_scan(uni_rows, bars_by_code, today):
+    """收盘直判 band_trail_break（07 P2 波段带预钉：收盘破 trail_ref →
+    「波段结束复核」）。只扫有 position 波段带锚的票；末根非当日不判。"""
+    out = []
+    for r in uni_rows:
+        ref = r.get("trail_ref")
+        bars = bars_by_code.get(r["code"])
+        if ref is None or not bars \
+                or str(bars[-1].get("date", ""))[:10] != today:
+            continue
+        close = bars[-1]["close"]
+        if close < ref:
+            out.append({"code": r["code"], "name": r.get("name", r["code"]),
+                        "close": close, "trail_ref": ref})
     return out
 
 
@@ -699,6 +921,115 @@ def _outlook_digest(state_dir, today):
     return lines + [""]
 
 
+# ------------------------------------------------- 收盘操作复核（0.0.25）
+
+# 五档机械投影（04「操作建议」持仓者分支的动作分类学；只投影不重裁决，
+# 以报告原文为准——signals.json 的 action 是结构化代理，非报告正文）
+_TIER_TEXT = {
+    "strong_buy": "持有（strong_buy 族：逢高减仓口径见报告）",
+    "buy": "持有（buy 族：逢高减仓口径见报告）",
+    "hold": "持有观察（hold：按止损纪律执行）",
+    "watch": "持有观察（watch）",
+    "reduce": "减仓档复核（reduce）",
+    "sell": "离场档复核（sell 族：减仓或离场，以报告原文为准）",
+    "strong_sell": "离场档复核（strong_sell）",
+    "add_on": "加仓轨在途（addon：三段确认制，见 10）",
+}
+
+
+def render_review_lines(events, uni_rows):
+    """操作复核节（事件 × 既有纪律映射的确定性投影；零 LLM、离线可测）。
+    纪律原文锚：06 三价（target1=hi20、+15% 后改 trailing 收盘破 MA20 离场）
+    /持有期（止损止盈后资金留存不追补）/波段带（纪律参考线非止损指令，
+    08 三层下行门是唯一离场口径）——两套离场口径分行列不互引。"""
+    rows = {r["code"]: r for r in uni_rows}
+    # 复核节覆盖集 ≠ PRICE_RULES（终判集）：trailing_armed/band_trail_break 无
+    # 收盘终判语义但必须进操作复核（07「日报行」承诺），扩集不得反向进
+    # classify_close/ev_stocks 终判路径
+    review_rules = PRICE_RULES | {"trailing_armed", "band_trail_break"}
+    by_code = {}
+    for e in events:
+        if e.get("code") == "*" or e.get("rule") not in review_rules:
+            continue
+        by_code.setdefault(e["code"], set()).add(e["rule"])
+    if not by_code:
+        return []
+    lines = []
+    for code in sorted(by_code):
+        rls = by_code[code]
+        r = rows.get(code)
+        if r is None:
+            continue
+        acts = []
+        if "target_hit" in rls and r.get("target1") is not None:
+            acts.append("止盈纪律复核：目标1=hi20 站上——06 三价纪律 +15% 后改 "
+                        "trailing（收盘破 MA20 离场）；止盈后资金留存不追补")
+        if {"stop_break", "stop_break_confirmed", "whipsaw"} & rls:
+            acts.append("止损纪律复核：06 持有期纪律——触发后资金留存不追补")
+        if "ma20_break" in rls:
+            acts.append("均线纪律复核：破 MA20×0.98（机械降档 medium，待全诊消费）")
+        if "trailing_armed" in rls:
+            acts.append("跟踪止损已武装（+15% 口径，06 三价纪律改锚）")
+        if "trailing_exit" in rls:
+            acts.append("跟踪止损复核：武装态破 MA20（06：收盘破 MA20 离场口径）")
+        if "band_lo_touch" in rls:
+            acts.append("低吸复核：position 轨波段带下沿（纪律参考线非止损指令，"
+                        "离场唯一口径是 08 三层下行门）")
+        if "band_hi_touch" in rls:
+            acts.append("高抛复核：position 轨波段带上沿（纪律参考线非止损指令）")
+        if "t2_pending_fill" in rls:
+            acts.append("T2 成交复核：推演成交未写回（写回属 P3 sim SSOT）")
+        if "band_trail_break" in rls:
+            acts.append("波段结束复核：收盘破 trail_ref（position 轨纪律参考线，"
+                        "离场唯一口径是 08 三层下行门）")
+        if not acts:
+            continue
+        sig = []
+        if r.get("signal_action"):
+            sig.append("default 轨最近信号 %s → %s" % (
+                r["signal_action"],
+                _TIER_TEXT.get(r["signal_action"], "档位见报告原文")))
+        if r.get("pos_signal_action"):
+            sig.append("position 轨最近信号 %s" % r["pos_signal_action"])
+        tail = "；最近信号投影：%s（只投影不重裁决，以报告原文为准）" % \
+            "；".join(sig) if sig else ""
+        lines.append("- **%s %s**（%s）：%s%s" % (
+            code, r.get("name", code), r.get("kind", "?"), "；".join(acts), tail))
+    return lines
+
+
+def weight_review_lines(uni_rows, ticks):
+    """权重提示（用户 2026-11-02 裁定分桶不折算；0.0.25 评审收口：**限实盘
+    持仓**——06 持有期漂移锚是实盘组合纪律，sim 推演盘混入会稀释实盘真实
+    权重且无操作意义）：收盘以末轮 tick 价 × 持仓数量现算市值，A（CNY）/
+    港（HKD）各以本桶实盘总市值为分母，单仓 >16% → 「次日减至 ≤14%」复核行
+    （06 持有期漂移锚，与建仓带 14.5% 是两把尺）；fx 不进判定（SKILL 红线
+    4）。只落百分比——金额/数量不落任何产物（脱敏红线）；单票桶分母无分散
+    意义，跳过。"""
+    last_px = {}
+    for t in ticks:
+        if t.get("code"):
+            last_px[t["code"]] = t.get("price")   # jsonl 顺序读，后写覆盖
+    lines = []
+    for market, label in (("cn", "A 股桶（CNY）"), ("hk", "港股桶（HKD）")):
+        hold = [(r["code"], r.get("name", r["code"]),
+                 (last_px.get(r["code"]) or 0) * (r.get("_qty") or 0))
+                for r in uni_rows
+                if r.get("market") == market and r.get("_qty")
+                and r.get("kind") == "real" and last_px.get(r["code"])]
+        if len(hold) < 2:
+            continue
+        total = sum(v for _, _, v in hold)
+        if total <= 0:
+            continue
+        for code, name, mv in hold:
+            w = mv / total * 100
+            if w > 16:
+                lines.append("- **%s %s**：单仓权重 %.1f%%（%s）＞16%%——持有期纪律"
+                             "「次日减至 ≤14%%」（06 漂移锚）" % (code, name, w, label))
+    return lines
+
+
 def close_pass(state_dir, uni, st, cfg, no_notify, no_bars=False):
     """收盘复核：全局取数锁下重拉事件股 + 全部港股（抽检）日 K → 终判 →
     day-summary 派生重渲（幂等：events/ticks 台账是事实源，日报是派生视图）。
@@ -722,9 +1053,16 @@ def close_pass(state_dir, uni, st, cfg, no_notify, no_bars=False):
     for e in events:
         if e.get("rule") in PRICE_RULES and e.get("code") != "*":
             ev_stocks.setdefault(e["code"], []).append(e)
+    annotate_runtime(uni["rows"], state_dir, load_tech_cache(state_dir))
     hk_codes = [r["code"] for r in uni["rows"] if r["market"] == "hk"
                 and any(t.get("code") == r["code"] for t in ticks)]
-    need = list(dict.fromkeys(list(ev_stocks) + hk_codes))
+    # 波段带 trail_ref 收盘直判票（band_trail_break）与有成本票（trailing high
+    # 收盘归并——data_stale 日盘中判据禁用时当日 high 只能收盘补，P2-3）并入
+    # 取数集（≈持仓数请求，与 --close 既有量级同阶）
+    trail_codes = [r["code"] for r in uni["rows"] if r.get("trail_ref") is not None]
+    cost_codes = [r["code"] for r in uni["rows"] if r.get("_cost")]
+    need = list(dict.fromkeys(list(ev_stocks) + hk_codes + trail_codes
+                              + cost_codes))
     bars_by_code = {}
     if need and not no_bars:
         lock = FetchLock(state_dir)
@@ -750,6 +1088,37 @@ def close_pass(state_dir, uni, st, cfg, no_notify, no_bars=False):
         finally:
             lock.release()
     verdicts = classify_close(ev_stocks, bars_by_code, uni["rows"], today)
+
+    # trailing 跟踪态收盘更新（跨日持续态：high 以当日完整根 high 归并——
+    # 自 0.0.25 部署日起累积，不回溯建仓前历史，如实口径）
+    tr_st = st.setdefault("trailing", {})
+    for r in uni["rows"]:
+        bars = bars_by_code.get(r["code"])
+        if r.get("_cost") and bars \
+                and str(bars[-1].get("date", ""))[:10] == today and bars[-1].get("high"):
+            tr = tr_st.setdefault(r["code"], {"armed": False, "high": 0.0})
+            tr["high"] = max(tr.get("high") or 0.0, bars[-1]["high"])
+
+    # 波段带 trail_ref 收盘直判（07 P2 预钉「波段结束复核」）：台账留痕
+    # （notify=False——收盘批量的通知面是「收盘复核完成」运维条，不逐票打扰）；
+    # 幂等去重：--close 重跑不重复追加（台账是事实源，重复行会污染复核节渲染）
+    trail_breaks = trail_break_scan(uni["rows"], bars_by_code, today)
+    if trail_breaks:
+        seen_tb = {e["code"] for e in events if e.get("rule") == "band_trail_break"}
+        trail_breaks = [b for b in trail_breaks if b["code"] not in seen_tb]
+    if trail_breaks:
+        append_jsonl(os.path.join(p["events"], today + ".jsonl"), [
+            {"ts": _now().isoformat(timespec="seconds"), "code": b["code"],
+             "market": next((r["market"] for r in uni["rows"]
+                             if r["code"] == b["code"]), "?"),
+             "kind": "close", "rule": "band_trail_break", "level": "T0",
+             "notify": False, "mech_risk": None,
+             "review": vrules._REVIEW_HINT["band_trail_break"],
+             "facts": {"close": b["close"], "trail_ref": b["trail_ref"],
+                       "dist_pct": round((b["close"] / b["trail_ref"] - 1) * 100, 2),
+                       "note": "收盘破波段带 trail_ref（position 轨纪律参考线）"}}
+            for b in trail_breaks])
+        events = read_jsonl(os.path.join(p["events"], today + ".jsonl"))
 
     # 港股源每日抽检（07「源校验」：全部在盯港股，末轮快照 vs 当日收盘价；
     # 末轮距收盘竞价有缓冲，阈值 0.5%——P1 只作标注，不改变盘中取数源）
@@ -794,12 +1163,32 @@ def close_pass(state_dir, uni, st, cfg, no_notify, no_bars=False):
                 if gaps else "",
                 "；当日判休市停轮" if st["rules"]["halted"].get(market) else ""))
     lines.append("")
+    # 操作复核节（0.0.25）：事件 × 纪律映射投影 + 权重分桶提示（只投影
+    # 不重裁决；权重只落百分比——金额/数量不落盘）
+    review_lines = render_review_lines(events, uni["rows"])
+    weight_lines = weight_review_lines(uni["rows"], ticks)
+    if review_lines or weight_lines:
+        lines.append("## 操作复核（事件 × 纪律映射 · 只投影不重裁决 · 待用户裁量）")
+        lines.append("")
+        lines += review_lines
+        if weight_lines:
+            lines.append("- 权重提示（A/港分桶不折算，fx 不进判定）：")
+            lines += ["  " + w for w in weight_lines]
+        lines.append("")
     unresolved = [e for e in events if e.get("code") != "*"
                   and (e.get("mech_risk") or {}).get("downgrade")
                   and e["rule"] in PRICE_RULES]
+    # 按 rule 出摘要词（P1-2：机械降档族已不止止损——ma20_break 是 ×0.98 破位，
+    # 止损时代硬编码文案会张冠李戴）
+    _focus_text = {"stop_break": "止损击穿加深", "stop_break_confirmed": "止损线击穿确认",
+                   "ma20_break": "MA20 破位（×0.98）降档 medium"}
+    by_code = {}
+    for e in unresolved:
+        by_code.setdefault(e["code"], set()).add(e["rule"])
     lines.append("## 次日盯盘重点")
-    for code in dict.fromkeys(e["code"] for e in unresolved):
-        lines.append("- %s：止损线击穿确认（机械降档事实待全诊消费）" % code)
+    for code, rls in sorted(by_code.items()):
+        lines.append("- %s：%s（机械降档事实待全诊消费）" % (
+            code, "；".join(sorted(_focus_text.get(r, r) for r in rls))))
     if not unresolved:
         lines.append("- 无未处理机械降档事件")
     lines += [""]
@@ -810,6 +1199,8 @@ def close_pass(state_dir, uni, st, cfg, no_notify, no_bars=False):
         f.write("\n".join(lines))
     print("close: 终判 %d 只，日报已渲染 monitor/day-summary/%s.md"
           % (len(verdicts), today), flush=True)
+    notify("收盘复核完成：终判 %d 只 · 操作复核与全文见 day-summary/%s.md"
+           % (len(verdicts), today), no_notify=no_notify)   # 运维类（事实级）
     st["close_done"] = True
     save_state(state_dir, st)
 
@@ -1024,6 +1415,14 @@ def selftest():
         check("position 轨波段带不覆盖短线锚（profile 过滤）",
               by["600001"]["target1"] == 11.50
               and "band_lo" not in by["600001"].get("key_levels", {}))
+        check("波段带三键并行投影（0.0.25：独立行键不互覆）",
+              by["600001"]["band_lo"] == 8.00 and
+              by["600001"]["band_hi"] == 12.00 and
+              by["600001"]["trail_ref"] == 10.50 and
+              by["600001"]["band_levels_source"] == "signals")
+        check("无 position 信号票波段带缺省（禁现算充锚）",
+              by["600003"].get("band_lo") is None
+              and by["600003"]["band_levels_source"] == "none")
         check("模拟回退 allocation", by["000002"]["stop"] == 9.50
               and by["000002"]["levels_source"] == "allocation"
               and by["000002"]["entry_ref"] == 9.70)
@@ -1098,6 +1497,179 @@ def selftest():
                          {"600001": [{"date": "2026-11-01", "close": 9.7}]},
                          uni_rows, today)
     check("末根非当日挂起", out[0]["verdicts"] == ["末根日 K 未出或非当日，次日补判"])
+
+    # 6c) 复核短语文案钉（07 通知口径 0.0.25 修订）：带短语 rule 以「·XX复核」
+    #     结尾；运维类零「复核」负断言；目标价1= 排版修复钉（I-027 连读歧义）
+    s = fmt_facts("target_hit", {"price": 9.47, "target1": 9.43}, "金蝶国际",
+                  review="止盈复核")
+    check("target_hit 文案带复核短语与等号排版",
+          s.endswith("·止盈复核") and "目标价1=9.43" in s and "目标价1 9.43" not in s)
+    check("止损文案带复核短语",
+          fmt_facts("stop_break", {"price": 9.0, "stop": 9.8, "depth_pct": 8.2},
+                    "甲", review="止损复核").endswith("·止损复核"))
+    check("ma20_break 文案带复核短语",
+          fmt_facts("ma20_break", {"price": 27.3, "ma20": 28.0, "dist_pct": -2.5},
+                    "甲", review="均线复核").endswith("·均线复核"))
+    check("trailing_exit 文案带复核短语",
+          fmt_facts("trailing_exit", {"price": 27.9, "ma20": 28.0,
+                                      "high_since_entry": 30.0,
+                                      "dist_ma20_pct": -0.4},
+                    "甲", review="跟踪止损复核").endswith("·跟踪止损复核"))
+    check("波段带文案带复核短语",
+          fmt_facts("band_lo_touch", {"price": 24.9, "band_lo": 25.0,
+                                      "dist_pct": -0.4},
+                    "甲", review="低吸复核").endswith("·低吸复核"))
+    for r, f in (("frozen", {"rounds": 5}),
+                 ("market_halted", {"snapshot_date": "2026-11-01"}),
+                 ("hk_delayed", {"max_lag_min": 18, "threshold_min": 15}),
+                 ("source_dropped", {"codes": ["600001"]}),
+                 ("storm_digest", {"suppressed_count": 3, "kinds": {}})):
+        check("运维类 %s 零复核短语" % r, "复核" not in fmt_facts(r, f, "甲"))
+    import io
+    import contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        notify("文案链路钉", no_notify=True)
+    check("notify 尾注单点追加",
+          "文案链路钉" in buf.getvalue()
+          and NOTIFY_TAIL in buf.getvalue())
+
+    # 6d) technical 预热门（0.0.25）：data_stale 事件构造（当日性门以
+    #     warmup_technical 内联逐票 data_date 判定为单一事实源，无独立谓词）
+    dse = _data_stale_event(_now(), ["600001", "000002"], 21)
+    check("data_stale 事件形态（运维类零短语）",
+          dse["rule"] == "data_stale" and dse["notify"]
+          and "review" not in dse and dse["facts"]["lacking"] == 2)
+
+    # 6e) 运行期注入（annotate_runtime）：内存生效、磁盘宇宙零污染（脱敏）
+    with tempfile.TemporaryDirectory() as td:
+        os.makedirs(os.path.join(td, "monitor"))
+        with open(os.path.join(td, "portfolio.json"), "w", encoding="utf-8") as f:
+            json.dump({"holdings": [{"code": "600001", "market": "cn",
+                                     "quantity": 100, "cost_price": 10.00}]}, f)
+        scan = os.path.join(td, "reports", "_scans", "d", "portfolio")
+        os.makedirs(scan)
+        with open(os.path.join(scan, "allocation.json"), "w", encoding="utf-8") as f:
+            json.dump({"rows": [{"code": "600009", "price": 9.90, "lots": 4,
+                                 "cost": 3960, "stop": 9.5, "entry_ref": 9.7,
+                                 "target1": 11.0}]}, f)
+        rows = [{"code": "600001", "market": "cn", "kind": "real"},
+                {"code": "600009", "market": "cn", "kind": "sim"},
+                {"code": "600100", "market": "cn", "kind": "watch"}]
+        uni_disk = {"date": "2026-11-03", "rows": [dict(r) for r in rows]}
+        varchive.write_json_atomic(os.path.join(td, "monitor", "universe.json"),
+                                   uni_disk)
+        before = open(os.path.join(td, "monitor", "universe.json"),
+                      encoding="utf-8").read()
+        cache = {"date": "2026-11-03",
+                 "codes": {"600001": {"ma20": 9.9, "data_date": "2026-11-03"},
+                           "600009": {"ma20": None, "data_date": "2026-11-02"}}}
+        annotate_runtime(rows, td, cache)
+        by = {r["code"]: r for r in rows}
+        check("real 注入成本/数量/ma20",
+              by["600001"]["_cost"] == 10.0 and by["600001"]["_qty"] == 100
+              and by["600001"]["_ma20"] == 9.9)
+        check("sim 成本=配置日价（cost≡lots×100×price）、末根非当日 ma20 禁用",
+              by["600009"]["_cost"] == 9.90 and by["600009"]["_qty"] == 400
+              and by["600009"]["_ma20"] is None)
+        check("watch 档不注入成本", by["600100"].get("_cost") is None)
+        after = open(os.path.join(td, "monitor", "universe.json"),
+                     encoding="utf-8").read()
+        check("注入零落盘（磁盘宇宙不变，脱敏）", before == after
+              and "_cost" not in after and "_ma20" not in after)
+
+    # 6f) 收盘终判新分支：MA20/trailing_exit/band（完整根现算口径）
+    bars20 = [{"date": "2026-10-%02d" % d, "close": 30.0, "low": 29.0,
+               "high": 31.0, "open": 30.0} for d in range(1, 21)]
+    uni_rows2 = [{"code": "600010", "market": "cn", "name": "甲", "kind": "real",
+                  "stop": None, "target1": None, "entry_ref": None,
+                  "band_lo": 25.0, "band_hi": 31.0, "trail_ref": 20.0}]
+    bb = bars20 + [{"date": today, "close": 27.0, "low": 26.5, "high": 29.0,
+                    "open": 28.5}]
+    out = classify_close({"600010": [{"rule": "ma20_break"},
+                                     {"rule": "trailing_exit"},
+                                     {"rule": "band_lo_touch"},
+                                     {"rule": "band_hi_touch"}]},
+                         {"600010": bb}, uni_rows2, today)
+    vs = "；".join(out[0]["verdicts"])
+    ma20_r = round(sum(b["close"] for b in bb[-20:]) / 20, 3)
+    check("MA20 破位完整根终判（勿复用盘中 estimated）",
+          "MA20 破位收盘确认" in vs and ("%.2f" % ma20_r) in vs)
+    check("trailing_exit 终判与波段带终判",
+          "跟踪止损破线收盘确认" in vs and "波段带下沿 收盘收回" in vs)
+    out = classify_close({"600010": [{"rule": "band_hi_touch"}]},
+                         {"600010": bb}, uni_rows2, today)
+    check("波段带上沿收盘收回", "波段带上沿 收盘收回" in out[0]["verdicts"][0])
+
+    # 6g) band_trail_break 收盘直判扫（trail_ref 破线出、未破不出、末根非当日不判）
+    rows_t = [{"code": "600011", "name": "乙", "trail_ref": 28.0},
+              {"code": "600012", "name": "丙", "trail_ref": 20.0}]
+    bars_map = {"600011": bb, "600012": bb}
+    tb = trail_break_scan(rows_t, bars_map, today)
+    check("trail_ref 破线直判", [x["code"] for x in tb] == ["600011"]
+          and tb[0]["close"] == 27.0)
+    check("trail_ref 末根非当日不判",
+          trail_break_scan(rows_t, bars_map, "2026-11-30") == [])
+
+    # 6h) 操作复核节渲染（事件×纪律映射 + 五档投影；无事件不出）
+    rows_r = [{"code": "600013", "market": "cn", "name": "丁", "kind": "real",
+               "target1": 11.0, "stop": 9.5, "signal_action": "reduce",
+               "signal_family": "bear", "pos_signal_action": "watch"}]
+    evs = [{"code": "600013", "rule": "target_hit"},
+           {"code": "*", "rule": "market_halted"},
+           {"code": "600013", "rule": "abnormal_move"}]
+    rl = render_review_lines(evs, rows_r)
+    check("操作复核行含纪律映射与五档投影",
+          any("止盈纪律复核" in x and "trailing" in x and "资金留存不追补" in x
+              for x in rl)
+          and any("default 轨最近信号 reduce → 减仓档复核" in x
+                  and "position 轨最近信号 watch" in x for x in rl))
+    check("非价位事件与无事件不出操作复核",
+          all("600013" in x or True for x in rl)
+          and render_review_lines([{"code": "*", "rule": "market_halted"}],
+                                  rows_r) == [])
+    # P1-1/P2-1 钉：trailing_armed/band_trail_break 在终判集（PRICE_RULES）外、
+    # 但必须进操作复核（07「日报行」承诺）——复核覆盖集独立于终判集
+    rl2 = render_review_lines([{"code": "600013", "rule": "band_trail_break"},
+                               {"code": "600013", "rule": "trailing_armed"}],
+                              rows_r)
+    check("波段结束/武装事件进操作复核",
+          any("波段结束复核" in x and "三层下行门" in x for x in rl2)
+          and any("跟踪止损已武装" in x for x in rl2))
+
+    # 6i) 权重分桶提示（>16% 出行、单票桶跳过、零金额数量落盘、限实盘）
+    rows_w = [{"code": "600021", "market": "cn", "name": "戊", "kind": "real",
+               "_qty": 100},
+              {"code": "600022", "market": "cn", "name": "己", "kind": "real",
+               "_qty": 100},
+              {"code": "600023", "market": "cn", "name": "辛", "kind": "sim",
+               "_qty": 100},
+              {"code": "00005", "market": "hk", "name": "庚", "kind": "real",
+               "_qty": 100}]
+    tks = [{"code": "600021", "price": 30.0}, {"code": "600022", "price": 1.0},
+           {"code": "600023", "price": 50.0}, {"code": "00005", "price": 9.0}]
+    wl = weight_review_lines(rows_w, tks)
+    check("权重 >16% 出复核行（本桶分母、fx 不进判定、sim 不混桶）",
+          len(wl) == 1 and "600021" in wl[0] and "96.8%" in wl[0]
+          and "次日减至 ≤14%" in wl[0] and "A 股桶（CNY）" in wl[0])
+    check("权重行零金额数量字面量（脱敏）",
+          not any(k in "".join(wl) for k in ("3000", "100 股", '"_qty"')))
+    check("单票桶分母无分散意义跳过",
+          weight_review_lines([rows_w[2]], tks) == [])
+
+    # 6j) ensure_state：trailing 跨日保留、tech 同日继承跨日重置（0.0.25）
+    with tempfile.TemporaryDirectory() as td:
+        st = ensure_state(td, "2026-11-02")
+        st["trailing"] = {"600001": {"armed": True, "high": 12.0}}
+        st["tech"] = {"date": "2026-11-02", "tries": 2, "stale_notified": True}
+        save_state(td, st)
+        st2 = ensure_state(td, "2026-11-03")
+        check("trailing 跨日保留（防隔日 trailing_exit 漏报）",
+              st2["trailing"] == {"600001": {"armed": True, "high": 12.0}})
+        check("tech 跨日重置", st2["tech"]["tries"] == 0
+              and st2["tech"]["stale_notified"] is False)
+        st3 = ensure_state(td, "2026-11-02")
+        check("tech 同日继承", st3["tech"]["tries"] == 2)
 
     # 6b) 走势参考附件（09 P2）：close_pass 重渲消费上一张收盘卡（<today——
     #     当日卡 17:35 批量才出）；无目录/当日卡不出节

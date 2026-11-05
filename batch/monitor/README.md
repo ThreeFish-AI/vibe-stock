@@ -57,12 +57,15 @@ plutil -lint "$PL" && launchctl bootstrap gui/$(id -u) "$PL"
 
 | 文件 | 职责 |
 | --- | --- |
-| watch.py | 宇宙派生 / 价格面轮询（qt 批量 + r_hk） / 通知 / 收盘复核 / 港股源验证 / selftest |
-| rules.py | 触发规则引擎（确定性纯函数：价位类规则 + 去抖/冷却/风暴闸/静默窗）+ selftest |
+| watch.py | 宇宙派生 / 价格面轮询（qt 批量 + r_hk） / 通知（事件带「××复核」短语）/ technical 当日预热 / 收盘复核（含操作复核节）/ 港股源验证 / selftest |
+| rules.py | 触发规则引擎（确定性纯函数：价位类 + 0.0.25 机械判据族 ma20/trailing/波段带 + 去抖/冷却/风暴闸/静默窗 + 复核短语注入）+ selftest |
 | com.threefish.vibestock.monitor.plist | LaunchAgent 模板（三类占位，按上方 sed 替换） |
 
 坑位速查：裸 python3 缺 CA 证书会 SSL 失败，一律 uv 运行；launchd 不继承
 shell PATH，模板用 uv 绝对路径；港股响应变量名 `v_r_hkXXXXX`、时间戳
 `YYYY/MM/DD HH:MM:SS`（2026-11-02 实测）；科创 688 量纲为股；量能禁用跨源量
 比；盯盘轮询不写 fetch_state 熔断账本（本地退避），仅 --close/--verify-hk
-经全局锁写账本；selftest fixture 一律合成标的（红线：零真实持仓入仓）。
+与当日 technical 预热（0.0.25）经全局锁写账本（预热锁竞争 30s 让路、重试
+≤3 耗尽出 data_stale 判据禁用——设计内常态）；MA20/跟踪止损判据当日性以
+`monitor/technical-cache.json` 为前置门；trailing 武装态跨日住 state 顶层；
+selftest fixture 一律合成标的（红线：零真实持仓入仓）。

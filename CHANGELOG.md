@@ -7,6 +7,19 @@
 > 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），
 > 此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.25] - 2026-11-05
+
+### Added
+
+- **盯盘「事件 → 操作」族（四路深读 + Plan 代理钉实现细节；用户两项裁定 2026-11-05：A=通知面允许「××复核」短语（修订 0.0.15 通知口径零短语句与 0.0.24 盘中携带「只报事实」句，仍禁减仓/离场/加仓等指令词，沿 07 波段带「低吸/高抛复核」预钉先例）；B=范围全上、T2 本期只钉规约实施另开 PR）**：① **事件级复核短语（I-027）**：rules `_REVIEW_HINT` 表 + `_emit` 单点注入 `ev.review`（随台账落全量含被压制行，P3 monitor: 画像可消费）；watch fmt_facts 尾拼 `·XX复核`（止盈/止损/消息面/T2成交/均线/跟踪止损/低吸/高抛/波段结束复核），运维类零短语（selftest 负断言钉）；**排版修复**：「触及目标价1 9.43」标签序号与数值连读歧义（用户误读为 19.43）改「触及目标价1=9.43」等号钉住归属。② **P2 机械判据族落地（I-028）**：ma20_break（price<ma20×0.98 降档 medium，episode 复位再报）、trailing_armed/trailing_exit（+15% 武装跨日态、退出只认先前武装态；armed/high 住 state 顶层 trailing 键跨日保留——日归零会隔日漏报；facts 禁落成本派生量）、band_lo_touch/band_hi_touch/band_trail_break（position 波段带三键独立行键并行投影，与 default 三价不互覆；收盘 trail_ref 直判）；**前置门数据通道自建**：technical 无既有缓存可复用（derive_technical 只落临时 workdir）——当日预热（FetchLock+账本）拉 universe 日 K 落 `monitor/technical-cache.json`（全派生量脱敏），重试 ≤3 耗尽出一次性 data_stale 事件、判据当日禁用（不虚构判据）；成本/数量运行期注入（annotate_runtime 内存态、磁盘产物零污染，sim 每股成本=allocation 配置日价 cost≡lots×100×price 实证）。③ **收盘操作复核节（I-027）**：day-summary 新增「## 操作复核」——当日价位类事件 × 既有纪律映射确定性投影（06 三价「+15% 后改 trailing/资金留存不追补」、持有期、波段带纪律参考线注记）+ 04 持仓者五档投影（signals 最新 action 机械映射 `_TIER_TEXT`，只投影不重裁决、以报告原文为准）+ 权重分桶提示（A/港本桶末轮市值分母、>16% → 次日减至 ≤14%、fx 不进判定、单票桶跳过、只落百分比）；收盘终判新分支（MA20/trailing_exit 完整根现算勿复用盘中 estimated、band 两键坐实/收回）；收盘复核完成运维通知一条（事实级）。④ **T2 规约钉死（I-029，零代码）**：07 升级链补事件升级三级语义表（T0 事实/T1 轻量刷新/T2 会话内局部重诊）、P2 建议卡产物契约（schema monitor-advice/1、落位 monitor/advice/<date>/<code>.md、脱敏边界：T+1 可卖份额原值/距成本涨幅/武装线值不落 monitor/ 产物）、T2 会话触发入口手动先行（exit 2 自动接管后置 0.0.26+）；指数 MA60 实施形态钉死（--close 经 fetch_index 现取、as_of≠今日不判定）。
+- 盯盘回归门禁：rules selftest 36→57 checks、watch 42→74 checks（新增复核短语文案钉、运维类负断言、波段带投影、注入零落盘、tech 前置门、终判新分支、操作复核/权重渲染、trailing 跨日保留；判据只收严）；07 回归门禁句文档数同步（历史 36/42 与运行数漂移一并修正）。
+- **合入前 code-reviewer 评审修复（P1×2 + P2 族）**：band_trail_break 落盘后零可见面（复核覆盖集与终判集 PRICE_RULES 分立、补波段结束复核行）；次日盯盘重点按 rule 出摘要词（ma20_break 不再误渲染为止损击穿）；band_trail_break 台账幂等去重（--close 重跑不重复追加）；trailing high 收盘归并取数集扩至全部有成本票（data_stale 日不丢当日 high）；预热锁竞争让路不计次；权重分桶限实盘（sim 推演盘不混桶、不稀释实盘权重）。
+- **合入前 code-reviewer 第二轮评审修复（P1×1 + P2×3）**：trailing high 累积纳入快照当日高点（rules init/max 与 close bar high 归并同口径——只用 price 会漏开盘竞价/快照间隙脉冲，低估「盘中高点」事实并延迟武装，8b fixture 补显式 high 钉）；收盘终判 0.98 字面量改引 rules DEFAULT_CFG `ma20_break_ratio`（盘中触发与收盘终判同一把尺）；tech_cache_fresh 生产零消费死代码删除（当日性门以 warmup 内联逐票判定为 SSOT，watch checks 76→74）；07 门禁句 75→74 再同步。
+
+### Changed
+
+- **规约句修订**：07 通知口径句（0.0.15 无条件全局规则层）按用户 2026-11-05 裁定改写（允许事件级「××复核」短语、指令词仍禁）；09 盘中携带句、07 走势参考携带括号句同步；07 分期表 P2 标「部分实施」；SKILL.md description/判表/version、README 盯盘节同步；AGENTS.md 测试段核对无涉（本就无数值/版本指针）。
+
 ## [0.0.24] - 2026-11-05
 
 ### Added
