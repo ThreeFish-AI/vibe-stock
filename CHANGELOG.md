@@ -8,7 +8,7 @@
 
 ### Changed
 
-- **全仓 Markdown「一段一行」合规化（纯排版，零语义变化）**：按《Markdown Source Layout Specifications》（一段一行，句内句间禁手动折行；显示行宽交 Renderer 软折行）将 18 篇 markdown 文档（CHANGELOG、SKILL、README、evals/batch/strategies README、references 十篇）约 1465 处段内手动折行并回单行；判据为规约 awk 检测器对全部 tracked md exit 0；折点空格按仓内存活文本实测惯例还原（汉字↔字母数字/`code`/`[链接]`/数学符号加盘古之白空格，链式 `a/b`、全角标点两侧直连），并修正 23 处折行吃掉的语义空格（命令参数 `--with efinance $T/…`、`--evidence .vs/…`、`gui/$(id -u) "$PL"`、元组 `horizon, regime`、`·`/`→`/`+` 分隔符等）；`git show`+工作树去空白逐字节比对全量一致，零内容增删。
+- **全仓 Markdown「一段一行」合规化（纯排版，零语义变化）**：按《Markdown Source Layout Specifications》（一段一行，句内句间禁手动折行；显示行宽交 Renderer 软折行）将 18 篇 markdown 文档（CHANGELOG、SKILL、README、evals/batch/batch-monitor/strategies README、references 十一篇含 PIPELINE）约 1465 处段内手动折行并回单行；判据为规约 awk 检测器对全部 tracked md exit 0；折点空格按仓内存活文本实测惯例还原（汉字↔字母数字/`code`/`[链接]`/数学符号加盘古之白空格，链式 `a/b`、全角标点两侧直连），并修正 24 处折行吃掉的语义空格（命令参数 `--with efinance $T/…`、`--evidence .vs/…`、`gui/$(id -u) "$PL"`、元组 `horizon, regime`、schema 键值 `leg: T1_open`、`·`/`→`/`+` 分隔符等）；`git show`+工作树去空白逐字节比对全量一致，零内容增删。
 
 ## [0.0.25] - 2026-11-05
 

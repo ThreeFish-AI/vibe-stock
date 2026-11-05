@@ -107,7 +107,7 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
 
 ## sim 组合 SSOT（P3 预留——用户裁定「一并建」，schema 先钉死）
 
-`~/.vibe-stock/sim-portfolio.json`：`{version, updated_at, budget, cash, positions:[{code, market, lots, avg_cost, status: holding|pending_open|closed, stop, entry_ref, target1, trailing_armed, high_since_entry, tranches:[{leg:T1_open|T2_limit|T3_trigger, lots, status: pending|filled|expired, ref_price, filled_price, filled_at}]}], operations:[{code, side, lots, price, ts, tranche_ref}]}`——T2 触价写回经用户逐笔确认，成交价 min(open, entry_ref)，时间精确到秒（+08:00）；台账事件 t2_pending_fill 是其唯一盘中来源。实施走 P3 PR。
+`~/.vibe-stock/sim-portfolio.json`：`{version, updated_at, budget, cash, positions:[{code, market, lots, avg_cost, status: holding|pending_open|closed, stop, entry_ref, target1, trailing_armed, high_since_entry, tranches:[{leg: T1_open|T2_limit|T3_trigger, lots, status: pending|filled|expired, ref_price, filled_price, filled_at}]}], operations:[{code, side, lots, price, ts, tranche_ref}]}`——T2 触价写回经用户逐笔确认，成交价 min(open, entry_ref)，时间精确到秒（+08:00）；台账事件 t2_pending_fill 是其唯一盘中来源。实施走 P3 PR。
 
 ## 后验（P3 预留）
 
