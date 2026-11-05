@@ -286,10 +286,13 @@ def evaluate(ticks, universe, state, cfg, now, trailing=None):
                 # 跨日持久化态必须显式判 None
                 tr = trailing.get(code)
                 if tr is None:
-                    tr = trailing[code] = {"armed": False, "high": t["price"]}
+                    tr = trailing[code] = {"armed": False, "high": 0.0}
                 was_armed = bool(tr.get("armed"))   # 退出只认「先前已武装」态：
                 # 武装当轮价格本就在 MA20 下方不算新「破」（06：+15% 改锚后破线离场）
-                tr["high"] = max(tr.get("high") or 0.0, t["price"])
+                # high 累积含快照当日高点（与 close_pass bar high 归并同口径；
+                # 只用 price 会漏开盘竞价/快照间隙脉冲，低估「盘中高点」事实）
+                tr["high"] = max(tr.get("high") or 0.0, t["price"],
+                                 t.get("high") or 0.0)
                 if not tr.get("armed") and tr["high"] >= row["_cost"] \
                         * cfg["trailing_arm_pct"]:
                     tr["armed"] = True
@@ -667,30 +670,31 @@ def selftest():
                      [rowt], st, cfg, t0, trailing=tr)
     check("浮盈达武装线触发武装事件",
           any(e["rule"] == "trailing_armed" and e.get("review") == "跟踪止损复核"
-              for e in ev) and tr["600001"]["armed"] is True)
+              for e in ev) and tr["600001"]["armed"] is True
+          and tr["600001"]["high"] == 11.7)   # 含快照当日高点（price 11.60 < high 11.70）
     check("武装当轮在 MA20 上方不出退出事件",
           not any(e["rule"] == "trailing_exit" for e in ev))
     ar = [e for e in ev if e["rule"] == "trailing_armed"][0]
     check("武装事件 facts 零成本派生量（脱敏）",
           "gain" not in json.dumps(ar["facts"]) and "arm_level" not in
           json.dumps(ar["facts"]) and "cost" not in json.dumps(ar["facts"]))
-    ev, _ = evaluate([_tick(price=11.65, chg=1.0)], [rowt], st, cfg, mins(1),
-                     trailing=tr)
-    check("high 跨轮 max 更新", tr["600001"]["high"] == 11.65
+    ev, _ = evaluate([_tick(price=11.65, chg=1.0, high=11.8)], [rowt], st, cfg,
+                     mins(1), trailing=tr)
+    check("high 跨轮 max 更新（含快照当日高点）", tr["600001"]["high"] == 11.8
           and not any(e["rule"] == "trailing_exit" for e in ev))
-    ev, _ = evaluate([_tick(price=10.90, chg=1.0)], [rowt], st, cfg, mins(2),
-                     trailing=tr)
+    ev, _ = evaluate([_tick(price=10.90, chg=1.0, high=10.90)], [rowt], st, cfg,
+                     mins(2), trailing=tr)
     check("武装后破 MA20 出退出事件",
           any(e["rule"] == "trailing_exit" and e["notify"] for e in ev))
-    ev, _ = evaluate([_tick(price=10.89, chg=1.0)], [rowt], st, cfg, mins(3),
-                     trailing=tr)
+    ev, _ = evaluate([_tick(price=10.89, chg=1.0, high=10.89)], [rowt], st, cfg,
+                     mins(3), trailing=tr)
     check("退出事件当日一次", not any(e["rule"] == "trailing_exit" for e in ev))
     st2 = fresh_state("2026-11-03")
     tr2 = {}
-    ev, _ = evaluate([_tick(price=10.50, chg=1.0)], [rowt], st2, cfg, t0,
-                     trailing=tr2)
-    ev, _ = evaluate([_tick(price=10.90, chg=1.0)], [rowt], st2, cfg, mins(1),
-                     trailing=tr2)
+    ev, _ = evaluate([_tick(price=10.50, chg=1.0, high=10.50)], [rowt], st2, cfg,
+                     t0, trailing=tr2)
+    ev, _ = evaluate([_tick(price=10.90, chg=1.0, high=10.90)], [rowt], st2, cfg,
+                     mins(1), trailing=tr2)
     check("未武装破 MA20 不出退出事件",
           not any(e["rule"] == "trailing_exit" for e in ev)
           and not tr2.get("600001", {}).get("armed"))

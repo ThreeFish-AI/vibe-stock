@@ -364,13 +364,6 @@ def load_tech_cache(state_dir):
         return {}
 
 
-def tech_cache_fresh(cache, today):
-    """当日性门（07「P2 前置门」字义：cache.date == 今日 且各票日 K 末根
-    data_date == 今日——末根非今日同样算 stale）。纯函数，离线可测。"""
-    return bool(cache) and cache.get("date") == today and bool(cache.get("codes")) \
-        and all(c.get("data_date") == today for c in cache["codes"].values())
-
-
 def _data_stale_event(now, lacking, total):
     """一次性 data_stale 运维事件（watch 级手工构造，仿 source_dropped——
     不带复核短语）。MA20/跟踪止损判据对缺数票当日禁用（_ma20 缺省自然跳过）。"""
@@ -815,7 +808,8 @@ def classify_close(ev_stocks, bars_by_code, uni_rows, today):
         ma20_full = vfetch._ma(closes, 20)
         if "ma20_break" in kinds:
             if ma20_full is not None:
-                hit = bar["close"] < ma20_full * 0.98
+                # 系数引 rules DEFAULT_CFG（SSOT）：盘中触发与收盘终判同一把尺
+                hit = bar["close"] < ma20_full * vrules.DEFAULT_CFG["ma20_break_ratio"]
                 item["verdicts"].append("MA20 破位收盘%s（%.2f / MA20 %.2f，完整根）"
                                         % ("确认" if hit else "撤回",
                                            bar["close"], ma20_full))
@@ -1540,20 +1534,8 @@ def selftest():
           "文案链路钉" in buf.getvalue()
           and NOTIFY_TAIL in buf.getvalue())
 
-    # 6d) technical 预热门（0.0.25）：当日性两态 + data_stale 事件构造
-    check("tech_cache 新鲜判定", tech_cache_fresh(
-        {"date": "2026-11-03", "codes": {"600001": {"ma20": 9.9,
-                                                    "data_date": "2026-11-03"}}},
-        "2026-11-03"))
-    check("tech_cache 跨日/末根非当日均 stale",
-          not tech_cache_fresh({"date": "2026-11-03",
-                                "codes": {"600001": {"ma20": 9.9,
-                                                     "data_date": "2026-11-03"}}},
-                               "2026-11-04")
-          and not tech_cache_fresh({"date": "2026-11-03",
-                                    "codes": {"600001": {"ma20": 9.9,
-                                                         "data_date": "2026-11-02"}}},
-                                   "2026-11-03"))
+    # 6d) technical 预热门（0.0.25）：data_stale 事件构造（当日性门以
+    #     warmup_technical 内联逐票 data_date 判定为单一事实源，无独立谓词）
     dse = _data_stale_event(_now(), ["600001", "000002"], 21)
     check("data_stale 事件形态（运维类零短语）",
           dse["rule"] == "data_stale" and dse["notify"]

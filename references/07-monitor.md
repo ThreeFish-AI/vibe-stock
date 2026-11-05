@@ -322,7 +322,7 @@ whipsaw 路径判据用日 K high/low（tick 缺口不影响判定）。
 ## 回归门禁
 
 `batch/monitor/rules.py --selftest`（57 checks）与 `watch.py --selftest`
-（75 checks，含 launchd 模板回归钉、outlook 17:35 槽模板钉、走势参考附件钉、
+（74 checks，含 launchd 模板回归钉、outlook 17:35 槽模板钉、走势参考附件钉、
 position 轨 profile 过滤钉、复核短语文案钉（含运维类负断言）、运行期注入
 零落盘钉、technical 前置门钉、收盘终判新分支钉、操作复核/权重分桶渲染钉
 与 trailing 跨日保留钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非
