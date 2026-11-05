@@ -4,7 +4,7 @@ description: 给一只 A 股或港股做全面诊股并产出专业决策报告�
 license: MIT
 compatibility: 联网模式需 uv 与 PyPI 可达（akshare/efinance/yfinance 经 uv run --with 临时依赖，绝不装全局）；快照模式零依赖零网络；宿主须能执行 Bash。
 metadata:
-  version: "0.0.25"
+  version: "0.0.26"
   author: "ThreeFish-AI"
   source: "机制蓝本 ZhuLinsen/daily_stock_analysis（MIT）+ negentropy 178 精读"
 allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
@@ -12,15 +12,7 @@ allowed-tools: Read Write Edit Glob Grep Bash WebSearch WebFetch
 
 # vibe-stock：诊股流水线（路由壳）
 
-本 Skill 是**路由层**：证据规约在 [references/01](references/01-evidence.md)、
-策略规约 [02](references/02-strategies.md)、裁决规约 [03](references/03-synthesis.md)、
-报告规约 [04](references/04-report.md)、后验规约 [05](references/05-postmortem.md)、
-批量子技能规约 [06](references/06-batch-scan.md)、中线规约
-[08](references/08-midterm.md)、走势参考规约
-[09](references/09-outlook.md)、加仓轨规约
-[10](references/10-add-on.md)、命令速查[PIPELINE.md](references/PIPELINE.md)；工具在 `scripts/`，批量参考实现在
-`batch/`，策略库在 `strategies/`。命令统一 `$T` = 本目录
-（`${CLAUDE_SKILL_DIR}`）。
+本 Skill 是**路由层**：证据规约在 [references/01](references/01-evidence.md)、策略规约 [02](references/02-strategies.md)、裁决规约 [03](references/03-synthesis.md)、报告规约 [04](references/04-report.md)、后验规约 [05](references/05-postmortem.md)、批量子技能规约 [06](references/06-batch-scan.md)、中线规约 [08](references/08-midterm.md)、走势参考规约 [09](references/09-outlook.md)、加仓轨规约 [10](references/10-add-on.md)、命令速查[PIPELINE.md](references/PIPELINE.md)；工具在 `scripts/`，批量参考实现在 `batch/`，策略库在 `strategies/`。命令统一 `$T` = 本目录（`${CLAUDE_SKILL_DIR}`）。
 
 ## 先判任务类型
 
@@ -89,27 +81,15 @@ uv run --no-project $T/scripts/adjudicate.py \
 uv run --no-project $T/scripts/diagnose.py report --stock 600519 --workdir .vs
 ```
 
-每步过门才进下一步：prepare 报 fetch_failed → 改快照模式或稍后重试；
-verdict 全 insufficient → 如实出「证据/意见不足」报告，不硬凑结论。
+每步过门才进下一步：prepare 报 fetch_failed → 改快照模式或稍后重试；verdict 全 insufficient → 如实出「证据/意见不足」报告，不硬凑结论。
 
 ## 红线（无条件全局规则：金融用途安全边界）
 
-1. **不构成投资建议、不下单、不保证收益**——报告免责段不得省略，对话结论
-   同样要带。
+1. **不构成投资建议、不下单、不保证收益**——报告免责段不得省略，对话结论同样要带。
 2. 意见必须来自证据包可见内容；证据缺失就写缺失，不脑补数据。
-3. 裁决链不许跳过或改写：LLM 只产 opinions/risk，聚合与最终信号一律以
-   verdict.json 为准。
-4. **汇率不进裁决**：HKD/CNY 只进 fx 扩展块与报告情报面、postmortem `--cny`
-   展示（人民币敞口是背景情报）；不得进信号判定、聚合、置信帽、策略 YAML
-   与 RiskGuard——后验 outcome 判定与台账归因默认仍按标的币种（条件/做法/
-   坑位详见 [01 · 汇率仅情报面](references/01-evidence.md) 与
-   [05](references/05-postmortem.md)）。
+3. 裁决链不许跳过或改写：LLM 只产 opinions/risk，聚合与最终信号一律以 verdict.json 为准。
+4. **汇率不进裁决**：HKD/CNY 只进 fx 扩展块与报告情报面、postmortem `--cny` 展示（人民币敞口是背景情报）；不得进信号判定、聚合、置信帽、策略 YAML 与 RiskGuard——后验 outcome 判定与台账归因默认仍按标的币种（条件/做法/坑位详见 [01 · 汇率仅情报面](references/01-evidence.md) 与 [05](references/05-postmortem.md)）。
 
 ## 后验与自校准
 
-隔若干交易日后（default 轨 T+1/3/5/10、position 轨 T+20/60/120）：
-`uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance
-$T/scripts/postmortem.py --stock <code>`——一次全量评估两轨：记对错、归因
-各自台账（ledger.json / ledger.position.json）、绩效因子与画像升降档
-（≥60% 升 / ≤40% 降 / <10 样本只观察），下次聚合各自吃到战绩权重；position
-轨仅 T+60 记分（判定带 σ_d×√h，规约见 references/05「期限轨」）。
+隔若干交易日后（default 轨 T+1/3/5/10、position 轨 T+20/60/120）：`uv run --no-project --with 'akshare==1.20.*' --with yfinance --with efinance $T/scripts/postmortem.py --stock <code>`——一次全量评估两轨：记对错、归因各自台账（ledger.json / ledger.position.json）、绩效因子与画像升降档（≥60% 升 / ≤40% 降 / <10 样本只观察），下次聚合各自吃到战绩权重；position 轨仅 T+60 记分（判定带 σ_d×√h，规约见 references/05「期限轨」）。

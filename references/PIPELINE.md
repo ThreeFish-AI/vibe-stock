@@ -1,16 +1,6 @@
 # PIPELINE · 五段流水线与命令速查
 
-路径变量（唯一定义处）：`$T` = skill 根（SKILL.md 所在目录；Claude Code 下即
-`${CLAUDE_SKILL_DIR}`）；`$W` = 本次诊股工作区（默认 `.vs/`）；状态目录
-`~/.vibe-stock/`（signals.json / ledger.json / fetch_state.json /
-reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](04-report.md)，不入仓）。
-本文件只覆盖单股五段流水线；多股批量（指数成分精选/筛 N/资金配置）走
-[06-batch-scan](06-batch-scan.md) 子技能（`batch/` 参考实现，命令序见
-[batch/README](../batch/README.md)）；在册股票盘中盯盘/收盘复核走
-[07-monitor](07-monitor.md) 盯盘子技能（`batch/monitor/` 参考实现）；
-中线（1–6 个月）因子口径与只降不升风险判据族见 [08-midterm](08-midterm.md)；
-持仓股加仓决策轨（三道门 + 三段确认制）见 [10-add-on](10-add-on.md)；
-在册股短/中期走势参考（零权重卡与收盘批量）见 [09-outlook](09-outlook.md)。
+路径变量（唯一定义处）：`$T` = skill 根（SKILL.md 所在目录；Claude Code 下即 `${CLAUDE_SKILL_DIR}`）；`$W` = 本次诊股工作区（默认 `.vs/`）；状态目录 `~/.vibe-stock/`（signals.json / ledger.json / fetch_state.json / reports/<code>.<market>/ 单日多版本与时间线索引——布局见 [04](04-report.md)，不入仓）。本文件只覆盖单股五段流水线；多股批量（指数成分精选/筛 N/资金配置）走 [06-batch-scan](06-batch-scan.md) 子技能（`batch/` 参考实现，命令序见 [batch/README](../batch/README.md)）；在册股票盘中盯盘/收盘复核走 [07-monitor](07-monitor.md) 盯盘子技能（`batch/monitor/` 参考实现）；中线（1–6 个月）因子口径与只降不升风险判据族见 [08-midterm](08-midterm.md)；持仓股加仓决策轨（三道门 + 三段确认制）见 [10-add-on](10-add-on.md)；在册股短/中期走势参考（零权重卡与收盘批量）见 [09-outlook](09-outlook.md)。
 
 ```text
 ① 取证据      fetch.py（多源回退+熔断冷却+八态+质量分；21 块=核心六块
@@ -92,22 +82,8 @@ uv run --no-project $T/scripts/outlook.py --selftest
 
 ## akshare 版本纪律
 
-命令面统一锁 `akshare==1.20.*`（minor 锁：拿补丁修复、不吃破坏性迁移——
-上游小版本内即发生接口文件迁移与列名随年份动态生成，2026-10 实证）。升版
-流程：①探活候选版本四源（日K/新闻/财务/板块）；②scripts 六件 selftest
-  全绿；③
-CHANGELOG 记录并同步本文件锁版本。
+命令面统一锁 `akshare==1.20.*`（minor 锁：拿补丁修复、不吃破坏性迁移——上游小版本内即发生接口文件迁移与列名随年份动态生成，2026-10 实证）。升版流程：①探活候选版本四源（日K/新闻/财务/板块）；②scripts 六件 selftest 全绿；③ CHANGELOG 记录并同步本文件锁版本。
 
 ## 港股速查
 
-代码形态 `hk00700` / `0700.HK` / `00700` 统一归一 5 位（`00700`，报告目录
-`00700.hk`）；Yahoo 侧再转 4 位（0700.HK）。已接入：
-fundamentals（东财 HKF10→yf，质量分 85 good）、valuation（em-hk-ind 具名列
-快照+baidu 5 年分位）、research（etnet→yf 双源：逐券商目标价/EPS/评级 +
-90 日 EPS 修正方向）、notices（em-notice ann_type=H 单源，盈警/回购分型）、
-moneyflow（南向持股：披露 T-1、持股变动对应成交 D-2，口径见 [01](01-evidence.md)）、news（qq_news 单源）、market（港股指数）。
-仍 not_supported：chip/forecast/unlock/holder/industry（港股无对应披露形态，
-见 01 backlog）。港股全链约 +12 次 HTTP（20 簇之 etnet 为港股唯一新簇）。
-fx 块取 HKD/CNY 入 pack 与 report 情报面（人民币敞口；汇率不进信号判定与
-策略 YAML）；postmortem 加 `--cny` 可对 hk 信号附人民币口径展示（判定与
-归因仍港币，见 [05](05-postmortem.md)）。
+代码形态 `hk00700` / `0700.HK` / `00700` 统一归一 5 位（`00700`，报告目录 `00700.hk`）；Yahoo 侧再转 4 位（0700.HK）。已接入：fundamentals（东财 HKF10→yf，质量分 85 good）、valuation（em-hk-ind 具名列快照+baidu 5 年分位）、research（etnet→yf 双源：逐券商目标价/EPS/评级 + 90 日 EPS 修正方向）、notices（em-notice ann_type=H 单源，盈警/回购分型）、moneyflow（南向持股：披露 T-1、持股变动对应成交 D-2，口径见 [01](01-evidence.md)）、news（qq_news 单源）、market（港股指数）。仍 not_supported：chip/forecast/unlock/holder/industry（港股无对应披露形态，见 01 backlog）。港股全链约 +12 次 HTTP（20 簇之 etnet 为港股唯一新簇）。fx 块取 HKD/CNY 入 pack 与 report 情报面（人民币敞口；汇率不进信号判定与策略 YAML）；postmortem 加 `--cny` 可对 hk 信号附人民币口径展示（判定与归因仍港币，见 [05](05-postmortem.md)）。

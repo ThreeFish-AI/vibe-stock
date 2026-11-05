@@ -1,9 +1,6 @@
 # batch/ · 批量诊股参考实现
 
-口径以 [references/06-batch-scan.md](../references/06-batch-scan.md) 为准
-（SSOT），本目录是其参考实现脚本。变量：`$SK` = skill 根目录（本仓 clone 或
-`~/.claude/skills/vibe-stock`）；`$SCAN` = 批量运行根目录，形如
-`~/.vibe-stock/reports/_scans/<date>-<pool>`（如 `…/2026-11-02-hs300`）。
+口径以 [references/06-batch-scan.md](../references/06-batch-scan.md) 为准（SSOT），本目录是其参考实现脚本。变量：`$SK` = skill 根目录（本仓 clone 或 `~/.claude/skills/vibe-stock`）；`$SCAN` = 批量运行根目录，形如 `~/.vibe-stock/reports/_scans/<date>-<pool>`（如 `…/2026-11-02-hs300`）。
 
 ## 文件清单
 
@@ -21,11 +18,7 @@
 | outlook/com.threefish.vibestock.outlook.plist | — | 收盘批量 launchd 模板（周一至五 17:35 单槽；安装三步见模板注释；语义见 09 分期表 P2） |
 | postmortem/com.threefish.vibestock.postmortem.plist | — | 信号后验收盘评估 launchd 模板（周一至五 18:05 单槽；安装三步见模板注释；节奏与预算见 [05](../references/05-postmortem.md)「收盘后评估节奏」） |
 
-`wf_*.mjs` 是宿主工作流脚本形态（phase/agent/parallel/pipeline/log/args 全局，
-文件头注释写明参数化路径——`scan_root`/`skill_dir`（及 `codes`/`shortlist`）
-必填且必须为**绝对路径**：宿主脚本面无 Node/process API，`~` 展开由宿主在
-调用前完成）；不支持该形态的宿主按 [06](../references/06-batch-scan.md) 的
-「宿主子代理能力」门槛降级为逐股串行。
+`wf_*.mjs` 是宿主工作流脚本形态（phase/agent/parallel/pipeline/log/args 全局，文件头注释写明参数化路径——`scan_root`/`skill_dir`（及 `codes`/`shortlist`）必填且必须为**绝对路径**：宿主脚本面无 Node/process API，`~` 展开由宿主在调用前完成）；不支持该形态的宿主按 [06](../references/06-batch-scan.md) 的「宿主子代理能力」门槛降级为逐股串行。
 
 ## 端到端命令序
 
@@ -49,21 +42,11 @@ uv run --no-project $SK/batch/portfolio.py --scan-root $SCAN --budget 100000
 uv run --no-project $SK/batch/render_index.py --scan-root $SCAN --pool hs300
 ```
 
-复盘：`uv run --no-project --with 'akshare==1.20.*' --with efinance --with
-yfinance $SK/scripts/postmortem.py`（skill 自带，见
-[references/05](../references/05-postmortem.md)）。
+复盘：`uv run --no-project --with 'akshare==1.20.*' --with efinance --with yfinance $SK/scripts/postmortem.py`（skill 自带，见 [references/05](../references/05-postmortem.md)）。
 
 ## 口径关系
 
-- 批量层只做编排，单股裁决链（opinions/risk → adjudicate → verdict）零改动；
-  版本要求 ≥0.0.6（聚合分语义修复后直接消费管线口径）。
-- 门限档、降级惩罚、R_sel/合分权重、仓位带与三价纪律的数值与取舍理由见
-  [06](../references/06-batch-scan.md) 各节；脚本参数
-  （--g1-steps/--min-pass/--w-min/--w-max/--industry-cap 等）是其可调面，
-  改参数不改规约语义。
-- 深评摘要 `digest.py` 与主报告 `render_index.py` 不写运行日志类 json；各
-  产物文件的唯一事实源地位与「勿手改」纪律见
-  [06「产物 SSOT 布局」](../references/06-batch-scan.md)。
-- 本目录属参考实现，不设 `--selftest` 门禁：改动以 scripts/ 六件 selftest
-  全绿（AGENTS.md 测试口径）+ `py_compile`/`node --check` 语法冒烟 + 06
-  口径复核为准。
+- 批量层只做编排，单股裁决链（opinions/risk → adjudicate → verdict）零改动；版本要求 ≥0.0.6（聚合分语义修复后直接消费管线口径）。
+- 门限档、降级惩罚、R_sel/合分权重、仓位带与三价纪律的数值与取舍理由见 [06](../references/06-batch-scan.md) 各节；脚本参数（--g1-steps/--min-pass/--w-min/--w-max/--industry-cap 等）是其可调面，改参数不改规约语义。
+- 深评摘要 `digest.py` 与主报告 `render_index.py` 不写运行日志类 json；各产物文件的唯一事实源地位与「勿手改」纪律见 [06「产物 SSOT 布局」](../references/06-batch-scan.md)。
+- 本目录属参考实现，不设 `--selftest` 门禁：改动以 scripts/ 六件 selftest 全绿（AGENTS.md 测试口径）+ `py_compile`/`node --check` 语法冒烟 + 06 口径复核为准。
