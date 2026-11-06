@@ -35,7 +35,7 @@ launchd 关系：三份 plist（monitor 09:15 / outlook 17:35 / postmortem 18:05
 
 ### 5 差异化主张（四支柱）
 
-①**可解释**：每条意见 rationale 引证据块数值、聚合确定性、分歧显式化——vs 问财/妙想黑箱（A-01/A-11）；②**后验校准公开**：T+N 记分台账、绩效因子升降档、预测带校准表 + 主 Agent decision log 同纪律（`agent:` 前缀）——竞品无用户可见自校准闭环，Danelfin 审计面板是方向线索（B-15，未核验：官网 403，非判据）；③**本地 SSOT + LLM 零直连审计线**：全状态在 `~/.vibe-stock/` 可审计、所有 LLM 调用单通道经 Claude Code、stream-json 归档+decision log 双轨——vs SaaS 数据外流（F-36/F-38）；④**确定性安全壳**：RiskGuard 只降不升、门禁只收严、交易人工确认、paper 永不接真实下单、断言器硬门——vs「AI 帮你炒股」执行风险叙事（C-36/G-31）。对照锚：成本结构（订阅复用，单股诊股 LLM 边际成本美分级、月 $10–30 量级 vs 竞品 AI 档 $178–254/月或 3888 元/月档，H-21/H-09/A-55）不列主主张、避免定价对标失真。
+①**可解释**：每条意见 rationale 引证据块数值、聚合确定性、分歧显式化——vs 问财/妙想黑箱（A-01/A-11）；②**后验校准公开**：T+N 记分台账、绩效因子升降档、预测带校准表 + 主 Agent decision log 同纪律（`agent:` 前缀）——竞品无用户可见自校准闭环，Danelfin 审计面板是方向线索（B-15，未核验：官网 403，非判据）；③**本地 SSOT + LLM 零直连审计线**：全状态在 `~/.vibe-stock/` 可审计、所有 LLM 调用单通道经 Claude Code、stream-json 归档+decision log 双轨——vs SaaS 数据外流（F-36/F-38）；④**确定性安全壳**：RiskGuard 只降不升、门禁只收严、交易人工确认、paper 永不接真实下单、断言器硬门——vs「AI 帮你炒股」执行风险叙事（C-36/G-31）。对照锚：成本结构（订阅复用；单股诊股裸 token 成本美分级（$0.002–0.09，H-21），叠加每次 spawn 固定开销（约 $0.20，F-59/H-41）后全成本约 $0.3–0.65/次，7 只实盘按交易日各诊一次月约 $45–100 API 等价量级（推导估算）；vs 竞品 AI 档 $178–254/月或 3888 元/月档，H-09/A-55）不列主主张、避免定价对标失真。
 
 ### 6 红线继承与新增红线
 
@@ -51,7 +51,7 @@ launchd 关系：三份 plist（monitor 09:15 / outlook 17:35 / postmortem 18:05
 
 ### 8 双层架构总览
 
-见 [main-architecture 图](../diagrams/main-agent/main-architecture/main-architecture.svg)。四层：确定性层（launchd 三槽+scripts 六件+batch，零改动、可独活——CC 不可达时盯盘/台账/后验全部照常，R10 结构保证）；主 Agent 层（FastAPI 单体：面板/路由/队列/CCClient/断言器/paper 引擎）；CC 大脑层（claude headless 子进程，唯一 LLM 通道）；状态层（既有 SSOT + `agent/` 唯一新写区）。分层铁律（图上醒目标注）：**LLM 零直写裁决面**——signals/ledger 的写者永远是既有确定性脚本（R3/R8 的写权限归属实现：单进程内以模块级写者纪律+断言器扫描落地，M3 无人值守开启时评估升级为 B 候选的进程级分离）。单进程单点风险处置：第四 LaunchAgent KeepAlive{Crashed} 自动重启+台账幂等断点重放+显式 AbandonProcessGroup 防守护重启连杀在跑 CC 子进程（I-57/I-59）。
+见 [main-architecture 图](../diagrams/main-agent/main-architecture/main-architecture.svg)。四层：确定性层（launchd 三槽+scripts 六件+batch，零改动、可独活——CC 不可达时盯盘/台账/后验全部照常：launchd 三槽直接调起脚本、不经主 Agent 进程，此为结构保证）；主 Agent 层（FastAPI 单体：面板/路由/队列/CCClient/断言器/paper 引擎）；CC 大脑层（claude headless 子进程，唯一 LLM 通道）；状态层（既有 SSOT + `agent/` 唯一新写区）。分层铁律（图上醒目标注）：**LLM 零直写裁决面**——signals/ledger 的写者永远是既有确定性脚本（R3/R8 的写权限归属实现：单进程内以模块级写者纪律+断言器扫描落地，M3 无人值守开启时评估升级为 B 候选的进程级分离）。单进程单点风险处置：第四 LaunchAgent KeepAlive{Crashed} 自动重启+台账幂等断点重放+显式 AbandonProcessGroup 防守护重启连杀在跑 CC 子进程（I-57/I-59）。
 
 ### 9 Claude Code 集成通道选型
 
@@ -153,7 +153,7 @@ decision log 指标族：意图路由命中率（确定性 vs 兜底）、三段
 | # | 决策点 | 推荐默认 | 理由 |
 | :--- | :--- | :--- | :--- |
 | D1 | 产品命名 | 方案 PR 由用户裁定（候选：vibe-pilot / vs-agent；不得含「Claude Code」字样，Anthropic 品牌约束） | 命名属用户裁量 |
-| D2 | M3 预算闸数值 | 单会话 $0.5、日累计 $5、月 $30 量级（占位 estimated，对照单股诊股 $0.002–0.09 与 Sidekick $0.35–0.49/条锚） | 机制已钉死、数值待用户定 |
+| D2 | M3 预算闸数值 | 单会话 $1、日累计 $8、月 $100 量级（占位 estimated：按含固定开销全成本 $0.3–0.65/次 × 7 只实盘日诊推导，对照 §9 固定成本 $0.20/次与 Sidekick $0.35–0.49/条锚；单会话闸压到 $0.5 以内会让常规诊股频繁触顶） | 机制已钉死、数值待用户定 |
 | D3 | AbandonProcessGroup | true（保留在跑 CC 会话，泄漏由巡检兜底） | 守护重启连杀子进程代价高于泄漏巡检成本（I-57/D-08） |
 | D4 | Tauri 桌面壳 | M2 门口评审、默认不做（浏览器 tab+pywebview 已覆盖） | C 候选自认边际价值存疑（judge value 7） |
 | D5 | watch.py exit 2 自动接管时点 | M3 与预算闸同批启用（07 坑位④协调问题届时裁定） | 对齐 07 规约预留 |
