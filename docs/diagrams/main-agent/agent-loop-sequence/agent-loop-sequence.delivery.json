@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "4cc8c6a2-0557-49b9-b7f5-4ce8a065c9f2",
+  "status": "current",
+  "command": "deliver",
+  "type": "sequence",
+  "input": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/docs/diagrams/main-agent/agent-loop-sequence/agent-loop-sequence.json",
+  "output": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/docs/diagrams/main-agent/agent-loop-sequence/agent-loop-sequence.html",
+  "specification": {
+    "sha256": "9492d0206eeb276561a2ed9f159c3615b60c4e9362844b8f187640c47d01081c",
+    "bytes": 6361
+  },
+  "artifact": {
+    "sha256": "f6d2066411a806e1b950f45de64b15fd17c043bf3e345da591b4504430ddd88b",
+    "bytes": 770262
+  }
+}

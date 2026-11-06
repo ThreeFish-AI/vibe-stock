@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "c1419ba3-40ec-496e-8f6e-9ba92b1ee679",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/docs/diagrams/main-agent/main-architecture/main-architecture.json",
+  "output": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/docs/diagrams/main-agent/main-architecture/main-architecture.html",
+  "specification": {
+    "sha256": "9ff5c8f673d4049d78670fce2b719cd8fb9bd53862be437001826123dd84a467",
+    "bytes": 7986
+  },
+  "artifact": {
+    "sha256": "72144b6d5a541dd3abb5f353477304522d0294f66e2b6c0c8d0c27ee5ff1ffb2",
+    "bytes": 787587
+  }
+}
