@@ -122,6 +122,26 @@ decision log 指标族：意图路由命中率（确定性 vs 兜底）、三段
 
 形态钉死「浏览器 tab 直连本地 FastAPI」：StaticFiles 同进程托管前端、单 worker 裸跑 uvicorn（I-03/I-34/I-61），NiceGUI 纯 Python 起步免前端构建链（I-40）、独立窗口留 pywebview（I-41）、桌面壳不进 M1（I-01/I-02）。页面七页：①今日总览（三槽状态+事件流+在跑会话）②诊股工作台（输入码→五段→渲染报告）③盯盘事件与 T2 复核（事件给候选动作+复核短语）④模拟盘（三腿状态/逐笔确认表/权益曲线）⑤建议卡库 ⑥后验战绩（全样本含亏损、模拟绩效标注假设性）⑦审计与预算。实时通道：htmx 轮询起步（180s tick 近实时足够，I-23）→按需 SSE（sse-starlette+watchfiles 盯台账目录，I-27/I-45）；WebSocket 不进方案（I-26）；告警主通道永久留在服务端 osascript（后台标签页冻结+程序化通知收紧，I-48/I-51），面板只做前台展示。
 
+### 16.1 界面原型（合成数据示意）
+
+七页中的四张主界面已有高保真原型（自包含单文件 HTML + 整页 PNG，`docs/prototypes/main-agent/`，1440px 视口）：迭代只需改对应 HTML 后按同口径重截图，无构建链依赖。数据全部合成：A 股用合成代码与名称、港股以「HK 示例」文字标识，与用户真实持仓零配对；每页页脚固定「原型示意 · 全部数据为合成示例，不构成投资建议，系统不下单」。视觉基调：暗色量化终端风、A 股红涨绿跌、表格固定列宽单行省略。
+
+![今日总览（盘前）](../prototypes/main-agent/overview.png)
+
+图 16-1 今日总览（页面①）：三槽状态条、在册事件流、在跑 CC 会话与预算水位。
+
+![诊股工作台](../prototypes/main-agent/diagnosis.png)
+
+图 16-2 诊股工作台（页面②）：五段流水线进度、双轨意见板、裁决卡（RiskGuard 降档链）与报告渲染位。
+
+![盯盘事件与 T2 复核](../prototypes/main-agent/monitor-advice.png)
+
+图 16-3 盯盘事件与 T2 复核（页面③）：事件表（复核短语列）+ T2 建议卡 monitor-advice/1 + 本地通知预览。
+
+![模拟盘](../prototypes/main-agent/paper.png)
+
+图 16-4 模拟盘（页面④）：NR-2 永不接真实下单横幅、三腿建仓持仓表、record_fill 逐笔确认队列与权益曲线。
+
 ### 17 实施规约落位预案
 
 本方案获批即视为以下规约骨架获批，实施期首个 PR 建 `references/12-orchestration.md`（编号续排）并同步 AGENTS 目录速查/SKILL 判表：①定位与边界（LLM 唯一通道、写权限归属、并存收编）；②CCClient 通道契约（§9 签名级）；③主 Loop 六段规约（§10，含 NR-1/NR-3 断言器判据族）；④状态扩展写拓扑（§11 表）；⑤预算闸与降级规约（§13/§14，NR-4 判据只收严）；⑥门禁预案：新增 `agent/` 编排件 selftest（断言器判据+路由表+撮合口径纯函数回归，判据只收严），六件 scripts selftest 口径不变、盯盘两件（rules.py/watch.py）旁路门禁义务随 batch/monitor 联动改动同规。paper 引擎规约体量大时 M2 拆 `references/13-paper.md`；T2 建议卡规约细节以 07 已钉死契约为准不另立。
