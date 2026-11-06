@@ -51,7 +51,11 @@ launchd 关系：三份 plist（monitor 09:15 / outlook 17:35 / postmortem 18:05
 
 ### 8 双层架构总览
 
-见 [main-architecture 图](../diagrams/main-agent/main-architecture/main-architecture.svg)。四层：确定性层（launchd 三槽+scripts 六件+batch，零改动、可独活——CC 不可达时盯盘/台账/后验全部照常：launchd 三槽直接调起脚本、不经主 Agent 进程，此为结构保证）；主 Agent 层（FastAPI 单体：面板/路由/队列/CCClient/断言器/paper 引擎）；CC 大脑层（claude headless 子进程，唯一 LLM 通道）；状态层（既有 SSOT + `agent/` 唯一新写区）。分层铁律（图上醒目标注）：**LLM 零直写裁决面**——signals/ledger 的写者永远是既有确定性脚本（R3/R8 的写权限归属实现：单进程内以模块级写者纪律+断言器扫描落地，M3 无人值守开启时评估升级为 B 候选的进程级分离）。单进程单点风险处置：第四 LaunchAgent KeepAlive{Crashed} 自动重启+台账幂等断点重放+显式 AbandonProcessGroup 防守护重启连杀在跑 CC 子进程（I-57/I-59）。
+![主 Agent 双层架构总览](../diagrams/main-agent/main-architecture/main-architecture.svg)
+
+图 8-1 双层架构四层组件图：确定性层零改动可独活，LLM 零直写裁决面为分层铁律。
+
+四层：确定性层（launchd 三槽+scripts 六件+batch，零改动、可独活——CC 不可达时盯盘/台账/后验全部照常：launchd 三槽直接调起脚本、不经主 Agent 进程，此为结构保证）；主 Agent 层（FastAPI 单体：面板/路由/队列/CCClient/断言器/paper 引擎）；CC 大脑层（claude headless 子进程，唯一 LLM 通道）；状态层（既有 SSOT + `agent/` 唯一新写区）。分层铁律（图上醒目标注）：**LLM 零直写裁决面**——signals/ledger 的写者永远是既有确定性脚本（R3/R8 的写权限归属实现：单进程内以模块级写者纪律+断言器扫描落地，M3 无人值守开启时评估升级为 B 候选的进程级分离）。单进程单点风险处置：第四 LaunchAgent KeepAlive{Crashed} 自动重启+台账幂等断点重放+显式 AbandonProcessGroup 防守护重启连杀在跑 CC 子进程（I-57/I-59）。
 
 ### 9 Claude Code 集成通道选型
 
@@ -86,11 +90,19 @@ class CCResult:
 
 ### 10 主 Agent Loop 事件驱动设计
 
-见 [agent-loop-sequence 图](../diagrams/main-agent/agent-loop-sequence/agent-loop-sequence.svg)。六段：①**触发源**三类（面板手动/launchd 槽完成事件经 watchfiles 监听台账/M3 盯盘事件自动接管），统一带 dedup_key 事件信封；入队前查 watch.lock 与取数串行锁，17:30–18:10 禁跑 report。②**意图路由**：YAML 确定性路由表（kind→任务模板：全诊/快速复查/T2 复核/批量波次/paper 确认/晨报复盘），零 LLM——routing 积木（C-76）；T0→本地通知、T1→diagnose prepare 两类零 LLM 分派。③**CC 会话**：每任务一次性 `claude -p` 短会话、fresh context（多轮长会话平均掉 39%，C-88）；`--session-id` 按日期+标的+任务派生 UUID；prompt 以 `/vibe-stock <code>` 拉起 Skill（F-49）。④**确定性后处理断言器**（落盘前置门，NR-3）：三段完成判据=退出码+result 信封+result 行存在（exit 0 不代表业务成功，D-01/D-05/D-06）；success 而 structured_output 缺失视为失败（strict 静默回退不可自证，F-14/F-15）；本地 draft-07 复验+红线断言族。⑤**落盘**：原子 os.replace 写 `agent/`，decision log 追加（hash 链）；建议卡链=重放过门 opinions→机械覆写 risk.json→adjudicate 原命令重裁决（NR-1）。⑥**后验反馈环**：decision log 以 `agent:` 前缀进 18:05 postmortem 槽记分；经验学习限定结算后+按标的限量 2–4 句短反思，盘中重诊不回灌近期对错结论（C-04/C-64/C-61）。
+![主 Agent Loop 六段时序](../diagrams/main-agent/agent-loop-sequence/agent-loop-sequence.svg)
+
+图 10-1 Loop 六段时序图：三触发源→意图路由→一次性 CC 会话→断言器→落盘→后验反馈环（含 M1/M2/M3 泳道与降级路径）。
+
+六段：①**触发源**三类（面板手动/launchd 槽完成事件经 watchfiles 监听台账/M3 盯盘事件自动接管），统一带 dedup_key 事件信封；入队前查 watch.lock 与取数串行锁，17:30–18:10 禁跑 report。②**意图路由**：YAML 确定性路由表（kind→任务模板：全诊/快速复查/T2 复核/批量波次/paper 确认/晨报复盘），零 LLM——routing 积木（C-76）；T0→本地通知、T1→diagnose prepare 两类零 LLM 分派。③**CC 会话**：每任务一次性 `claude -p` 短会话、fresh context（多轮长会话平均掉 39%，C-88）；`--session-id` 按日期+标的+任务派生 UUID；prompt 以 `/vibe-stock <code>` 拉起 Skill（F-49）。④**确定性后处理断言器**（落盘前置门，NR-3）：三段完成判据=退出码+result 信封+result 行存在（exit 0 不代表业务成功，D-01/D-05/D-06）；success 而 structured_output 缺失视为失败（strict 静默回退不可自证，F-14/F-15）；本地 draft-07 复验+红线断言族。⑤**落盘**：原子 os.replace 写 `agent/`，decision log 追加（hash 链）；建议卡链=重放过门 opinions→机械覆写 risk.json→adjudicate 原命令重裁决（NR-1）。⑥**后验反馈环**：decision log 以 `agent:` 前缀进 18:05 postmortem 槽记分；经验学习限定结算后+按标的限量 2–4 句短反思，盘中重诊不回灌近期对错结论（C-04/C-64/C-61）。
 
 ### 11 状态扩展设计
 
-见 [state-extension-dataflow 图](../diagrams/main-agent/state-extension-dataflow/state-extension-dataflow.svg)。`~/.vibe-stock/agent/` 布局与读写矩阵：
+![状态扩展数据流](../diagrams/main-agent/state-extension-dataflow/state-extension-dataflow.svg)
+
+图 11-1 状态扩展数据流图：既有 SSOT 与新增 `agent/` 唯一新写区的读写矩阵。
+
+`~/.vibe-stock/agent/` 布局与读写矩阵：
 
 | 路径 | 内容 | 主 Agent | 面板 | launchd 槽 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -104,7 +116,11 @@ sim-portfolio.json 留 `~/.vibe-stock/` 根（07 P3 schema 原样，写者=paper
 
 ### 12 模拟盘引擎设计
 
-本节全程受 **NR-2** 约束：永不接真实下单接口——含券商 API 直连与委托报文任何形态，模拟与实盘物理隔离；本节是未来 references/13-paper.md 的母体，红线句随拆分原样携带。见 [paper-trading-lifecycle 图](../diagrams/main-agent/paper-trading-lifecycle/paper-trading-lifecycle.svg)。纯确定性模块、零 LLM 参与。**撮合**（ch09 基线）：限价单严格穿价成交（买腿 low<limit、价=min(open,limit)；卖腿镜像），止损腿 max/min(open,stop)±滑点，同 bar 多触发按止损先发生的悲观序（触价口径可令年化摆动 ±240bps，E-05）；tick 穿越旋钮默认 ≥1 tick（E-04）。**三腿建仓**（06 Stage D + 07 P3 schema）：T1 开盘腿（次日竞价入口，E-52/E-53）/T2 限价腿（触价写回经用户逐笔确认、成交价 min(open,entry_ref)）/T3 触发确认腿。**滑点静态表**：A 股固定 5–10bp 起步+半价差与最小 tick 自行标定（散户小单冲击重要性仅 3.63%，E-18；不沿用任何引擎默认值——引擎默认域证据 E-73/E-74 未核验、仅作线索）；港股按最小价位分档（0.25–10 港元档 0.005 港元，仙股 1 tick≈167bp，E-55）；量相依冲击（Almgren 3/5 幂律、A 股指数 0.7）留大额/低流动性升级位（E-16/E-17）。**费用栈**分段常量：A 股卖出印花税 5bp+过户费 0.1bp 双边+佣金最低 5 元留用户配置位；港股印花税 10bp 双边向上取整 1 港元+交易费 0.00565%/边+SFC 0.0027%+AFRC 0.00015%+CCASS 0.002%（min 2 max 100 港元）（E-10~E-15）。**A 股本地化**：T+1（可卖=持仓−冻结−当日买入、日切清零，E-42/E-48）、100 股手数、涨跌停三态（一字板不可成交、涨停价最小变动单位取整）、停牌三规则、公司行动先送转后分红+分档红利税（E-09/E-26/E-41/E-43）。**港股腿门禁**：时戳新鲜度未过闸一律回落收盘复核成交（E-25；E-76/E-77 未核验，重探定谳前保守处置）。**纪律**：成分精选只做前向模拟不做历史回溯收益宣称（E-22/E-23）；逐笔成交 append-only+hash 链台账（A-65）；口径严于 Alpaca paper（不模拟滑点分红）与 TradingView paper（零费用）基线（E-56/E-58）。
+本节全程受 **NR-2** 约束：永不接真实下单接口——含券商 API 直连与委托报文任何形态，模拟与实盘物理隔离；本节是未来 references/13-paper.md 的母体，红线句随拆分原样携带。纯确定性模块、零 LLM 参与。
+
+![模拟盘生命周期状态图](../diagrams/main-agent/paper-trading-lifecycle/paper-trading-lifecycle.svg)
+
+图 12-1 模拟盘生命周期：allocation 导入→三腿限价建仓（T1/T2/T3）→holding→closed，成交写回经用户逐笔确认环。**撮合**（ch09 基线）：限价单严格穿价成交（买腿 low<limit、价=min(open,limit)；卖腿镜像），止损腿 max/min(open,stop)±滑点，同 bar 多触发按止损先发生的悲观序（触价口径可令年化摆动 ±240bps，E-05）；tick 穿越旋钮默认 ≥1 tick（E-04）。**三腿建仓**（06 Stage D + 07 P3 schema）：T1 开盘腿（次日竞价入口，E-52/E-53）/T2 限价腿（触价写回经用户逐笔确认、成交价 min(open,entry_ref)）/T3 触发确认腿。**滑点静态表**：A 股固定 5–10bp 起步+半价差与最小 tick 自行标定（散户小单冲击重要性仅 3.63%，E-18；不沿用任何引擎默认值——引擎默认域证据 E-73/E-74 未核验、仅作线索）；港股按最小价位分档（0.25–10 港元档 0.005 港元，仙股 1 tick≈167bp，E-55）；量相依冲击（Almgren 3/5 幂律、A 股指数 0.7）留大额/低流动性升级位（E-16/E-17）。**费用栈**分段常量：A 股卖出印花税 5bp+过户费 0.1bp 双边+佣金最低 5 元留用户配置位；港股印花税 10bp 双边向上取整 1 港元+交易费 0.00565%/边+SFC 0.0027%+AFRC 0.00015%+CCASS 0.002%（min 2 max 100 港元）（E-10~E-15）。**A 股本地化**：T+1（可卖=持仓−冻结−当日买入、日切清零，E-42/E-48）、100 股手数、涨跌停三态（一字板不可成交、涨停价最小变动单位取整）、停牌三规则、公司行动先送转后分红+分档红利税（E-09/E-26/E-41/E-43）。**港股腿门禁**：时戳新鲜度未过闸一律回落收盘复核成交（E-25；E-76/E-77 未核验，重探定谳前保守处置）。**纪律**：成分精选只做前向模拟不做历史回溯收益宣称（E-22/E-23）；逐笔成交 append-only+hash 链台账（A-65）；口径严于 Alpaca paper（不模拟滑点分红）与 TradingView paper（零费用）基线（E-56/E-58）。
 
 ### 13 安全与预算
 

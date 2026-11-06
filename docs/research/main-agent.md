@@ -22,6 +22,10 @@
 
 ⑥ **产品与工程形态**：竞品验证了 Skill/MCP 生态与本地大脑形态（moomoo AI Agent Toolkit 官方明示兼容 Claude Code 且智能交易默认模拟盘+实盘二次确认、老虎 tigeropen-skill 可装入 `~/.claude/skills/`）；成本上订阅复用经济成立（单股诊股裸 token 成本美分级；叠加每次 spawn 固定开销后全成本约 $0.3–0.65/次，单只每交易日诊一次月约 $6.5–14 API 等价量级、随实盘只数线性放大，推导估算）；本地 Web 面板选型收敛（浏览器 tab 直连 FastAPI、htmx 轮询起步按需 SSE、沿用 launchd 不引第二套调度器）；差异化四支柱=可解释+后验校准公开+本地 SSOT 与 LLM 零直连审计线+确定性安全壳（第 2–4、11、12 章 → 方案文档）。
 
+![主 Agent 双层架构总览](../diagrams/main-agent/main-architecture/main-architecture.svg)
+
+图 1-1 六条主线汇聚成的方案双层架构（设计落点，机制细节见方案文档 §8）。
+
 ## 第 2 章 国内竞品 teardown
 
 本章对问财、妙想、九方、券商 AI 与 OpenClaw 形态的国内产品逐家 teardown，聚焦诊股证据与输出形态、自动交易与条件单边界、模拟盘撮合规则三条轴线。总体图景：头部产品「结构化输出+可溯源」已与 vibe-stock 诊股报告同构，但证据深度浅、免费额度受限；自动执行是持牌券商卖点而非通用能力；各模拟盘公开撮合规则均未见滑点口径。
@@ -302,6 +306,10 @@ compaction 后项目根 CLAUDE.md 与 auto memory 从磁盘重注入，skill 正
 
 auto-compact 不可作无人值守的可靠依赖：2.1.153–2.1.183 多版本复现「上下文到 100% 停摆、需手动 /compact」回归，社区以 CLAUDE_CODE_AUTO_COMPACT_WINDOW 收小阈值自救（社区）（D-38）；中文逆向研究（bundle 反推、非官方确认）给出 200K 窗口阈值约 83.5%（167k tokens）与 3 连败断路器口径（D-39）；2.1.310 已有官方 `--autocompact`（auto 或 100k–1M tokens）可显式设压缩窗口，无需依赖逆向阈值（D-66）。
 
+![状态扩展数据流](../diagrams/main-agent/state-extension-dataflow/state-extension-dataflow.svg)
+
+图 7-1 文件态 SSOT 结论的方案落点：既有状态与新增 `agent/` 唯一新写区的读写矩阵（方案文档 §11）。
+
 ### 7.4 成本与限额工程：订阅轨是配额制，预算闸是估算口径
 
 价目锚点：Opus 5.5 输入 $4/输出 $20 per MTok、Sonnet 5.5 $2/$10、Haiku 5.5 $0.10/$0.50（prompt≤100k）、Batch 五折，粗估一次意见段（约 50–100k 输入+2k 输出、无缓存）$0.2–0.45（D-46）；prompt cache 写 5 分钟 TTL 1.25x、1 小时 2x，读默认 0.1x（Opus 5.5/Sonnet 5.5 仅 0.05x、Fable 5.1/Mythos 5.1 为 0.025x），最小 512 tokens、命中免费刷新、并行请求无法命中并发写缓存（Anthropic. Prompt caching, 2026-11-06. https://platform.claude.com/docs/en/build-with-claude/prompt-caching）（D-45）。订阅内主会话 cache 默认 1 小时 TTL、API key 5 分钟，断档超 TTL 后 resume 全量无缓存重算、/compact 在老会话恢复时最贵，缓存按机器+目录为域（官方 code.claude.com/docs/en/prompt-caching, 2026-11-06）（D-36）。
@@ -342,6 +350,10 @@ auto-compact 不可作无人值守的可靠依赖：2.1.153–2.1.183 多版本�
 ## 第 8 章 Claude Code 三通道集成矩阵与实测
 
 本章在本机 claude CLI 2.1.310（原生 arm64 二进制，--help 全进程 boot 实测 50–70ms）上，对主 Agent「唯一 LLM 大脑」的三条候选集成通道（headless CLI、Agent SDK、claude mcp serve）的通道语义、结构化输出、预算闸、权限信任与版本漂移逐项实测对拍，官方口径以现行文档为准（Anthropic. Headless mode, as-of 2026-11-06. https://code.claude.com/docs/en/headless）（F-04）。总结论：CLI 与 SDK 驱动同一 agent loop，可分别作主通道与对照通道；mcp serve 只是工具桥、不承载推理；无人值守风险集中在退出码单判、结构化输出静默回退、预算闸越限与旗标面漂移。
+
+![主 Agent Loop 六段时序](../diagrams/main-agent/agent-loop-sequence/agent-loop-sequence.svg)
+
+图 8-1 CLI 主通道结论的运行时形态：触发→路由→一次性 CC 会话→断言器→落盘→后验（方案文档 §10）。
 
 ### 8.1 三通道定位：大脑通道与工具桥
 
@@ -385,6 +397,10 @@ SDK 与 CLI 共享同一 loop，「headless CLI 主通道 + Agent SDK 对照」�
 ## 第 9 章 模拟盘与回测引擎设计基线
 
 模拟盘（paper trading）的可信度取决于撮合口径的现实性：主流引擎在「限价触价是否成交」上公开分裂，而成交假设单独即可反转回测结论（E-06）。本章按撮合口径、本地化约束与费用栈、滑点、防前视、统计准入、在位形态六面给出设计基线，结论方向一致：撮合、费用、滑点、记账须显式建模并公示口径，默认取保守侧。
+
+![模拟盘生命周期状态图](../diagrams/main-agent/paper-trading-lifecycle/paper-trading-lifecycle.svg)
+
+图 9-1 模拟盘基线的生命周期落点：allocation 导入→三腿限价建仓→holding→收盘复核→closed，成交写回经用户逐笔确认（方案文档 §12）。
 
 ### 9.1 撮合口径：穿价成交与悲观序
 
