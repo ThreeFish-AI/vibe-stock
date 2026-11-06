@@ -8,7 +8,7 @@
   "provenance": "current",
   "deliveryReceiptId": "3a05eb64-56de-45b0-8059-c6f3281be0fc",
   "artifact": {
-    "path": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/docs/diagrams/main-agent/paper-trading-lifecycle/paper-trading-lifecycle.html",
+    "path": "docs/diagrams/main-agent/paper-trading-lifecycle/paper-trading-lifecycle.html",
     "sha256": "638ff8f105007ab2c8139a75851b3ee86673ca72e0d60c8f81983ad06be2102d",
     "bytes": 760042
   },
@@ -896,7 +896,7 @@
     "contactSheet": "paper-trading-lifecycle.visual-check.html"
   },
   "sidecars": {
-    "directory": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/.archify/visual-check-paper-trading-lifecycle",
+    "directory": ".archify/visual-check-paper-trading-lifecycle",
     "receipt": "paper-trading-lifecycle.visual-check.json",
     "contactSheet": "paper-trading-lifecycle.visual-check.html",
     "files": [

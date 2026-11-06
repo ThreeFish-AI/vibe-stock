@@ -8,7 +8,7 @@
   "provenance": "current",
   "deliveryReceiptId": "c1419ba3-40ec-496e-8f6e-9ba92b1ee679",
   "artifact": {
-    "path": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/docs/diagrams/main-agent/main-architecture/main-architecture.html",
+    "path": "docs/diagrams/main-agent/main-architecture/main-architecture.html",
     "sha256": "72144b6d5a541dd3abb5f353477304522d0294f66e2b6c0c8d0c27ee5ff1ffb2",
     "bytes": 787587
   },
@@ -928,7 +928,7 @@
     "contactSheet": "main-architecture.visual-check.html"
   },
   "sidecars": {
-    "directory": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/.archify/visual-check-main-architecture",
+    "directory": ".archify/visual-check-main-architecture",
     "receipt": "main-architecture.visual-check.json",
     "contactSheet": "main-architecture.visual-check.html",
     "files": [

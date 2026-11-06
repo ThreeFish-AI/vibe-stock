@@ -8,7 +8,7 @@
   "provenance": "current",
   "deliveryReceiptId": "a42775ac-936f-4a1d-8677-c09756658d44",
   "artifact": {
-    "path": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/docs/diagrams/main-agent/state-extension-dataflow/state-extension-dataflow.html",
+    "path": "docs/diagrams/main-agent/state-extension-dataflow/state-extension-dataflow.html",
     "sha256": "7ea11794a6f2c6cb1777999f5c560290d9f5c205e22b4a45986927b34dbce501",
     "bytes": 768005
   },
@@ -896,7 +896,7 @@
     "contactSheet": "state-extension-dataflow.visual-check.html"
   },
   "sidecars": {
-    "directory": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/.archify/visual-check-state-extension-dataflow",
+    "directory": ".archify/visual-check-state-extension-dataflow",
     "receipt": "state-extension-dataflow.visual-check.json",
     "contactSheet": "state-extension-dataflow.visual-check.html",
     "files": [

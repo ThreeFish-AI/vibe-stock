@@ -8,7 +8,7 @@
   "provenance": "current",
   "deliveryReceiptId": "4cc8c6a2-0557-49b9-b7f5-4ce8a065c9f2",
   "artifact": {
-    "path": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/docs/diagrams/main-agent/agent-loop-sequence/agent-loop-sequence.html",
+    "path": "docs/diagrams/main-agent/agent-loop-sequence/agent-loop-sequence.html",
     "sha256": "f6d2066411a806e1b950f45de64b15fd17c043bf3e345da591b4504430ddd88b",
     "bytes": 770262
   },
@@ -928,7 +928,7 @@
     "contactSheet": "agent-loop-sequence.visual-check.html"
   },
   "sidecars": {
-    "directory": "/Users/cm.huang/conductor/workspaces/vibe-stock/hanoi-v1/.archify/visual-check-agent-loop-sequence",
+    "directory": ".archify/visual-check-agent-loop-sequence",
     "receipt": "agent-loop-sequence.visual-check.json",
     "contactSheet": "agent-loop-sequence.visual-check.html",
     "files": [
