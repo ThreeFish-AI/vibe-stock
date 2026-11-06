@@ -24,7 +24,7 @@
 | [docs/research/main-agent.md](../research/main-agent.md) | 主 Agent（Claude Code 唯一大脑）前期调研报告：159-agent 流水线、646 findings、14 章+拒绝引入清单 | 贡献者 / Agent |
 | [docs/research/main-agent-proposal.md](../research/main-agent-proposal.md) | 主 Agent 产品与技术方案（待审批）：四裁定内三候选比选、红线继承 13+NR-5、M1/M2/M3 分期 | 贡献者 / Agent |
 | [docs/diagrams/main-agent/](../diagrams/main-agent/) | 主 Agent 方案四张架构图（archify A 档四件套+visual-check 回执） | 贡献者 / Agent |
-| [docs/prototypes/main-agent/](../prototypes/main-agent/) | 主 Agent 四页产品原型（自包含 HTML+整页 PNG，全合成数据，方案 §16.1 嵌入） | 贡献者 / Agent |
+| [docs/prototypes/main-agent/](../prototypes/main-agent/) | 主 Agent 四页产品原型（自包含 HTML+整页 PNG，全合成数据，方案上篇 §2 借图展开嵌入） | 贡献者 / Agent |
 | [batch/monitor/README.md](../../batch/monitor/README.md) | 盯盘参考实现命令序、launchd 安装与文件清单 | Agent / 用户 |
 | [strategies/README.md](../../strategies/README.md) | 策略 YAML 库说明 | 贡献者 |
 | [evals/README.md](../../evals/README.md) | 合成 Fixture 与黄金样本 | 贡献者 |
