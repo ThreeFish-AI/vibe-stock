@@ -141,7 +141,7 @@
       "id": "panel",
       "type": "frontend",
       "label": "Web 面板",
-      "sublabel": "六页 · 全量只读",
+      "sublabel": "七页 · 读+命令通道",
       "tag": "展示与触发",
       "stage": 3,
       "row": 1,
@@ -324,7 +324,7 @@
       "items": [
         "monitor events 与槽完成事件（watchfiles）是意图路由的两个事件触发源，均以只读扇入组装有界上下文",
         "decisions.jsonl 以 agent: 前缀流入 18:05 后验槽记分；后验槽以既有写者身份写回 ledger，不新增第二写者",
-        "Web 面板全量只读：决策时间线 + 模拟盘视图，展示层零直写"
+        "Web 面板读 agent/ 与模拟盘视图；写仅经 agent/ 命令通道（任务提交、逐笔确认、预算），不写既有 SSOT"
       ]
     }
   ]

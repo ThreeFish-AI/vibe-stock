@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "a42775ac-936f-4a1d-8677-c09756658d44",
+  "deliveryReceiptId": "33424aac-436c-4483-b9f0-54645009e651",
   "artifact": {
     "path": "docs/diagrams/main-agent/state-extension-dataflow/state-extension-dataflow.html",
-    "sha256": "7ea11794a6f2c6cb1777999f5c560290d9f5c205e22b4a45986927b34dbce501",
-    "bytes": 768005
+    "sha256": "c975196a6a9c0d91c8a295212a05a7ae33b6e04639996b991fa28cd802a07bbf",
+    "bytes": 768075
   },
   "state": {
     "detail": "read",
@@ -896,7 +896,7 @@
     "contactSheet": "state-extension-dataflow.visual-check.html"
   },
   "sidecars": {
-    "directory": ".archify/visual-check-state-extension-dataflow",
+    "directory": ".archify/visual-check-state-extension-dataflow-r2",
     "receipt": "state-extension-dataflow.visual-check.json",
     "contactSheet": "state-extension-dataflow.visual-check.html",
     "files": [
@@ -906,23 +906,23 @@
         "file": "state-extension-dataflow.visual-check.html"
       },
       {
-        "sha256": "5487467b49cdd6be63860959fcc52c23f523c67b2020e3391b4682025e6c28f4",
-        "bytes": 147805,
+        "sha256": "d9eaadcd0a0fe305d6d93e903770e92b99f0fec913418b8ab890c8f1442a3f52",
+        "bytes": 148035,
         "file": "state-extension-dataflow.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "83e38717e15e9dfa616bc4e220e51c0555e090ebc34fcd094dc8a2478e02ed2d",
-        "bytes": 155401,
+        "sha256": "2b1afa5eef4895c4649569b0d5c5bca27fe753e711f1454b83ca4b8272fc9338",
+        "bytes": 155638,
         "file": "state-extension-dataflow.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "bb0b6e674ef1bd0b162221ec9a59f780928e758c2b151f60edbae0090d9ca39f",
-        "bytes": 215632,
+        "sha256": "bfeb570c6ffa45f77c51bc1b2eff993810138b90664ee84d67d938fbd9ce4bba",
+        "bytes": 216100,
         "file": "state-extension-dataflow.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "cb0ad54627e0f4f35f28850d99fd9dd27dc86ea03b6f21acbf395e0ae4933895",
-        "bytes": 230919,
+        "sha256": "711233ef4e43adfe526f75c5486b98977399d983dd079cde2d3f787bf9366d1a",
+        "bytes": 231372,
         "file": "state-extension-dataflow.visual-check.2048x1320.dark.png"
       }
     ]

@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "c1419ba3-40ec-496e-8f6e-9ba92b1ee679",
+  "deliveryReceiptId": "1bbea97e-9e40-4504-889c-e614626e0f45",
   "artifact": {
     "path": "docs/diagrams/main-agent/main-architecture/main-architecture.html",
-    "sha256": "72144b6d5a541dd3abb5f353477304522d0294f66e2b6c0c8d0c27ee5ff1ffb2",
-    "bytes": 787587
+    "sha256": "b5a8ae27f8f6d9f4c3d08358ea478620ed8a942e254e9e9c120096177df09b76",
+    "bytes": 787596
   },
   "state": {
     "detail": "read",
@@ -928,7 +928,7 @@
     "contactSheet": "main-architecture.visual-check.html"
   },
   "sidecars": {
-    "directory": ".archify/visual-check-main-architecture",
+    "directory": ".archify/visual-check-main-architecture-r2",
     "receipt": "main-architecture.visual-check.json",
     "contactSheet": "main-architecture.visual-check.html",
     "files": [
@@ -938,23 +938,23 @@
         "file": "main-architecture.visual-check.html"
       },
       {
-        "sha256": "99a0605fe83906efcab2f00fd7d747b2831eedffccf688f738257cf194ecf417",
-        "bytes": 143446,
+        "sha256": "e33b1fa40084188b4065060b8b06c89a3ed1d2322cb36853e1a8d68f96aa6cee",
+        "bytes": 143435,
         "file": "main-architecture.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "79dba1a92e98b9e3f719812e8fc5c109b81d970c85a28fc65ace680352ee8711",
-        "bytes": 153552,
+        "sha256": "177647d19d4ca32f629dada6cafae97e99f7bc52b8b352020ff603715697a7c8",
+        "bytes": 153538,
         "file": "main-architecture.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "c19879a448a02f5c61ef774eba574e22fdee1f367b1b567603c25769e804b64e",
-        "bytes": 213955,
+        "sha256": "a06bbd0902405ee8512b303ddf127dc08997b5ebba088c1b9125c76ea86b5411",
+        "bytes": 213895,
         "file": "main-architecture.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "6dc03f0c341746321afba7afb6e24edf8333a22626574ee02045b36628ebb981",
-        "bytes": 225911,
+        "sha256": "ce3d1cbe951e5b12bcfe18911373d9163fb9a144f3de204cf00293aee9e273d3",
+        "bytes": 225876,
         "file": "main-architecture.visual-check.2048x1320.dark.png"
       }
     ]

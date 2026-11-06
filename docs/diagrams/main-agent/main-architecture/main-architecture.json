@@ -14,7 +14,7 @@
     { "id": "ld-post", "type": "messagebus", "label": "launchd 18:05 后验槽", "sublabel": "postmortem 信号记分", "tag": "每日", "pos": [50, 270], "size": [205, 60] },
     { "id": "scripts", "type": "backend", "label": "scripts 确定性件", "sublabel": "adjudicate · diagnose · postmortem · lens · addon · outlook", "tag": "uv run --no-project · 含 fetch", "pos": [350, 130], "size": [350, 130] },
     { "id": "batch", "type": "backend", "label": "batch/ 编排", "sublabel": "06 批量 · 07 盯盘参考", "pos": [730, 240], "size": [190, 64] },
-    { "id": "web", "type": "frontend", "label": "Web 面板", "sublabel": "StaticFiles · 六页", "tag": "本地只读+触发", "pos": [40, 420], "size": [155, 64] },
+    { "id": "web", "type": "frontend", "label": "Web 面板", "sublabel": "StaticFiles · 七页", "tag": "本地读+命令通道", "pos": [40, 420], "size": [155, 64] },
     { "id": "router", "type": "backend", "label": "意图路由表", "sublabel": "YAML 意图→任务分派", "tag": "零 LLM", "pos": [280, 420], "size": [215, 64] },
     { "id": "queue", "type": "backend", "label": "任务队列", "sublabel": "幂等键 + WAL", "tag": "崩溃可恢复", "pos": [770, 420], "size": [210, 64] },
     { "id": "asserts", "type": "security", "label": "后处理断言器", "sublabel": "schema 校验 · 红线断言", "tag": "三段完成判据", "pos": [410, 540], "size": [195, 84] },
