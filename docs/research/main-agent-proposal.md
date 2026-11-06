@@ -108,7 +108,7 @@ sim-portfolio.json 留 `~/.vibe-stock/` 根（07 P3 schema 原样，写者=paper
 
 ### 13 安全与预算
 
-权限分级：L0 纯脚本（零 CC）/ L1 人在环 CC（面板触发）/ L2 无人值守 CC（M3、默认关）。CC 会话标准件：`--permission-mode dontAsk`+精确 `--allowedTools`+`--permission-prompts none`（拒绝记入 permission_denials 审计流水，F-24/F-28）；PreToolUse hook deny 为裁决链不可绕过的宿主侧抓手、零例外红线交 harness 强制（F-56/C-81）；paper 逐笔确认走 -p 第四决策值 defer 挂起等人工（F-57）。预算双闸+硬顶：内闸=每次 spawn 必带 `--max-budget-usd`（真实上限=cap+最贵单次调用，实测 $1 顶停于 $1.38，F-17/F-18）；外闸=发送前预检（任务数×单次估算 vs 日/月 USD 信封）+硬性次数闸；订阅轨按 token 数+等效美元双口径记账（F-19/F-34）；程序化用量独立 credit 池（Pro $20/Max 5x $100）耗尽监控（D-15）。面板安全：绑 127.0.0.1 之上加 TrustedHostMiddleware 白名单防 DNS rebinding（I-46/I-47）；数据面单文件/JSON 原子写，不引数据库。
+权限分级：L0 纯脚本（零 CC）/ L1 人在环 CC（面板触发）/ L2 无人值守 CC（M3、默认关）。CC 会话标准件：`--permission-mode dontAsk`+精确 `--allowedTools`+`--permission-prompts none`（拒绝记入 permission_denials 审计流水，F-24/F-28）；PreToolUse hook deny 为裁决链不可绕过的宿主侧抓手、零例外红线交 harness 强制（F-56/C-81）；paper 逐笔确认走 -p 第四决策值 defer 挂起等人工（F-57）。预算双闸+硬顶：内闸=每次 spawn 必带 `--max-budget-usd`（真实上限=cap+最贵单次调用，实测 $1 顶停于 $1.38，F-17/F-18）；外闸=发送前预检（任务数×单次估算 vs 日/月 USD 信封）+硬性次数闸；订阅轨按 token 数+等效美元双口径记账（F-19/F-34）；订阅登录态下程序化用量（`claude -p`/Agent SDK）仍计入订阅 5 小时/周额度窗口，独立 credit 池拆分已被官方暂缓（Anthropic. Use the Claude Agent SDK with your Claude plan, 2026-11-06 复核, https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan；暂缓非取消，列政策观察项）。预算数值按计费形态分档（D2）：形态由 `probe()` 认证态机判（订阅 OAuth 且无 ANTHROPIC_API_KEY，F-31），订阅形态数值放开、真实上限是额度窗口；若开启 usage credits 且未设支出上限，额度耗尽后会按量计费（官方 costs 页；D-44 另载中途静默切换且 /cost 停止累计），探针认证态一旦变化即按 API 档默认值收紧。面板安全：绑 127.0.0.1 之上加 TrustedHostMiddleware 白名单防 DNS rebinding（I-46/I-47）；数据面单文件/JSON 原子写，不引数据库。
 
 ### 14 可靠性与降级
 
@@ -153,7 +153,7 @@ decision log 指标族：意图路由命中率（确定性 vs 兜底）、三段
 | # | 决策点 | 推荐默认 | 理由 |
 | :--- | :--- | :--- | :--- |
 | D1 | 产品命名 | 方案 PR 由用户裁定（候选：vibe-pilot / vs-agent；不得含「Claude Code」字样，Anthropic 品牌约束） | 命名属用户裁量 |
-| D2 | M3 预算闸数值 | 单会话 $1、日累计 $8、月 $100 量级（占位 estimated：按含固定开销全成本 $0.3–0.65/次 × 7 只实盘日诊推导，对照 §9 固定成本 $0.20/次与 Sidekick $0.35–0.49/条锚；单会话闸压到 $0.5 以内会让常规诊股频繁触顶） | 机制已钉死、数值待用户定 |
+| D2 | M3 预算闸数值 | 按计费形态二选一（已裁定）：①**全部调用走订阅登录态（OAuth）→ 预算数值先完全放开**（`--max-budget-usd` 仍带高位哨兵值满足 NR-4，日/月 USD 信封不设闸、仅记账，硬性次数闸保留）；②**任一调用走 API Usage 计费 → 单会话 $1、日累计 $8、月 $100 量级**（占位 estimated：按含固定开销全成本 $0.3–0.65/次 × 7 只实盘日诊推导，对照 §9 固定成本 $0.20/次与 Sidekick $0.35–0.49/条锚；单会话闸压到 $0.5 以内会让常规诊股频繁触顶） | 机制已钉死（NR-4）、数值依计费形态：订阅登录态下 `claude -p` 仍计入订阅额度而非美元计费（官方帮助页，§13）；形态由 `probe()` 认证态机判，不凭配置自述 |
 | D3 | AbandonProcessGroup | true（保留在跑 CC 会话，泄漏由巡检兜底） | 守护重启连杀子进程代价高于泄漏巡检成本（I-57/D-08） |
 | D4 | Tauri 桌面壳 | M2 门口评审、默认不做（浏览器 tab+pywebview 已覆盖） | C 候选自认边际价值存疑（judge value 7） |
 | D5 | watch.py exit 2 自动接管时点 | M3 与预算闸同批启用（07 坑位④协调问题届时裁定） | 对齐 07 规约预留 |
@@ -168,7 +168,7 @@ decision log 指标族：意图路由命中率（确定性 vs 兜底）、三段
 | R-01 | 面板崩=编排停（单进程单点） | 第四 LaunchAgent 守护重启+台账幂等断点重放+AbandonProcessGroup | I-10/I-57 |
 | R-02 | CC 进程泄漏拖垮整机 | 超时杀树+单实例锁+重启孤儿巡检+watchdog | D-08/D-72 |
 | R-03 | CLI 版本回归/旗标漂移 | 钉版本+升级门禁三件套+versions/ 回滚；--bare 化头号观察项 | D-09/F-30/F-37/D-04 |
-| R-04 | 预算越限（事后计价） | 双闸+硬次数闸+token 双口径记账+credit 池监控 | F-18/F-35/D-15 |
+| R-04 | 预算越限（事后计价） | 双闸+硬次数闸+token 双口径记账+订阅额度窗口监控 | F-18/F-35 |
 | R-05 | stream 截断/静默丢 result | 三段判据+转写对账+一次性进程+resume | D-05/D-06 |
 | R-06 | OAuth 竞争/认证静默切换 | 多槽错峰+CC 串行化+认证态探针+unset API key | D-71/F-31 |
 | R-07 | 模拟盘口径争议 | 口径公示（本章）+保守侧默认+旋钮留白+hash 链台账 | E-05/E-06/A-65 |
@@ -177,6 +177,6 @@ decision log 指标族：意图路由命中率（确定性 vs 兜底）、三段
 | R-10 | 红线穿越（LLM 绕裁决链/敏感落盘） | 断言器硬门+PreToolUse deny+脱敏负断言 selftest+违例拒落盘 | F-56/C-81/NR-3 |
 | R-11 | 合规话术越界/AI washing | 措辞只述真实机制+免责四件套+AI 归责句+文案黑名单 | G-11/G-24/A-59 |
 | R-12 | launchd 退出连坐杀 CC 子进程 | AbandonProcessGroup+优雅关停窗<ExitTimeOut | I-57/I-59 |
-| R-13 | 订阅权益单方变动/credit 池政策变化 | 双通道兜底（订阅 OAuth+API key）+成本双口径记账 | H-27/D-15 |
+| R-13 | 订阅权益单方变动（含已暂缓的程序化用量 credit 池拆分重启） | 双通道兜底（订阅 OAuth+API key）+成本双口径记账 | H-27/D-15（拆分已暂缓） |
 
 *本方案仅供学习研究，不构成投资建议；系统不下单、不改单、不撤单、不保证收益。实施待用户审批后启动。*
