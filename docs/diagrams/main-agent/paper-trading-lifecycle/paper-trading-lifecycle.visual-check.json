@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "3a05eb64-56de-45b0-8059-c6f3281be0fc",
+  "deliveryReceiptId": "3de42414-7b72-4fea-939b-e3ea74c0384b",
   "artifact": {
     "path": "docs/diagrams/main-agent/paper-trading-lifecycle/paper-trading-lifecycle.html",
-    "sha256": "638ff8f105007ab2c8139a75851b3ee86673ca72e0d60c8f81983ad06be2102d",
-    "bytes": 760042
+    "sha256": "caff2449f71fd158ff9105c4fdb547c6fd61bcc9489b3c7aea15cfac7fc22460",
+    "bytes": 760039
   },
   "state": {
     "detail": "read",
@@ -896,7 +896,7 @@
     "contactSheet": "paper-trading-lifecycle.visual-check.html"
   },
   "sidecars": {
-    "directory": ".archify/visual-check-paper-trading-lifecycle",
+    "directory": ".archify/visual-check-paper-trading-lifecycle-r2",
     "receipt": "paper-trading-lifecycle.visual-check.json",
     "contactSheet": "paper-trading-lifecycle.visual-check.html",
     "files": [
@@ -906,23 +906,23 @@
         "file": "paper-trading-lifecycle.visual-check.html"
       },
       {
-        "sha256": "687d11492d4dd957581eca8ab22dc1a7aa4170f2f09f06f79828547be89bb03b",
-        "bytes": 111048,
+        "sha256": "8e16f0c27a3da02f8d455a83936a0cfc2b72011c3876234354aa92e04fb2c48a",
+        "bytes": 110650,
         "file": "paper-trading-lifecycle.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "2c3e1da3518bf82219352958c005e9a4487e26be001d1c39a1bbd9e0ec2b1681",
-        "bytes": 117593,
+        "sha256": "c0afe057212c739d58ba34d8f85b2295951e07d739369e43ab54c55be61de88f",
+        "bytes": 117230,
         "file": "paper-trading-lifecycle.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "84a57896a025f1fc11a0e979a467348529c37ea2f7754a20f00c5a62831ea93f",
-        "bytes": 177679,
+        "sha256": "65a2760f9fc72117de51fae994f8ff40df7007d4dcb6473e02f7e5fa2ada0473",
+        "bytes": 176651,
         "file": "paper-trading-lifecycle.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "051ee96261a172214503d24ec567503a572ab46095b9ff044fb97c326813686d",
-        "bytes": 189023,
+        "sha256": "bf8ecb8aca0130c8419d049afabb07e0fbe51e3655f0fc257d06debdb6698c33",
+        "bytes": 187663,
         "file": "paper-trading-lifecycle.visual-check.2048x1320.dark.png"
       }
     ]
