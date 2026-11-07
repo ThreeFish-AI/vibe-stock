@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "模拟盘（paper trading）建仓生命周期",
+    "subtitle": "三批建仓状态机 · 穿价与回落分支 · 全程永不接真实下单接口（NR-2）",
+    "locale": "zh-CN",
+    "output": "docs/diagrams/main-agent/paper-trading-lifecycle/paper-trading-lifecycle.html",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "main", "label": "建仓主轨" },
+    { "id": "tranche", "label": "三批并行状态机" },
+    { "id": "terminal", "label": "终态" }
+  ],
+  "states": [
+    { "id": "alloc", "type": "start", "label": "allocation 导入", "sublabel": "06 Stage D · 三段建仓", "tag": "NR-2 纯模拟", "lane": "main", "col": 0, "step": "01" },
+    { "id": "pend", "type": "waiting", "label": "pending_open", "sublabel": "预算·标的校验 · 待次日开盘", "lane": "main", "col": 1, "step": "02" },
+    { "id": "holding", "type": "active", "label": "holding", "sublabel": "持仓运行 · 约束内", "tag": "五约束见卡片", "lane": "main", "col": 3, "step": "04" },
+    { "id": "tranche", "type": "waiting", "label": "tranche 三批并行", "sublabel": "T1_open / T2_limit / T3_trigger", "tag": "各批 pending→filled/expired", "lane": "tranche", "col": 2, "step": "03" },
+    { "id": "hk", "type": "waiting", "label": "港股收盘复核", "sublabel": "15:10 / 16:10 --close", "tag": "回落成交", "lane": "tranche", "col": 3 },
+    { "id": "expired", "type": "failure", "label": "建仓失败", "sublabel": "所有存在的批均 expired · 无持仓", "lane": "terminal", "col": 2 },
+    { "id": "closed", "type": "success", "label": "closed", "sublabel": "清仓 · 全部了结", "lane": "terminal", "col": 4 }
+  ],
+  "transitions": [
+    { "id": "t1", "from": "alloc", "to": "pend", "label": "导入校验通过" },
+    { "id": "t2", "from": "pend", "to": "tranche", "label": "分批", "fromSide": "bottom", "toSide": "left" },
+    { "id": "t3", "from": "tranche", "to": "holding", "label": "任一批成交", "variant": "emphasis", "fromSide": "right", "toSide": "bottom" },
+    { "id": "t4", "from": "tranche", "to": "expired", "label": "所有批均 expired", "fromSide": "bottom", "toSide": "top" },
+    { "id": "t5", "from": "tranche", "to": "hk", "label": "新鲜度未过闸", "variant": "dashed", "fromSide": "right", "toSide": "left" },
+    { "id": "t6", "from": "hk", "to": "holding", "label": "收盘复核成交", "fromSide": "top", "toSide": "bottom" },
+    { "id": "t7", "from": "holding", "to": "closed", "label": "止盈止损 / 人工清仓", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "三批并行状态机",
+      "items": [
+        "T1_open 次日开盘批：按开盘价成交；跳空 >+2% 转限价（信号日收盘×1.02、5 日 GTC，未穿价 expired）",
+        "T2_limit 限价批：low<limit 严格穿价 · 成交价=min(open, entry_ref) · 触价写回经用户逐笔确认 record_fill",
+        "T3_trigger 确认批：触发条件确认后才计成交；各批独立 pending→filled/expired，任一批成交即进 holding（余批继续 pending）；T3 补足必转 filled，仅无 T3 批（≤2 手）才会全部 expired"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "holding 内嵌约束",
+      "items": [
+        "T+1 可卖份额日切清零；涨跌停三态：一字板不可成交",
+        "停牌冻结，复牌按实际开盘处理；公司行动先送转后分红 + 分档红利税",
+        "滑点静态表：A股 5–10bp；港股按最小价位分档"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "红线 NR-2",
+      "items": [
+        "永不接真实下单接口：全程只写 sim-portfolio.json（07 P3 schema）",
+        "港股标的时戳新鲜度门禁未过闸 → 回落收盘复核成交（虚线分支），不做盘中追价",
+        "触价写回必须经用户逐笔确认，无人工确认不记账"
+      ]
+    }
+  ]
+}

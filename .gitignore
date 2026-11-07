@@ -6,3 +6,5 @@ __pycache__/
 .vs*
 .playwright-mcp/
 .temp/
+.archify/
+docs/diagrams/**/*.delivery.json

@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>Stock Trading Agent · 盯盘事件与 T2 复核</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg0:#0B0E14; --bg1:#12161F; --bg2:#171C27; --bg3:#1C2230;
+  --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.14);
+  --t1:#E9EDF5; --t2:#A9B4C8; --t3:#8792A6; --t4:#66718A;
+  --up:#FF6B6B; --up2:#FF8A80; --upbg:rgba(255,107,107,.11); --upln:rgba(255,107,107,.34);
+  --dn:#3DCE96; --dn2:#5EE0AC; --dnbg:rgba(61,206,150,.11); --dnln:rgba(61,206,150,.34);
+  --hold:#9AA6BC; --holdbg:rgba(154,166,188,.11); --holdln:rgba(154,166,188,.3);
+  --acc:#6C9EFF; --acc2:#9DBAFF; --accbg:rgba(108,158,255,.12); --accln:rgba(108,158,255,.36);
+  --warn:#F0B35C; --warnbg:rgba(240,179,92,.11); --warnln:rgba(240,179,92,.36);
+  --mono:ui-monospace,'SF Mono','Cascadia Mono',Menlo,Consolas,'Roboto Mono',monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei','Noto Sans CJK SC',sans-serif;
+}
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;scrollbar-width:none}
+::-webkit-scrollbar{width:0;height:0;display:none}
+body{min-height:100vh;display:flex;flex-direction:column;background-color:var(--bg0);
+  background-image:radial-gradient(1100px 480px at 18% -12%,rgba(108,158,255,.05),transparent 62%),radial-gradient(rgba(255,255,255,.02) 1px,transparent 1px);
+  background-size:auto,26px 26px;color:var(--t1);font:13px/1.55 var(--sans)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.1px}
+/* ── 顶栏 ── */
+.top{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:16px;height:52px;padding:0 22px;
+  background:rgba(11,14,20,.92);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;letter-spacing:.2px;white-space:nowrap}
+.proto{font-size:10.5px;font-weight:500;color:var(--warn);border:1px solid var(--warnln);background:var(--warnbg);padding:2px 7px;border-radius:5px;letter-spacing:.3px;white-space:nowrap}
+.tabs{display:flex;gap:2px;flex:1;min-width:0}
+.tab{padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--t3);white-space:nowrap;display:flex;align-items:center;gap:6px}
+.tab.on{color:var(--t1);background:var(--bg2);box-shadow:inset 0 0 0 1px var(--line)}
+.tab .m2{font:500 9px var(--mono);color:var(--t4);border:1px solid var(--line);border-radius:3px;padding:0 3px;line-height:1.5}
+.top-r{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.date{font:500 12px var(--mono);color:var(--t2)}
+.phase{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 11px;border-radius:999px}
+.phase-live{color:var(--up2);border:1px solid var(--upln);background:var(--upbg)}
+.pd{width:7px;height:7px;border-radius:50%}
+.pd-live{background:var(--up);box-shadow:0 0 8px rgba(255,107,107,.7);animation:pu 2.2s ease-out infinite}
+@keyframes pu{0%{box-shadow:0 0 0 0 rgba(255,107,107,.4)}70%{box-shadow:0 0 0 6px rgba(255,107,107,0)}100%{box-shadow:0 0 8px rgba(255,107,107,.7)}}
+/* ── 布局 ── */
+main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;display:flex;flex-direction:column;gap:13px}
+.hero{display:flex;align-items:flex-end;justify-content:space-between;gap:14px}
+.hero h1{font-size:19px;font-weight:700;letter-spacing:.3px}
+.hero .sub{font-size:12px;color:var(--t3);margin-top:2px}
+.hero-r{display:flex;gap:8px;align-items:center}
+.metachip{font:500 11px var(--mono);color:var(--t2);border:1px solid var(--line);border-radius:6px;padding:4px 9px;white-space:nowrap}
+.card{background:var(--bg1);border:1px solid var(--line);border-radius:10px;box-shadow:0 1px 0 rgba(255,255,255,.02) inset,0 10px 30px rgba(0,0,0,.28);min-width:0}
+.card-h{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.card-h .ct{font-size:13px;font-weight:600;letter-spacing:.2px}
+.card-h .cm{margin-left:auto;font:500 11px var(--mono);color:var(--t3);display:flex;gap:6px;align-items:center;white-space:nowrap}
+/* ── 事件表 ── */
+.tbl{width:100%;border-collapse:collapse;table-layout:fixed}
+.tbl th{font-size:11px;font-weight:500;color:var(--t3);text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.2px}
+.tbl td{font-size:12.5px;color:var(--t2);padding:8.5px 12px;border-bottom:1px solid rgba(255,255,255,.05);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl .code{color:var(--t1);font:600 12px var(--mono)}
+.tbl .num{color:var(--t1)}
+.lv{font:700 10px var(--mono);padding:2px 6px;border-radius:4px;letter-spacing:.5px;white-space:nowrap}
+.lv0{color:var(--t2);background:var(--holdbg);border:1px solid var(--holdln)}
+.lv1{color:var(--warn);background:var(--warnbg);border:1px solid var(--warnln)}
+.lv2{color:var(--acc2);background:var(--accbg);border:1px solid var(--accln)}
+.tag{font-size:11px;color:var(--t2);border:1px solid var(--line2);border-radius:5px;padding:2px 7px;white-space:nowrap}
+.tbl-note{padding:8px 14px;font-size:11px;color:var(--t4);border-top:1px solid var(--line)}
+tr.sel td{background:rgba(108,158,255,.09);color:var(--t1)}
+tr.sel td:first-child{box-shadow:inset 2.5px 0 0 var(--acc)}
+.near{color:var(--warn)}.breach{color:var(--up2);font-weight:600}
+/* ── T2 建议卡 ── */
+.split{display:grid;grid-template-columns:1fr 336px;gap:13px;align-items:stretch}
+.adv{border:1px solid var(--accln);box-shadow:0 1px 0 rgba(255,255,255,.02) inset,0 10px 30px rgba(0,0,0,.28),0 0 0 4px rgba(108,158,255,.05)}
+.adv-h{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(108,158,255,.09),rgba(108,158,255,.02))}
+.adv-id{font:600 11px var(--mono);color:var(--acc2);border:1px solid var(--accln);background:var(--accbg);border-radius:5px;padding:2.5px 8px;letter-spacing:.3px}
+.adv-t{font-size:14px;font-weight:700;letter-spacing:.3px}
+.adv-st{margin-left:auto;display:flex;gap:6px;align-items:center}
+.adv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 16px}
+.blk{border:1px solid var(--line);background:var(--bg2);border-radius:9px;padding:11px 13px;min-width:0}
+.bl{font-size:10.5px;font-weight:600;color:var(--t3);letter-spacing:.5px;margin-bottom:8px}
+.quote{font-size:16.5px;font-weight:700;color:var(--t1);letter-spacing:.5px;line-height:1.4}
+.quote::before{content:'「';color:var(--t4)}
+.quote::after{content:'」';color:var(--t4)}
+.bs{font-size:10.5px;color:var(--t4);margin-top:7px;line-height:1.55}
+.diff{display:flex;align-items:center;gap:10px}
+.sig{display:inline-flex;align-items:center;gap:6px;font:600 13px var(--mono);letter-spacing:.2px}
+.sig .d{width:8px;height:8px;border-radius:50%;flex:none}
+.sig-h{color:var(--hold)}.sig-h .d{background:var(--hold)}
+.sig-s{color:var(--dn2)}.sig-s .d{background:var(--dn)}
+.arr{font:700 14px var(--mono);color:var(--t4)}
+.bignum{font:700 25px/1 var(--mono);color:var(--t1);letter-spacing:-.3px}
+.bignum .u{font-size:12px;font-weight:500;color:var(--t3);letter-spacing:0}
+.mini{width:100%;border-collapse:collapse;table-layout:fixed;margin-top:2px}
+.mini th{font-size:10px;font-weight:500;color:var(--t4);text-align:right;padding:3px 4px;white-space:nowrap}
+.mini td{font:500 11px var(--mono);color:var(--t2);text-align:right;padding:4px;white-space:nowrap;border-top:1px solid rgba(255,255,255,.05)}
+.mini th:first-child,.mini td:first-child{text-align:left}
+.mini td:first-child{color:var(--acc2)}
+.adv-foot{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--line);background:rgba(255,255,255,.015)}
+.adv-foot .warn-tx{font-size:11.5px;color:var(--warn)}
+.adv-foot .fx{margin-left:auto;display:flex;gap:8px}
+.ghostbtn{font-size:11.5px;padding:5px 12px;border-radius:7px;border:1px solid var(--line2);color:var(--t2);white-space:nowrap}
+.ghostbtn.pri{border-color:var(--accln);color:var(--acc2);background:var(--accbg)}
+/* ── 通知预览 ── */
+.notif{margin:14px;background:rgba(38,42,52,.92);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  border:1px solid rgba(255,255,255,.12);border-radius:15px;padding:12px 14px;display:flex;gap:11px;
+  box-shadow:0 10px 26px rgba(0,0,0,.45),0 0 0 4px rgba(255,255,255,.03)}
+.nicon{width:36px;height:36px;border-radius:9px;flex:none;background:linear-gradient(160deg,#1C2230,#12161F);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center}
+.nbody{flex:1;min-width:0}
+.nrow{display:flex;align-items:baseline;gap:8px}
+.ntitle{font-size:12.5px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ntime{margin-left:auto;font:500 10px var(--mono);color:var(--t4);flex:none}
+.ntext{font-size:11.5px;color:var(--t2);margin-top:2px;line-height:1.55}
+.nfoot{font-size:10px;color:var(--t4);margin-top:5px}
+.nt-ch{display:inline-flex;align-items:center;gap:4px;margin-top:2px}
+.nt-ch i{width:6px;height:6px;border-radius:50%;background:var(--dn);box-shadow:0 0 6px rgba(61,206,150,.7);flex:none;font-style:normal}
+.nt-ch span{font:500 10px var(--mono);color:var(--t3)}
+.ch-note{margin:0 14px 13px;font-size:10.5px;color:var(--t4);line-height:1.6;display:flex;gap:7px;align-items:flex-start}
+.ch-note svg{flex:none;margin-top:2px}
+.disclaimer-foot{height:36px;margin-top:auto;display:flex;align-items:center;justify-content:center;border-top:1px solid var(--line);font-size:11.5px;color:var(--t4);background:rgba(11,14,20,.72);letter-spacing:.3px}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+      <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF6B6B"/><stop offset="1" stop-color="#6C9EFF"/></linearGradient></defs>
+      <rect x="1.25" y="1.25" width="23.5" height="23.5" rx="6.5" stroke="url(#lg)" stroke-width="1.5"/>
+      <circle cx="8.5" cy="17.5" r="2" fill="#FF6B6B"/>
+      <circle cx="17.5" cy="8.5" r="2" fill="#6C9EFF"/>
+      <circle cx="16.6" cy="18" r="1.5" fill="#E9EDF5"/>
+      <path d="M10 16.1L15.9 10.1M10.3 17.5L14.8 17.9" stroke="rgba(233,237,245,.5)" stroke-width="1.2"/>
+    </svg>
+    Stock Trading Agent
+    <span class="proto">M1 原型 · 规划中</span>
+  </div>
+  <nav class="tabs">
+    <span class="tab">今日总览</span>
+    <span class="tab">诊股工作台</span>
+    <span class="tab on">盯盘与 T2 复核</span>
+    <span class="tab">模拟盘</span>
+    <span class="tab">建议卡库 <span class="m2">M2</span></span>
+    <span class="tab">后验战绩 <span class="m2">M2</span></span>
+    <span class="tab">审计与预算 <span class="m2">M2</span></span>
+  </nav>
+  <div class="top-r">
+    <span class="date">2026-11-09 周一</span>
+    <span class="phase phase-live"><span class="pd pd-live"></span>盘中</span>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div>
+      <h1>盯盘事件与 T2 复核</h1>
+      <div class="sub">monitor 09:15 起在册监控 · 事件 13 条（T0×5 / T1×5 / T2×3）· 选中行已生成 T2 建议卡</div>
+    </div>
+    <div class="hero-r">
+      <span class="metachip">watch.py 心跳 14:06:22 · 正常</span>
+      <span class="metachip">T+0 机械判据族 · 零 LLM</span>
+    </div>
+  </div>
+
+  <!-- 事件表 -->
+  <section class="card">
+    <div class="card-h"><span class="ct">盘中事件</span><span class="cm">本地事实告警 · 按时间倒序</span></div>
+    <table class="tbl">
+      <colgroup>
+        <col style="width:72px"><col style="width:210px"><col style="width:480px"><col style="width:110px"><col style="width:120px"><col style="width:80px"><col>
+      </colgroup>
+      <thead><tr><th>时间</th><th>股票</th><th>事件</th><th>现价</th><th>距线</th><th>级别</th><th>复核短语</th></tr></thead>
+      <tbody>
+        <tr class="sel">
+          <td class="num">14:05</td><td><span class="code">601234</span> 示例电子</td>
+          <td>stop_break · 止损再破（09:18 击穿后收回，15.90）</td><td class="num">15.78</td><td class="num breach">−0.75%</td>
+          <td><span class="lv lv1">T1</span></td><td><span class="tag">止损复核</span></td>
+        </tr>
+        <tr>
+          <td class="num">13:41</td><td><span class="code">300866</span> 示例新能源</td>
+          <td>band_hi_touch · 高抛区上沿触及（战术仓）</td><td class="num">44.85</td><td class="num">+1.4%</td>
+          <td><span class="lv lv0">T0</span></td><td><span class="tag">高抛复核</span></td>
+        </tr>
+        <tr>
+          <td class="num">13:22</td><td><span class="code">HK 示例·互联</span></td>
+          <td>资金流异动 · 两融余额连升 5 日</td><td class="num">386.2</td><td class="num">—</td>
+          <td><span class="lv lv0">T0</span></td><td>—</td>
+        </tr>
+        <tr>
+          <td class="num">10:47</td><td><span class="code">000567</span> 示例消费</td>
+          <td>band_lo_touch · 波段带下沿触及（21.40）</td><td class="num">21.34</td><td class="num near">−0.3%</td>
+          <td><span class="lv lv2">T2</span></td><td><span class="tag">低吸复核</span></td>
+        </tr>
+        <tr>
+          <td class="num">10:32</td><td><span class="code">688517</span> 示例半导体</td>
+          <td>ma20_break · 价格下穿 MA20×0.98（86.63）</td><td class="num">86.50</td><td class="num near">−0.2%</td>
+          <td><span class="lv lv1">T1</span></td><td><span class="tag">均线复核</span></td>
+        </tr>
+        <tr>
+          <td class="num">10:15</td><td><span class="code">300866</span> 示例新能源</td>
+          <td>target_hit · 第一目标位触及（44.00）</td><td class="num">44.10</td><td class="num">+0.2%</td>
+          <td><span class="lv lv1">T1</span></td><td><span class="tag">止盈复核</span></td>
+        </tr>
+        <tr>
+          <td class="num">09:55</td><td><span class="code">大盘</span> 市场级</td>
+          <td>市场级 · 指数与汇率快照已注入上下文包</td><td class="num">—</td><td class="num">—</td>
+          <td><span class="lv lv0">T0</span></td><td>—</td>
+        </tr>
+        <tr>
+          <td class="num">09:49</td><td><span class="code">601789</span> 示例医药</td>
+          <td>加仓轨 · 资格冻结到期重估（三道门）</td><td class="num">32.86</td><td class="num">—</td>
+          <td><span class="lv lv2">T2</span></td><td>—</td>
+        </tr>
+        <tr>
+          <td class="num">09:42</td><td><span class="code">688517</span> 示例半导体</td>
+          <td>解禁临近 · 11-11 解禁 2.1% 流通盘</td><td class="num">89.20</td><td class="num">—</td>
+          <td><span class="lv lv0">T0</span></td><td>—</td>
+        </tr>
+        <tr>
+          <td class="num">09:36</td><td><span class="code">HK 示例·互联</span></td>
+          <td>业绩公告临近 · 11-13 盘后公告</td><td class="num">378.0</td><td class="num">—</td>
+          <td><span class="lv lv0">T0</span></td><td>—</td>
+        </tr>
+        <tr>
+          <td class="num">09:31</td><td><span class="code">300866</span> 示例新能源</td>
+          <td>t2_pending_fill · T2 限价批触价（43.08，推演成交）</td><td class="num">43.06</td><td class="num">—</td>
+          <td><span class="lv lv2">T2</span></td><td><span class="tag">T2成交复核</span></td>
+        </tr>
+        <tr>
+          <td class="num">09:24</td><td><span class="code">000567</span> 示例消费</td>
+          <td>ma20_break · 价格下穿 MA20×0.98（21.95）· 降档 buy → hold</td><td class="num">21.90</td><td class="num near">−0.2%</td>
+          <td><span class="lv lv1">T1</span></td><td><span class="tag">均线复核</span></td>
+        </tr>
+        <tr>
+          <td class="num">09:18</td><td><span class="code">601234</span> 示例电子</td>
+          <td>stop_break · 止损击穿（15.90）</td><td class="num">15.82</td><td class="num breach">−0.50%</td>
+          <td><span class="lv lv1">T1</span></td><td><span class="tag">止损复核</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tbl-note">事件由机械判据族产出（本地事实告警）· 监控永不写 signals.json（R8）· 盘中结论以收盘复核为准（R9） · 复核短语仅 watch.py 登记规则带，资金流/解禁/公告/加仓轨行为扩展情报与加仓轨提示、不带短语</div>
+  </section>
+
+  <div class="split">
+    <!-- T2 建议卡 -->
+    <section class="card adv">
+      <div class="adv-h">
+        <span class="adv-id">monitor-advice/1</span>
+        <span class="adv-t">601234 示例电子 · 止损击穿 · T+1 复核</span>
+        <span class="adv-st">
+          <span class="tag" style="border-color:rgba(61,206,150,.34);color:var(--dn2)">已重裁决 ✓ NR-1</span>
+          <span class="tag">待用户复核</span>
+        </span>
+      </div>
+      <div class="adv-grid">
+        <div class="blk">
+          <div class="bl">候选动作 · 五档措辞</div>
+          <div class="quote">持仓者减仓或离场</div>
+          <div class="bs">五档第 4 档 · 仅持仓者措辞 · 空仓者不适用</div>
+        </div>
+        <div class="blk">
+          <div class="bl">与上一裁决差异</div>
+          <div class="diff">
+            <span class="sig sig-h"><span class="d"></span>initial hold</span>
+            <span class="arr">→</span>
+            <span class="sig sig-s"><span class="d"></span>final sell</span>
+          </div>
+          <div class="bs">重放过门意见 + 机械覆写 risk 后，按 adjudicate 原命令重裁决</div>
+        </div>
+        <div class="blk">
+          <div class="bl">T+1 可卖份额</div>
+          <div class="bignum num">1,200<span class="u"> 股</span></div>
+          <div class="bs">持仓 1,200 股 · 当日买入冻结 0 股 · 数值为合成示例</div>
+        </div>
+        <div class="blk">
+          <div class="bl">走势参考 · σ√h 预测带（零权重 · 参考非信号）</div>
+          <table class="mini">
+            <colgroup><col style="width:56px"><col><col><col></colgroup>
+            <thead><tr><th>horizon</th><th>带下沿</th><th>带上沿</th><th>P(触下)</th></tr></thead>
+            <tbody>
+              <tr><td>h = 1d</td><td>15.42</td><td>16.05</td><td>34%</td></tr>
+              <tr><td>h = 5d</td><td>14.90</td><td>16.60</td><td>47%</td></tr>
+              <tr><td>h = 10d</td><td>14.40</td><td>17.10</td><td>52%</td></tr>
+            </tbody>
+          </table>
+          <div class="bs" style="margin-top:7px">σ√h 带以昨收锚定 · 触及概率为模型口径合成值</div>
+        </div>
+      </div>
+      <div class="adv-foot">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.8" stroke="#F0B35C" stroke-width="1.4"/><path d="M7 4.2V7.4L9 8.8" stroke="#F0B35C" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span class="warn-tx">待收盘复核 · 非投资建议 · AI 生成标注 · 用户复核前置</span>
+        <span class="fx"><span class="ghostbtn">导出脱敏卡片</span><span class="ghostbtn pri">标记已复核</span></span>
+      </div>
+    </section>
+
+    <!-- 通知预览 -->
+    <section class="card">
+      <div class="card-h"><span class="ct">通知预览</span><span class="cm">前台展示</span></div>
+      <div class="notif">
+        <div class="nicon">
+          <svg width="20" height="20" viewBox="0 0 26 26" fill="none">
+            <rect x="1.25" y="1.25" width="23.5" height="23.5" rx="6.5" stroke="url(#lg)" stroke-width="1.5"/>
+            <circle cx="8.5" cy="17.5" r="2" fill="#FF6B6B"/>
+            <circle cx="17.5" cy="8.5" r="2" fill="#6C9EFF"/>
+            <path d="M10 16.1L15.9 10.1" stroke="rgba(233,237,245,.5)" stroke-width="1.2"/>
+          </svg>
+        </div>
+        <div class="nbody">
+          <div class="nrow"><div class="ntitle">盯盘 T1 · 601234 止损击穿</div><div class="ntime">现在</div></div>
+          <div class="ntext">现价 15.78 已破止损线 15.90 · 建议卡 monitor-advice/1 已生成</div>
+          <div class="nfoot">待收盘复核 · 非投资建议</div>
+          <div class="nt-ch"><i></i><span>terminal — osascript</span></div>
+        </div>
+      </div>
+      <div class="ch-note">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><rect x="2.5" y="6" width="9" height="6" rx="1.6" stroke="#7C879E" stroke-width="1.3"/><path d="M4.6 6V4.4a2.4 2.4 0 014.8 0V6" stroke="#7C879E" stroke-width="1.3"/></svg>
+        <span>仅本地 osascript 通道 · 禁第三方推送（红线 7）· 后台标签页冻结风险下，告警主通道永久留在服务端，面板只做前台展示</span>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer class="disclaimer-foot">原型示意 · 全部数据为合成示例 · 不构成投资建议 · 系统不下单</footer>
+
+</body>
+</html>

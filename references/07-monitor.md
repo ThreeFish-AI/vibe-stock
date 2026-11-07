@@ -102,12 +102,16 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
   | T0 | 事实事件+复核短语（价位/百分比/距离，机械判据族含 mech_risk 降档事实） | 台账 `level` 字段现恒 "T0"，launchd 无人值守可跑 | ✅ P1/0.0.25 |
   | T1 | 轻量刷新：触发股重拉日 K → derive_technical 重算 → snapshot 通道拼新 evidence → `prepare --evidence` 直入出新 context-pack（五段流水线零改动） | 会话消费输入（pack 非建议） | 预留 |
   | T2 | 会话内局部重诊：重放过门 opinions + 按触发事实覆写 risk.json（机械布尔预写、LLM 只补 rationale）→ adjudicate 原命令重裁决 → 建议卡 | 会话在场（手动触发先行；exit 2 自动接管后置） | 预留 |
-- **P2 建议卡产物契约（0.0.25 规约钉死，实施随 0.0.26+）**：schema`monitor-advice/1`，落位 `monitor/advice/<date>/<code>.md`；必含四要素（候选动作（04 五档分类学措辞）+ 与上一裁决差异 + T+1 可卖份额 + 走势参考节（0.0.24 必含句））+ 免责尾注；**脱敏边界（无条件规则：monitor/ 落盘产物零成本/零数量/零可反推派生量）**——T+1 可卖份额原值、距成本涨幅、武装线值等只在会话呈现态给值或走 04 全诊报告通道，落盘产物至多落百分比与档位词；意见保鲜门（下条）与只降不升三重锚（上条）是其硬前置，违例拒出建议卡、降级纯事实通报。
+- **P2 建议卡产物契约（0.0.25 规约钉死，实施随 0.0.26+）**：schema`monitor-advice/1`，落位 `monitor/advice/<date>/<code>.md`（写者为 T2 会话经断言器放行后原子写入，`watch.py` 不产卡、`monitor/` 其余产物写者不变；坑位：路径在 `monitor/` 下不等于写者是 `watch.py`）；必含四要素（候选动作（04 五档分类学措辞）+ 与上一裁决差异 + T+1 可卖份额 + 走势参考节（0.0.24 必含句））+ 免责尾注；**脱敏边界（无条件规则：monitor/ 落盘产物零成本/零数量/零可反推派生量）**——T+1 可卖份额原值、距成本涨幅、武装线值等只在会话呈现态给值或走 04 全诊报告通道，落盘产物至多落百分比与档位词；意见保鲜门（下条）与只降不升三重锚（上条）是其硬前置，违例拒出建议卡、降级纯事实通报。
 - **T2 会话触发入口（0.0.25 钉死形态）**：手动触发先行——用户在会话点名（如「盯盘复核 00268」）→ 会话按本节 T2 流程执行（重放意见→覆写 risk→adjudicate 重裁决→建议卡）；exit 2 自动接管（watch 触发即退出交还会话）与 launchd 补拉槽协调（上文坑位④）后置 0.0.26+ 评审；无人值守自动拉起 LLM 属 M3 且须用户显式开启预算闸。
 
 ## sim 组合 SSOT（P3 预留——用户裁定「一并建」，schema 先钉死）
 
 `~/.vibe-stock/sim-portfolio.json`：`{version, updated_at, budget, cash, positions:[{code, market, lots, avg_cost, status: holding|pending_open|closed, stop, entry_ref, target1, trailing_armed, high_since_entry, tranches:[{leg: T1_open|T2_limit|T3_trigger, lots, status: pending|filled|expired, ref_price, filled_price, filled_at}]}], operations:[{code, side, lots, price, ts, tranche_ref}]}`——T2 触价写回经用户逐笔确认，成交价 min(open, entry_ref)，时间精确到秒（+08:00）；台账事件 t2_pending_fill 是其唯一盘中来源。实施走 P3 PR。
+
+- **批状态机**（条件：`tranches[].status`；做法：`pending → filled`（写 `filled_price/filled_at`，T2/T3 成交经用户逐笔确认）或 `pending → expired`，两个终态互斥且不可逆，各批独立、互不连坐；`expired` 只有两个来源：该批自身到期（以 [06](06-batch-scan.md) Stage D 载明的窗口为准，T1 为 5 日、T2 为 10 日 GTC）与仓位清仓时仍 pending 的批一并撤单置 `expired`；坑位：T3「20 日内未触发按收盘补足」是转 `filled`（补足成交）而非 `expired`；T1 在窗内未等到回落同属自身到期而非撤单；T2/T3 成交请求在用户确认前批保持 `pending`、不记成交，「驳回」只作废该次请求、不产生状态迁移（T1/T2 仍按自身窗口到期；T3 无窗口，保持 `pending` 并在收盘重新生成补足请求），长期未确认的仓位如实停在 `pending_open`，人工出口是人工清仓，余批按上述撤单口径一并置 `expired`）。
+- **仓位状态由批状态机械推导，禁手写**（条件：`positions[].status`；做法：`pending_open` = 无任一批 filled 且至少一批 pending；`holding` = 至少一批 filled 且未清仓，余批可为 pending 或 expired；`closed` = 清仓（止盈/止损/人工）后，或所有存在的批均 expired 且无成交（建仓失败：`lots` 为 0、`operations` 无记录，不另设 status 值）；坑位：T3 补足经用户确认转 `filled` 且无自身到期，故拆出 T3 批（`lots` ≥ 3）的仓位不会因各批到期而建仓失败（人工清仓不在此列），只有无 T3 批（`lots` ≤ 2，仅 T1/T2 或仅 T1）的仓位才会因各批到期走到该终态；进入 holding 的条件是「任一批成交」而非「三批全 filled」，T1 已成交、T2 过期（T3 仍 pending 或已补足）的真实持仓必须有状态归属且可卖份额按 T+1 计；面板的「建仓中/持有/清仓待结算」是展示标签，不得回写 status）。
+- **成交判据与提示判据分两把尺**（条件：T1 回落单与 T2 限价批判成交；做法：`t2_pending_fill` 的 `low ≤ entry_ref` 只是提示口径（推演不写回，见上表；收盘终判「T2 触价坐实」同取该式，「坐实」只表示触价、不是成交确认，P3 实施时随成交判据改为严格穿价），sim 成交判据取严格穿价 `low < limit`、成交价 = min(open, limit)，同为 T1 回落单与 T2 限价批所用，paper 引擎（方案 §12）与之同式；坑位：边界日 `low = limit` 时提示与终判照报、但不成交，用户逐笔确认时须以穿价口径核对，不得因提示或「坐实」已报而补记成交；本条是相对提示口径的收严，判据只许收严）。
 
 ## 后验（P3 预留）
 

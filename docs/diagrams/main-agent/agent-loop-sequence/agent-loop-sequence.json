@@ -1,0 +1,373 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Stock Trading Agent 任务闭环时序：触发 → 编排 → CC 大脑 → 断言落盘 → 后验",
+    "subtitle": "确定性编排零 LLM · CC 短会话结构化输出 · 三段完成判据门禁 · 违例默认拒出",
+    "locale": "zh-CN",
+    "output": "docs/diagrams/main-agent/agent-loop-sequence/agent-loop-sequence.html",
+    "viewBox": [
+      1346,
+      841
+    ],
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    {
+      "id": "user",
+      "type": "frontend",
+      "label": "用户 · 面板"
+    },
+    {
+      "id": "slots",
+      "type": "messagebus",
+      "label": "launchd 三槽"
+    },
+    {
+      "id": "router",
+      "type": "backend",
+      "label": "意图路由"
+    },
+    {
+      "id": "cclient",
+      "type": "backend",
+      "label": "CCClient"
+    },
+    {
+      "id": "cc",
+      "type": "external",
+      "label": "CC 大脑"
+    },
+    {
+      "id": "asserts",
+      "type": "security",
+      "label": "断言器"
+    },
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "台账落盘"
+    },
+    {
+      "id": "postmortem",
+      "type": "backend",
+      "label": "后验槽"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 230,
+      "label": "三源触发（入口）"
+    },
+    {
+      "from": 240,
+      "to": 268,
+      "label": "确定性编排 · 零 LLM"
+    },
+    {
+      "from": 276,
+      "to": 330,
+      "label": "CC 大脑短会话"
+    },
+    {
+      "from": 338,
+      "to": 392,
+      "label": "断言三判 + 原子落盘"
+    },
+    {
+      "from": 400,
+      "to": 480,
+      "label": "降级路径（默认拒出）"
+    },
+    {
+      "from": 488,
+      "to": 678,
+      "label": "T2 建议卡支线（盘中重裁决）"
+    },
+    {
+      "from": 686,
+      "to": 740,
+      "label": "后验闭环（18:05 postmortem 槽）"
+    }
+  ],
+  "messages": [
+    {
+      "id": "a1",
+      "from": "user",
+      "to": "router",
+      "y": 160,
+      "label": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
+      "variant": "emphasis"
+    },
+    {
+      "id": "a2",
+      "from": "slots",
+      "to": "router",
+      "y": 190,
+      "label": "② 槽完成事件（watchfiles 监听台账）",
+      "variant": "dashed"
+    },
+    {
+      "id": "a3",
+      "from": "slots",
+      "to": "router",
+      "y": 220,
+      "label": "③ M3 盯盘接管：默认关 · 须显式预算闸",
+      "variant": "security"
+    },
+    {
+      "id": "b1",
+      "from": "router",
+      "to": "cclient",
+      "y": 250,
+      "label": "意图命中 → 幂等键入队（WAL）→ 出队",
+      "variant": "default"
+    },
+    {
+      "id": "c1",
+      "from": "cclient",
+      "to": "cc",
+      "y": 286,
+      "label": "spawn claude -p（每任务新会话）",
+      "variant": "emphasis"
+    },
+    {
+      "id": "c2",
+      "from": "cc",
+      "to": "cclient",
+      "y": 318,
+      "label": "结构化 result 信封 + 退出码",
+      "variant": "return"
+    },
+    {
+      "id": "d1",
+      "from": "cclient",
+      "to": "asserts",
+      "y": 348,
+      "label": "提交 result 信封 · stdout · exit code",
+      "variant": "default"
+    },
+    {
+      "id": "d2",
+      "from": "asserts",
+      "to": "ledger",
+      "y": 380,
+      "label": "三段判据全过 → 原子写 decisions.jsonl（agent: + hash 链）",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e1",
+      "from": "asserts",
+      "to": "user",
+      "y": 410,
+      "label": "断言违例 → 拒绝落盘 + 纯事实通报",
+      "variant": "dashed"
+    },
+    {
+      "id": "e2",
+      "from": "cclient",
+      "to": "user",
+      "y": 440,
+      "label": "CC 不可达 → 面板转只读",
+      "variant": "dashed"
+    },
+    {
+      "id": "e3",
+      "from": "cclient",
+      "to": "ledger",
+      "y": 470,
+      "label": "CC 不可达 → 事件照落台账（不产意见）",
+      "variant": "dashed"
+    },
+    {
+      "id": "f1",
+      "from": "user",
+      "to": "router",
+      "y": 500,
+      "label": "『盯盘复核 <code>』（T2 手动入口）",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f2",
+      "from": "router",
+      "to": "cclient",
+      "y": 528,
+      "label": "重放过门 opinions + 盘中触发事实 → 出队 spawn",
+      "variant": "default"
+    },
+    {
+      "id": "f3",
+      "from": "cclient",
+      "to": "cc",
+      "y": 556,
+      "label": "spawn claude -p（LLM 只补 rationale）",
+      "variant": "default"
+    },
+    {
+      "id": "f4",
+      "from": "cc",
+      "to": "cclient",
+      "y": 584,
+      "label": "结构化 result 信封 + 退出码",
+      "variant": "return"
+    },
+    {
+      "id": "f5",
+      "from": "cclient",
+      "to": "asserts",
+      "y": 612,
+      "label": "提交信封 → 三段判据 + 红线断言",
+      "variant": "default"
+    },
+    {
+      "id": "f6",
+      "from": "asserts",
+      "to": "router",
+      "y": 640,
+      "label": "断言通过 → 机械覆写 risk.json（违例拒出）",
+      "variant": "return"
+    },
+    {
+      "id": "f7",
+      "from": "router",
+      "to": "user",
+      "y": 668,
+      "label": "adjudicate 原命令重裁决 → 建议卡",
+      "variant": "emphasis"
+    },
+    {
+      "id": "g2",
+      "from": "ledger",
+      "to": "postmortem",
+      "y": 698,
+      "label": "读 decisions.jsonl（agent: 前缀）",
+      "variant": "default"
+    },
+    {
+      "id": "g3",
+      "from": "postmortem",
+      "to": "ledger",
+      "y": 728,
+      "label": "记分写 ledger（既有写者不变）",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "slots",
+      "from": 188,
+      "to": 224
+    },
+    {
+      "participant": "router",
+      "from": 158,
+      "to": 262
+    },
+    {
+      "participant": "router",
+      "from": 497,
+      "to": 534
+    },
+    {
+      "participant": "router",
+      "from": 636,
+      "to": 672
+    },
+    {
+      "participant": "cclient",
+      "from": 245,
+      "to": 262
+    },
+    {
+      "participant": "cclient",
+      "from": 282,
+      "to": 322
+    },
+    {
+      "participant": "cclient",
+      "from": 435,
+      "to": 468
+    },
+    {
+      "participant": "cclient",
+      "from": 524,
+      "to": 616
+    },
+    {
+      "participant": "cc",
+      "from": 283,
+      "to": 315
+    },
+    {
+      "participant": "cc",
+      "from": 559,
+      "to": 581
+    },
+    {
+      "participant": "asserts",
+      "from": 343,
+      "to": 384
+    },
+    {
+      "participant": "asserts",
+      "from": 405,
+      "to": 412
+    },
+    {
+      "participant": "asserts",
+      "from": 608,
+      "to": 644
+    },
+    {
+      "participant": "ledger",
+      "from": 374,
+      "to": 384
+    },
+    {
+      "participant": "ledger",
+      "from": 465,
+      "to": 470
+    },
+    {
+      "participant": "ledger",
+      "from": 693,
+      "to": 732
+    },
+    {
+      "participant": "postmortem",
+      "from": 693,
+      "to": 732
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "三源触发 · 确定性编排",
+      "items": [
+        "入口① 面板手动（全诊 / 批量 / T2 复核短语）；② 槽完成事件 watchfiles；③ M3 盯盘接管默认关、须显式预算闸",
+        "意图路由为 YAML 确定性分派，编排全程零 LLM；只读既有台账组装有界上下文",
+        "队列幂等键去重 + WAL 崩溃可恢复，重复触发不重复消耗预算"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "CC 短会话 + 三段完成判据",
+      "items": [
+        "每任务新开 claude -p 短会话：--json-schema 结构化输出 + --session-id + --max-budget-usd 预算闸 + dontAsk",
+        "三段判据：退出码=0 ∧ result 信封合法 ∧ result 行存在，缺一即失败；另过 schema 校验与红线断言",
+        "过门才原子写 decisions.jsonl（agent: 前缀 + hash 链），并归档 audit/<date>/ 与扣减 budget.json"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "降级与红线",
+      "items": [
+        "断言违例：拒绝落盘 + 纯事实通报，LLM 输出永不做裁决",
+        "CC 不可达：面板转只读，事件照落台账不产意见",
+        "T2 支线：CC 仍只经 CCClient 到达、产物先过断言器；risk.json 由确定性代码按触发事实机械覆写、LLM 只补 rationale，adjudicate 原命令重裁决；违例拒出建议卡 · 不写 signals.json"
+      ]
+    }
+  ]
+}

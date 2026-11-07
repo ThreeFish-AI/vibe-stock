@@ -1,0 +1,543 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Stock Trading Agent 总体架构：Claude Code 唯一大脑",
+    "subtitle": "四层并存：确定性层零改动 · 主 Agent 只加不改 · CC 大脑唯一 LLM 通道 · 状态层唯一新写区",
+    "locale": "zh-CN",
+    "output": "docs/diagrams/main-agent/main-architecture/main-architecture.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "ld-monitor",
+      "type": "messagebus",
+      "label": "launchd 09:15 盯盘槽",
+      "sublabel": "watch.py --loop · 180s/轮",
+      "tag": "周一至五",
+      "pos": [
+        50,
+        110
+      ],
+      "size": [
+        205,
+        60
+      ]
+    },
+    {
+      "id": "ld-outlook",
+      "type": "messagebus",
+      "label": "launchd 17:35 走势批量槽",
+      "sublabel": "outlook 收盘批量（09 规约）",
+      "tag": "周一至五",
+      "pos": [
+        50,
+        190
+      ],
+      "size": [
+        205,
+        60
+      ]
+    },
+    {
+      "id": "ld-post",
+      "type": "messagebus",
+      "label": "launchd 18:05 后验槽",
+      "sublabel": "postmortem 信号记分",
+      "tag": "周一至五",
+      "pos": [
+        50,
+        270
+      ],
+      "size": [
+        205,
+        60
+      ]
+    },
+    {
+      "id": "scripts",
+      "type": "backend",
+      "label": "scripts 确定性件",
+      "sublabel": "adjudicate · diagnose · postmortem · lens · addon · outlook",
+      "tag": "uv run --no-project · 含 fetch",
+      "pos": [
+        350,
+        130
+      ],
+      "size": [
+        350,
+        130
+      ]
+    },
+    {
+      "id": "batch",
+      "type": "backend",
+      "label": "batch/ 编排",
+      "sublabel": "06 批量 · 07 盯盘参考",
+      "pos": [
+        730,
+        240
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Web 面板",
+      "sublabel": "StaticFiles · 七页",
+      "tag": "本地读+命令通道",
+      "pos": [
+        40,
+        420
+      ],
+      "size": [
+        155,
+        64
+      ]
+    },
+    {
+      "id": "router",
+      "type": "backend",
+      "label": "意图路由表",
+      "sublabel": "YAML 意图→任务分派",
+      "tag": "零 LLM",
+      "pos": [
+        280,
+        420
+      ],
+      "size": [
+        215,
+        64
+      ]
+    },
+    {
+      "id": "queue",
+      "type": "backend",
+      "label": "任务队列",
+      "sublabel": "幂等键 + WAL",
+      "tag": "崩溃可恢复",
+      "pos": [
+        770,
+        420
+      ],
+      "size": [
+        210,
+        64
+      ]
+    },
+    {
+      "id": "asserts",
+      "type": "security",
+      "label": "后处理断言器",
+      "sublabel": "schema 校验 · 红线断言",
+      "tag": "三段完成判据",
+      "pos": [
+        410,
+        540
+      ],
+      "size": [
+        195,
+        84
+      ]
+    },
+    {
+      "id": "ccclient",
+      "type": "backend",
+      "label": "CCClient 适配器",
+      "sublabel": "claude -p 子进程管理",
+      "tag": "每任务新会话",
+      "pos": [
+        705,
+        540
+      ],
+      "size": [
+        185,
+        84
+      ]
+    },
+    {
+      "id": "paper",
+      "type": "backend",
+      "label": "paper 引擎",
+      "sublabel": "穿价撮合 · 费用+T+1",
+      "tag": "模拟盘撮合",
+      "pos": [
+        920,
+        540
+      ],
+      "size": [
+        185,
+        84
+      ]
+    },
+    {
+      "id": "cc",
+      "type": "external",
+      "label": "claude headless 子进程 ×N",
+      "sublabel": "--json-schema · --session-id · --max-budget-usd",
+      "tag": "结构化输出 · dontAsk",
+      "pos": [
+        560,
+        735
+      ],
+      "size": [
+        310,
+        80
+      ]
+    },
+    {
+      "id": "ssot-slots",
+      "type": "database",
+      "label": "既有 SSOT · 槽台账与持仓",
+      "sublabel": "monitor/ · outlook/ · reports/ · portfolio.json（用户手维）",
+      "tag": "写者=三槽脚本 · portfolio 全员只读",
+      "pos": [
+        40,
+        925
+      ],
+      "size": [
+        355,
+        84
+      ]
+    },
+    {
+      "id": "agentdir",
+      "type": "database",
+      "label": "agent/（新增）",
+      "sublabel": "queue · sessions · decisions · audit · budget",
+      "tag": "主 Agent 唯一新写区",
+      "pos": [
+        435,
+        925
+      ],
+      "size": [
+        270,
+        84
+      ]
+    },
+    {
+      "id": "simport",
+      "type": "database",
+      "label": "sim-portfolio.json",
+      "sublabel": "07 P3 schema · paper 记账",
+      "tag": "模拟盘 · 永不真实下单",
+      "pos": [
+        725,
+        925
+      ],
+      "size": [
+        210,
+        84
+      ]
+    },
+    {
+      "id": "ssot-verdicts",
+      "type": "database",
+      "label": "signals.json · ledger×2",
+      "sublabel": "五词信号登记 · 双轨战绩台账",
+      "tag": "写者=report/postmortem",
+      "pos": [
+        950,
+        925
+      ],
+      "size": [
+        220,
+        84
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "层 1 · 确定性层（既有 · 零改动）",
+      "wraps": [
+        "ld-monitor",
+        "ld-outlook",
+        "ld-post",
+        "scripts",
+        "batch"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "层 2 · 主 Agent 层（新增 · FastAPI 单体）",
+      "wraps": [
+        "web",
+        "router",
+        "queue",
+        "asserts",
+        "ccclient",
+        "paper"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "层 3 · CC 大脑（唯一 LLM 通道）",
+      "wraps": [
+        "cc"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "层 4 · 状态层 ~/.vibe-stock/",
+      "wraps": [
+        "ssot-slots",
+        "agentdir",
+        "simport",
+        "ssot-verdicts"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "新增 · 主 Agent 唯一新写区",
+      "wraps": [
+        "agentdir",
+        "simport"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "c1",
+      "from": "ld-monitor",
+      "to": "scripts",
+      "label": "拉起 watch",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "c2",
+      "from": "ld-outlook",
+      "to": "scripts",
+      "label": "走势批量",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "c3",
+      "from": "ld-post",
+      "to": "scripts",
+      "label": "后验记分",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "c4",
+      "from": "batch",
+      "to": "scripts",
+      "label": "编排"
+    },
+    {
+      "id": "c5",
+      "from": "scripts",
+      "to": "router",
+      "label": "并存收编不替代 · 只消费台账",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        455,
+        340
+      ]
+    },
+    {
+      "id": "c6",
+      "from": "web",
+      "to": "router",
+      "label": "手动触发",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "c7",
+      "from": "router",
+      "to": "queue",
+      "label": "幂等入队",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "c8",
+      "from": "queue",
+      "to": "ccclient",
+      "label": "出队 spawn",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "c9",
+      "from": "queue",
+      "to": "paper",
+      "label": "本地撮合任务",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "c10",
+      "from": "ccclient",
+      "to": "asserts",
+      "label": "result 信封",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "c11",
+      "from": "ccclient",
+      "to": "cc",
+      "label": "spawn claude -p · 单向调用",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        640,
+        700
+      ]
+    },
+    {
+      "id": "c12",
+      "from": "cc",
+      "to": "ccclient",
+      "label": "结构化 result",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelAt": [
+        950,
+        690
+      ]
+    },
+    {
+      "id": "c13",
+      "from": "asserts",
+      "to": "agentdir",
+      "label": "原子写 · hash 链",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          507.5,
+          875
+        ],
+        [
+          570,
+          875
+        ]
+      ],
+      "labelAt": [
+        538,
+        862
+      ]
+    },
+    {
+      "id": "c14",
+      "from": "paper",
+      "to": "simport",
+      "label": "穿价记账 · T+1",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          1012.5,
+          875
+        ],
+        [
+          830,
+          875
+        ]
+      ],
+      "labelAt": [
+        920,
+        862
+      ]
+    },
+    {
+      "id": "c15",
+      "from": "scripts",
+      "to": "ssot-verdicts",
+      "label": "唯一写者 · LLM 零直写裁决面",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          1130,
+          195
+        ],
+        [
+          1130,
+          875
+        ],
+        [
+          1060,
+          875
+        ]
+      ],
+      "labelAt": [
+        1130,
+        640
+      ]
+    },
+    {
+      "id": "c16",
+      "from": "router",
+      "to": "ssot-slots",
+      "label": "只读 · watchfiles 监听",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          387.5,
+          515
+        ],
+        [
+          217.5,
+          515
+        ],
+        [
+          217.5,
+          890
+        ]
+      ],
+      "labelAt": [
+        330,
+        700
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "红线：LLM 零直写裁决面",
+      "items": [
+        "signals.json 与 ledger×2 的写者永远是既有确定性脚本（report / postmortem）",
+        "CC 大脑输出只经断言器三段判据，落 agent/ 决策台账，永不直写裁决面",
+        "主 Agent 对既有件全部只读；RiskGuard 只降不升单向不因新层改变"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "并存收编不替代",
+      "items": [
+        "launchd 三槽原样保留：09:15 盯盘 / 17:35 走势批量 / 18:05 后验",
+        "主 Agent 不改确定性层一行代码，只消费其台账（watchfiles 监听变更）",
+        "层 2 → 层 3 单向调用：CC 大脑不反向调用系统任何组件"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "主 Agent 唯一新写区",
+      "items": [
+        "~/.vibe-stock/agent/：queue（幂等键+WAL）· sessions · decisions（agent: 前缀 + hash 链）· audit · budget",
+        "sim-portfolio.json：07 P3 schema，写者仅为 paper 引擎（穿价撮合 · 费用 · T+1）",
+        "全部落盘原子写；预算闸 --max-budget-usd 双重约束 spawn 与台账",
+        "例外：monitor/advice/ 建议卡经断言器放行后由主 Agent 原子写，落盘零数量（方案 §11）"
+      ]
+    }
+  ]
+}
