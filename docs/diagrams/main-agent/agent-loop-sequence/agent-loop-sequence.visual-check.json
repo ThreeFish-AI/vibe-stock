@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "4cc8c6a2-0557-49b9-b7f5-4ce8a065c9f2",
+  "deliveryReceiptId": "19b0b1bc-8c09-46d1-8cd6-6937af4ee9c5",
   "artifact": {
     "path": "docs/diagrams/main-agent/agent-loop-sequence/agent-loop-sequence.html",
-    "sha256": "f6d2066411a806e1b950f45de64b15fd17c043bf3e345da591b4504430ddd88b",
-    "bytes": 770262
+    "sha256": "0c5a40921ee29c56bce73c1a041eb14f505c606c75e0de33b016ea5fd8d1aa66",
+    "bytes": 773187
   },
   "state": {
     "detail": "read",
@@ -41,20 +41,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1297,
-        "diagramWidth": 1267,
+        "readerWidth": 1157,
+        "diagramWidth": 1127,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 78,
+          "headerPx": 94,
           "diagramChromePx": 78,
-          "svgPx": 720,
+          "svgPx": 704,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 10.354383358098069,
-        "minimumProjectedNonEdgeTextPx": 10.354383358098069,
-        "minimumProjectedEdgeTextPx": 10.354383358098069,
+        "minimumProjectedNodeTextPx": 9.210252600297178,
+        "minimumProjectedNonEdgeTextPx": 9.210252600297178,
+        "minimumProjectedEdgeTextPx": 9.210252600297178,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -93,20 +93,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1357,
-        "diagramWidth": 1327,
+        "readerWidth": 1237,
+        "diagramWidth": 1207,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
           "diagramChromePx": 84,
           "svgPx": 754,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 10.844725111441308,
-        "minimumProjectedNonEdgeTextPx": 10.844725111441308,
-        "minimumProjectedEdgeTextPx": 10.844725111441308,
+        "minimumProjectedNodeTextPx": 9.86404160475483,
+        "minimumProjectedNonEdgeTextPx": 9.86404160475483,
+        "minimumProjectedEdgeTextPx": 9.86404160475483,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -145,20 +145,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1498,
-        "diagramWidth": 1468,
+        "readerWidth": 1365,
+        "diagramWidth": 1335,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
           "diagramChromePx": 84,
           "svgPx": 834,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 11,
-        "minimumProjectedNonEdgeTextPx": 11,
-        "minimumProjectedEdgeTextPx": 11,
+        "minimumProjectedNodeTextPx": 10.910104011887073,
+        "minimumProjectedNonEdgeTextPx": 10.910104011887073,
+        "minimumProjectedEdgeTextPx": 10.910104011887073,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -197,15 +197,15 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1909,
-        "diagramWidth": 1859,
+        "readerWidth": 1741,
+        "diagramWidth": 1691,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 94,
           "diagramChromePx": 94,
           "svgPx": 1057,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
         "minimumProjectedNodeTextPx": 11,
@@ -302,20 +302,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1297,
-        "diagramWidth": 1267,
+        "readerWidth": 1157,
+        "diagramWidth": 1127,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 78,
+          "headerPx": 94,
           "diagramChromePx": 78,
-          "svgPx": 720,
+          "svgPx": 704,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 10.354383358098069,
-        "minimumProjectedNonEdgeTextPx": 10.354383358098069,
-        "minimumProjectedEdgeTextPx": 10.354383358098069,
+        "minimumProjectedNodeTextPx": 9.210252600297178,
+        "minimumProjectedNonEdgeTextPx": 9.210252600297178,
+        "minimumProjectedEdgeTextPx": 9.210252600297178,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -354,20 +354,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1357,
-        "diagramWidth": 1327,
+        "readerWidth": 1237,
+        "diagramWidth": 1207,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
           "diagramChromePx": 84,
           "svgPx": 754,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 10.844725111441308,
-        "minimumProjectedNonEdgeTextPx": 10.844725111441308,
-        "minimumProjectedEdgeTextPx": 10.844725111441308,
+        "minimumProjectedNodeTextPx": 9.86404160475483,
+        "minimumProjectedNonEdgeTextPx": 9.86404160475483,
+        "minimumProjectedEdgeTextPx": 9.86404160475483,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -406,20 +406,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1498,
-        "diagramWidth": 1468,
+        "readerWidth": 1365,
+        "diagramWidth": 1335,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
           "diagramChromePx": 84,
           "svgPx": 834,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 11,
-        "minimumProjectedNonEdgeTextPx": 11,
-        "minimumProjectedEdgeTextPx": 11,
+        "minimumProjectedNodeTextPx": 10.910104011887073,
+        "minimumProjectedNonEdgeTextPx": 10.910104011887073,
+        "minimumProjectedEdgeTextPx": 10.910104011887073,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -458,15 +458,15 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1909,
-        "diagramWidth": 1859,
+        "readerWidth": 1741,
+        "diagramWidth": 1691,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 94,
           "diagramChromePx": 94,
           "svgPx": 1057,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
         "minimumProjectedNodeTextPx": 11,
@@ -515,20 +515,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1297,
-        "diagramWidth": 1267,
+        "readerWidth": 1157,
+        "diagramWidth": 1127,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 78,
+          "headerPx": 94,
           "diagramChromePx": 78,
-          "svgPx": 720,
+          "svgPx": 704,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 10.354383358098069,
-        "minimumProjectedNonEdgeTextPx": 10.354383358098069,
-        "minimumProjectedEdgeTextPx": 10.354383358098069,
+        "minimumProjectedNodeTextPx": 9.210252600297178,
+        "minimumProjectedNonEdgeTextPx": 9.210252600297178,
+        "minimumProjectedEdgeTextPx": 9.210252600297178,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -567,20 +567,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1357,
-        "diagramWidth": 1327,
+        "readerWidth": 1237,
+        "diagramWidth": 1207,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
           "diagramChromePx": 84,
           "svgPx": 754,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 10.844725111441308,
-        "minimumProjectedNonEdgeTextPx": 10.844725111441308,
-        "minimumProjectedEdgeTextPx": 10.844725111441308,
+        "minimumProjectedNodeTextPx": 9.86404160475483,
+        "minimumProjectedNonEdgeTextPx": 9.86404160475483,
+        "minimumProjectedEdgeTextPx": 9.86404160475483,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -619,20 +619,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1498,
-        "diagramWidth": 1468,
+        "readerWidth": 1365,
+        "diagramWidth": 1335,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
           "diagramChromePx": 84,
           "svgPx": 834,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 11,
-        "minimumProjectedNonEdgeTextPx": 11,
-        "minimumProjectedEdgeTextPx": 11,
+        "minimumProjectedNodeTextPx": 10.910104011887073,
+        "minimumProjectedNonEdgeTextPx": 10.910104011887073,
+        "minimumProjectedEdgeTextPx": 10.910104011887073,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -671,15 +671,15 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1909,
-        "diagramWidth": 1859,
+        "readerWidth": 1741,
+        "diagramWidth": 1691,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 94,
           "diagramChromePx": 94,
           "svgPx": 1057,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
         "minimumProjectedNodeTextPx": 11,
@@ -728,20 +728,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1297,
-        "diagramWidth": 1267,
+        "readerWidth": 1157,
+        "diagramWidth": 1127,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 78,
+          "headerPx": 94,
           "diagramChromePx": 78,
-          "svgPx": 720,
+          "svgPx": 704,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 10.354383358098069,
-        "minimumProjectedNonEdgeTextPx": 10.354383358098069,
-        "minimumProjectedEdgeTextPx": 10.354383358098069,
+        "minimumProjectedNodeTextPx": 9.210252600297178,
+        "minimumProjectedNonEdgeTextPx": 9.210252600297178,
+        "minimumProjectedEdgeTextPx": 9.210252600297178,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -781,20 +781,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1297,
-        "diagramWidth": 1267,
+        "readerWidth": 1157,
+        "diagramWidth": 1127,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 78,
+          "headerPx": 94,
           "diagramChromePx": 78,
-          "svgPx": 720,
+          "svgPx": 704,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 10.354383358098069,
-        "minimumProjectedNonEdgeTextPx": 10.354383358098069,
-        "minimumProjectedEdgeTextPx": 10.354383358098069,
+        "minimumProjectedNodeTextPx": 9.210252600297178,
+        "minimumProjectedNonEdgeTextPx": 9.210252600297178,
+        "minimumProjectedEdgeTextPx": 9.210252600297178,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -834,15 +834,15 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1909,
-        "diagramWidth": 1859,
+        "readerWidth": 1741,
+        "diagramWidth": 1691,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 94,
           "diagramChromePx": 94,
           "svgPx": 1057,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
         "minimumProjectedNodeTextPx": 11,
@@ -887,15 +887,15 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1909,
-        "diagramWidth": 1859,
+        "readerWidth": 1741,
+        "diagramWidth": 1691,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 94,
           "diagramChromePx": 94,
           "svgPx": 1057,
           "cardsPx": 0,
-          "viewBoxHeight": 765
+          "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
         "minimumProjectedNodeTextPx": 11,
@@ -928,7 +928,7 @@
     "contactSheet": "agent-loop-sequence.visual-check.html"
   },
   "sidecars": {
-    "directory": ".archify/visual-check-agent-loop-sequence",
+    "directory": ".archify/visual-check-agent-loop-sequence-r4",
     "receipt": "agent-loop-sequence.visual-check.json",
     "contactSheet": "agent-loop-sequence.visual-check.html",
     "files": [
@@ -938,23 +938,23 @@
         "file": "agent-loop-sequence.visual-check.html"
       },
       {
-        "sha256": "add4fa5680835d848d77fd8cbad0fe6bafb0d2409cd55b94dcc1ba8a7d9f7300",
-        "bytes": 187854,
+        "sha256": "99ac6b556b5e9759022b6830e7aac968a31c4303abf52958013988874db13d4d",
+        "bytes": 179000,
         "file": "agent-loop-sequence.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "9729453a157029816db74f7b0ac487801b48a34bdcd833caf3b1e0f9e23304b3",
-        "bytes": 193647,
+        "sha256": "1646ba1d03c037d1c133be7c4e9fa29002b4bef6b56496adfcb33f2fddf5703f",
+        "bytes": 184632,
         "file": "agent-loop-sequence.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "2dae8ef1aea360456b76c12850d47748975f14dd0c0ad420881eba8ea0670472",
-        "bytes": 268211,
+        "sha256": "965338211b5c15986b0e20e6cabebe6eea0df78c34cd27cd734946bdef509504",
+        "bytes": 269943,
         "file": "agent-loop-sequence.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "01744b468e095c4d22b64465ca889db76dd3a785498b88d0bacaa1c2b2f4a2a8",
-        "bytes": 280072,
+        "sha256": "381fc5de0b228b6972145fd4985b0de3872f03dd2fac10193f3e647173cc3f75",
+        "bytes": 281233,
         "file": "agent-loop-sequence.visual-check.2048x1320.dark.png"
       }
     ]

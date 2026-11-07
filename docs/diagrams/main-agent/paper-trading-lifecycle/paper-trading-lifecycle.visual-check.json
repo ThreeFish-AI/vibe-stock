@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "edd97c17-9225-4d45-8ce6-ba273276e7c1",
+  "deliveryReceiptId": "ff2d2b97-69a7-4546-add1-506a9154c9d2",
   "artifact": {
     "path": "docs/diagrams/main-agent/paper-trading-lifecycle/paper-trading-lifecycle.html",
-    "sha256": "e114f03785a6faad6f791b4c97f41342ccd91aa004163dc278187c2802052028",
-    "bytes": 760201
+    "sha256": "4fdd3e79709a91d77df53e7523cc38df6db584788c26d8975e8c367bf45c26e4",
+    "bytes": 760281
   },
   "state": {
     "detail": "read",
@@ -896,7 +896,7 @@
     "contactSheet": "paper-trading-lifecycle.visual-check.html"
   },
   "sidecars": {
-    "directory": ".archify/visual-check-paper-trading-lifecycle-r3",
+    "directory": ".archify/visual-check-paper-trading-lifecycle-r4",
     "receipt": "paper-trading-lifecycle.visual-check.json",
     "contactSheet": "paper-trading-lifecycle.visual-check.html",
     "files": [
@@ -911,18 +911,18 @@
         "file": "paper-trading-lifecycle.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "531aa26f7ed35079d95dae129cd527214d575ad08ca5c1e8b0313cca3a7f1508",
-        "bytes": 118045,
+        "sha256": "09cf75c9ed06e641d9189ccfd30858464f9358e3124744580d9912e91f689717",
+        "bytes": 118046,
         "file": "paper-trading-lifecycle.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "a9919c04cc5fa49f78b3c5ff03e5b333ea9dc6e99df66c7621baf329d6ab0ebf",
-        "bytes": 177928,
+        "sha256": "b9bf76955fea189c3c7089fbf15d92d0278de3e627f08e91e76afd684dedfcf9",
+        "bytes": 182800,
         "file": "paper-trading-lifecycle.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "63fbed7963a391c7589d297c8fc8a4bf0b98f08a403552ff7fe25128edac1b8f",
-        "bytes": 189184,
+        "sha256": "99186eff05617f3c62bcb14c43dda44c41bdae2e2f271d5bbaec10818938052f",
+        "bytes": 194413,
         "file": "paper-trading-lifecycle.visual-check.2048x1320.dark.png"
       }
     ]

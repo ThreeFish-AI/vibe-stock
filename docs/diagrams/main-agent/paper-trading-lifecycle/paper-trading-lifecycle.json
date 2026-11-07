@@ -36,7 +36,7 @@
       "dot": "cyan",
       "title": "三批并行状态机",
       "items": [
-        "T1_open 次日开盘批：按次日开盘价成交",
+        "T1_open 次日开盘批：按开盘价成交；跳空 >+2% 转限价（信号日收盘×1.02、5 日 GTC，未穿价 expired）",
         "T2_limit 限价批：low<limit 严格穿价 · 成交价=min(open, entry_ref) · 触价写回经用户逐笔确认 record_fill",
         "T3_trigger 确认批：触发条件确认后才计成交；各批独立 pending→filled/expired，任一批成交即进 holding（余批继续 pending）；T3 补足必转 filled，仅无 T3 批（≤2 手）才会全部 expired"
       ]
