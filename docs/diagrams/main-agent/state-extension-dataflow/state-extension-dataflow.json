@@ -1,0 +1,331 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "状态层数据流：既有 SSOT 只读 · agent/ 唯一新写区",
+    "subtitle": "~/.vibe-stock/ 读写权划分：既有件写者不变 · 主 Agent 只读扇入 · 决策台账经后验槽回流记分",
+    "locale": "zh-CN",
+    "output": "docs/diagrams/main-agent/state-extension-dataflow/state-extension-dataflow.html",
+    "viewBox": [
+      1085,
+      620
+    ],
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    {
+      "label": "既有 SSOT"
+    },
+    {
+      "label": "主 Agent 层"
+    },
+    {
+      "label": "agent/ 唯一新写区"
+    },
+    {
+      "label": "模拟盘 · 后验 · 展示"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "verdicts",
+      "type": "database",
+      "label": "signals · ledger×2",
+      "sublabel": "五词信号 · 双轨战绩",
+      "tag": "写者=report/postmortem",
+      "stage": 0,
+      "row": 0,
+      "width": 150,
+      "height": 64
+    },
+    {
+      "id": "monitor",
+      "type": "database",
+      "label": "monitor/",
+      "sublabel": "盯盘台账 · advice/ 建议卡",
+      "tag": "台账=watch.py · 卡=例外",
+      "stage": 0,
+      "row": 1,
+      "width": 150,
+      "height": 64
+    },
+    {
+      "id": "slotfiles",
+      "type": "database",
+      "label": "outlook/ · reports/",
+      "sublabel": "走势参考 · 分级报告",
+      "tag": "写者=批量槽/report",
+      "stage": 0,
+      "row": 2,
+      "width": 150,
+      "height": 64
+    },
+    {
+      "id": "portfolio",
+      "type": "database",
+      "label": "portfolio.json",
+      "sublabel": "实盘持仓 · 取数串行",
+      "tag": "用户手维 · 全员只读",
+      "stage": 0,
+      "row": 3,
+      "width": 150,
+      "height": 64
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "主 Agent 层",
+      "sublabel": "路由·CC·断言·paper",
+      "tag": "FastAPI 单体",
+      "stage": 1,
+      "row": 1,
+      "width": 150,
+      "height": 64
+    },
+    {
+      "id": "queuesessions",
+      "type": "database",
+      "label": "queue · sessions",
+      "sublabel": "幂等键+WAL · 会话台账",
+      "tag": "queue.json · sessions.json",
+      "stage": 2,
+      "row": 0,
+      "width": 150,
+      "height": 64
+    },
+    {
+      "id": "decisionsaudit",
+      "type": "database",
+      "label": "decisions.jsonl",
+      "sublabel": "+ audit/<date>/ 归档",
+      "tag": "agent: 前缀·hash 链",
+      "stage": 2,
+      "row": 1,
+      "width": 150,
+      "height": 64
+    },
+    {
+      "id": "budget",
+      "type": "database",
+      "label": "budget.json",
+      "sublabel": "预算闸台账",
+      "tag": "--max-budget-usd",
+      "stage": 2,
+      "row": 2,
+      "width": 150,
+      "height": 64
+    },
+    {
+      "id": "simport",
+      "type": "database",
+      "label": "sim-portfolio.json",
+      "sublabel": "模拟盘账本 · 07 P3",
+      "tag": "写者=paper 引擎",
+      "stage": 2,
+      "row": 3,
+      "width": 150,
+      "height": 64
+    },
+    {
+      "id": "postmortem",
+      "type": "backend",
+      "label": "18:05 后验槽",
+      "sublabel": "agent: 前缀记分",
+      "tag": "既有写者不变",
+      "stage": 3,
+      "row": 0,
+      "width": 150,
+      "height": 64
+    },
+    {
+      "id": "panel",
+      "type": "frontend",
+      "label": "Web 面板",
+      "sublabel": "七页 · 读+命令通道",
+      "tag": "展示与触发",
+      "stage": 3,
+      "row": 1,
+      "width": 150,
+      "height": 64
+    }
+  ],
+  "flows": [
+    {
+      "id": "f1",
+      "from": "monitor",
+      "to": "agent",
+      "label": "盯盘触发",
+      "classification": "事件流",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        172,
+        331
+      ]
+    },
+    {
+      "id": "f2",
+      "from": "verdicts",
+      "to": "agent",
+      "label": "只读·信号",
+      "classification": "只读",
+      "variant": "dashed",
+      "labelAt": [
+        172,
+        217
+      ]
+    },
+    {
+      "id": "f3",
+      "from": "slotfiles",
+      "to": "agent",
+      "label": "槽完成触发",
+      "classification": "只读",
+      "variant": "dashed",
+      "labelAt": [
+        172,
+        445
+      ]
+    },
+    {
+      "id": "f4",
+      "from": "portfolio",
+      "to": "agent",
+      "label": "实盘对照",
+      "classification": "只读",
+      "variant": "dashed",
+      "labelAt": [
+        240,
+        331
+      ]
+    },
+    {
+      "id": "f5",
+      "from": "agent",
+      "to": "queuesessions",
+      "label": "入队·幂等",
+      "classification": "任务流",
+      "variant": "emphasis",
+      "labelAt": [
+        385,
+        217
+      ]
+    },
+    {
+      "id": "f6",
+      "from": "agent",
+      "to": "decisionsaudit",
+      "label": "过门原子写",
+      "classification": "决策流",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        385,
+        331
+      ]
+    },
+    {
+      "id": "f7",
+      "from": "agent",
+      "to": "simport",
+      "label": "穿价记账",
+      "classification": "模拟盘",
+      "variant": "emphasis",
+      "labelAt": [
+        385,
+        445
+      ]
+    },
+    {
+      "id": "f8",
+      "from": "budget",
+      "to": "agent",
+      "label": "预算闸",
+      "classification": "超限拒spawn",
+      "variant": "security",
+      "labelAt": [
+        460,
+        331
+      ]
+    },
+    {
+      "id": "f9",
+      "from": "decisionsaudit",
+      "to": "postmortem",
+      "label": "agent:记分",
+      "classification": "后验流",
+      "variant": "emphasis",
+      "labelAt": [
+        600,
+        217
+      ]
+    },
+    {
+      "id": "f10",
+      "from": "postmortem",
+      "to": "verdicts",
+      "label": "记分写回",
+      "classification": "既有写者",
+      "variant": "security",
+      "route": "top-channel",
+      "labelAt": [
+        420,
+        88
+      ]
+    },
+    {
+      "id": "f11",
+      "from": "simport",
+      "to": "panel",
+      "label": "模拟盘视图",
+      "classification": "只读",
+      "variant": "dashed",
+      "labelAt": [
+        680,
+        445
+      ]
+    },
+    {
+      "id": "f12",
+      "from": "decisionsaudit",
+      "to": "panel",
+      "label": "决策时间线",
+      "classification": "只读",
+      "variant": "dashed",
+      "route": "straight",
+      "labelAt": [
+        600,
+        331
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "既有件写者不变",
+      "items": [
+        "signals.json / ledger.json / ledger.position.json 的写者永远是 report / postmortem 确定性脚本，主 Agent 全部只读",
+        "monitor/ 台账写者=watch.py（advice/ 建议卡例外：主 Agent 经断言器放行后原子写、落盘零数量）；outlook/ 写者=17:35 批量槽；reports/ 写者=report；各节点边均标注读写者与方向",
+        "portfolio.json 用户手维 · 全员只读；fetch_state.lock 保证全诊取数串行互斥"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "agent/ 唯一新写区",
+      "items": [
+        "queue.json（幂等键+WAL）· sessions.json · decisions.jsonl（agent: 前缀 + hash 链）· audit/<date>/（stream-json 归档）· budget.json 五件全部原子写",
+        "budget.json 是 --max-budget-usd 的落地面：超限拒 spawn，先闸后花",
+        "sim-portfolio.json 独立于 agent/，写者仅为 paper 引擎（07 P3 schema · 穿价 · T+1）"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "只读扇入与后验回流",
+      "items": [
+        "monitor events 与槽完成事件（watchfiles）是意图路由的两个事件触发源，均以只读扇入组装有界上下文",
+        "decisions.jsonl 以 agent: 前缀流入 18:05 后验槽记分；后验槽以既有写者身份写回 ledger，不新增第二写者",
+        "Web 面板读 agent/ 与模拟盘视图；写仅经 agent/ 命令通道（任务提交、逐笔确认、预算），不写既有 SSOT"
+      ]
+    }
+  ]
+}
