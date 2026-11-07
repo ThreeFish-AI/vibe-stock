@@ -194,42 +194,42 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
         <div class="ev risk">
           <div class="ev-time">09:24</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
-            <div class="ev-top"><span class="ev-stock"><b>000567</b> 示例消费</span><span class="lv lv1">T1</span><span class="tag">破位复核</span></div>
+            <div class="ev-top"><span class="ev-stock"><b>000567</b> 示例消费</span><span class="lv lv1">T1</span><span class="tag">均线复核</span></div>
             <div class="ev-name">MA20 破位降档 buy → hold<span class="riskchip">mech_risk medium</span></div>
           </div>
         </div>
         <div class="ev">
           <div class="ev-time">09:31</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
-            <div class="ev-top"><span class="ev-stock"><b>300866</b> 示例新能源</span><span class="lv lv2">T2</span><span class="tag">触价复核</span></div>
+            <div class="ev-top"><span class="ev-stock"><b>300866</b> 示例新能源</span><span class="lv lv2">T2</span><span class="tag">T2成交复核</span></div>
             <div class="ev-name">T2 限价批触价 · 模拟盘待逐笔确认</div>
           </div>
         </div>
         <div class="ev">
           <div class="ev-time">09:36</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
-            <div class="ev-top"><span class="ev-stock"><b>HK 示例·互联</b></span><span class="lv lv0">T0</span><span class="tag">知情确认</span></div>
+            <div class="ev-top"><span class="ev-stock"><b>HK 示例·互联</b></span><span class="lv lv0">T0</span></div>
             <div class="ev-name">11-13 盘后业绩公告临近 · 提前补全诊证据</div>
           </div>
         </div>
         <div class="ev">
           <div class="ev-time">09:42</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
-            <div class="ev-top"><span class="ev-stock"><b>688517</b> 示例半导体</span><span class="lv lv0">T0</span><span class="tag">知情确认</span></div>
+            <div class="ev-top"><span class="ev-stock"><b>688517</b> 示例半导体</span><span class="lv lv0">T0</span></div>
             <div class="ev-name">11-11 解禁临近提示 · 2.1% 流通盘</div>
           </div>
         </div>
         <div class="ev">
           <div class="ev-time">09:49</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
-            <div class="ev-top"><span class="ev-stock"><b>601789</b> 示例医药</span><span class="lv lv2">T2</span><span class="tag">资格复核</span></div>
+            <div class="ev-top"><span class="ev-stock"><b>601789</b> 示例医药</span><span class="lv lv2">T2</span></div>
             <div class="ev-name">加仓轨资格冻结到期 · 待重估三道门</div>
           </div>
         </div>
         <div class="ev">
           <div class="ev-time">09:55</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
-            <div class="ev-top"><span class="ev-stock"><b>大盘</b> 市场级</span><span class="lv lv0">T0</span><span class="tag">无需复核</span></div>
+            <div class="ev-top"><span class="ev-stock"><b>大盘</b> 市场级</span><span class="lv lv0">T0</span></div>
             <div class="ev-name">盘中指数与汇率快照已注入上下文包</div>
           </div>
         </div>
@@ -362,7 +362,7 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
 
 <script>
 (function(){
-  var data=[1.000,1.004,1.001,1.008,1.012,1.009,1.016,1.022,1.019,1.026,1.033,1.029,1.024,1.017,1.010,1.003,0.996,1.001,1.007,1.013,1.010,1.017,1.023,1.020,1.027,1.034,1.030,1.037,1.043,1.040,1.047,1.054,1.050,1.057,1.063,1.060,1.067,1.073,1.070,1.076,1.0842];
+  var data=[1.000,1.004,1.001,1.008,1.012,1.009,1.016,1.022,1.019,1.026,1.033,1.029,1.024,1.017,1.010,1.003,0.996,1.001,1.007,1.013,1.010,1.017,1.023,1.020,1.027,1.034,1.030,1.037,1.043,1.040,1.047,1.054,1.050,1.057,1.063,1.060,1.067,1.073,1.070,1.0775,1.0842];
   var el=document.getElementById('spark'); if(!el) return;
   var W=310,H=56,L=2,R=8,T=5,B=4,lo=0.985,hi=1.095,n=data.length;
   function x(i){return L+(W-L-R)*i/(n-1);}

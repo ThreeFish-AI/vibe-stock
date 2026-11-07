@@ -176,7 +176,7 @@ tr.open td:first-child{box-shadow:inset 4px 0 0 #F0B35C,0 0 10px rgba(240,179,92
             <td class="code">300866</td><td>示例新能源</td>
             <td><span class="st st-open"><span class="d"></span>建仓中</span></td>
             <td><span class="legs"><span class="leg filled"><i>T1</i>filled</span><span class="leg pending"><i>T2</i>pending</span><span class="leg pending"><i>T3</i>pending</span></span></td>
-            <td class="num">0</td><td class="num">43.10</td><td class="num">44.10</td><td class="num pf">+2.32%</td>
+            <td class="num">0</td><td class="num">43.20</td><td class="num">44.10</td><td class="num pf">+2.08%</td>
           </tr>
           <tr>
             <td class="code">601234</td><td>示例电子</td>
@@ -257,7 +257,7 @@ tr.open td:first-child{box-shadow:inset 4px 0 0 #F0B35C,0 0 10px rgba(240,179,92
           </svg>
           <div class="eq-sub">
             <span class="chip chip-neutral">初始 1.0000</span>
-            <span class="chip chip-neutral">期末 1.0842</span>
+            <span class="chip chip-neutral">期末 1.0775</span>
             <span>合成月度数据 · 含费用与滑点</span>
           </div>
         </div>
@@ -284,7 +284,7 @@ tr.open td:first-child{box-shadow:inset 4px 0 0 #F0B35C,0 0 10px rgba(240,179,92
 <script>
 (function(){
   var el=document.getElementById('eq'); if(!el) return;
-  var data=[1.000,1.005,0.997,1.008,1.014,1.010,1.019,1.026,1.022,1.031,1.038,1.045,1.052,1.046,1.036,1.024,1.012,1.001,0.990,0.984,0.991,1.000,1.008,1.016,1.011,1.020,1.029,1.036,1.031,1.041,1.049,1.056,1.051,1.060,1.067,1.062,1.071,1.077,1.072,1.080,1.076,1.081,1.077,1.083,1.079,1.086,1.0842];
+  var data=[1.000,1.005,0.997,1.008,1.014,1.010,1.019,1.026,1.022,1.031,1.038,1.045,1.052,1.046,1.036,1.024,1.012,1.001,0.990,0.984,0.991,1.000,1.008,1.016,1.011,1.020,1.029,1.036,1.031,1.041,1.049,1.056,1.051,1.060,1.067,1.062,1.071,1.077,1.072,1.080,1.076,1.081,1.077,1.083,1.079,1.086,1.0775];
   var W=440,H=196,L=44,R=14,T=12,B=24,lo=0.972,hi=1.108,n=data.length;
   function x(i){return L+(W-L-R)*i/(n-1);}
   function y(v){return T+(H-T-B)*(1-(v-lo)/(hi-lo));}
@@ -321,7 +321,7 @@ tr.open td:first-child{box-shadow:inset 4px 0 0 #F0B35C,0 0 10px rgba(240,179,92
   p.setAttribute('cx',x(n-1).toFixed(1));p.setAttribute('cy',y(data[n-1]).toFixed(1));
   var lab=el.querySelector('.lastlab');
   lab.setAttribute('x',x(n-1).toFixed(1)-2);lab.setAttribute('y',y(data[n-1]).toFixed(1)-10);
-  lab.textContent='1.0842';
+  lab.textContent='1.0775';
 })();
 </script>
 </body>
