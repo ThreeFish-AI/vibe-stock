@@ -1,8 +1,10 @@
-# 主 Agent（Claude Code 唯一大脑）产品与技术方案
+# Stock Trading Agent（主 Agent）产品与技术方案
 
 日期：2026-11-06 · 状态：待审批 · 本方案及全部产物仅供学习研究，不构成投资建议
 
-**前置说明**：本方案基于 [main-agent.md](main-agent.md) 调研报告（646 条 findings、159-agent 三段流水线产出）收敛。四项用户裁定为不可复议前提：①技术主线 Python + headless CLI 子进程（Agent SDK 对照）；②M1 即本地 Web UI 起步；③模拟盘口径盘中限价+滑点（永不真实下单）；④成果沉淀本仓。方案比选：三候选（A FastAPI 单体面板 / B 编排守护与只读面板分体 / C Tauri 桌面壳+sidecar）×三 lens（工程成本/红线合规/产品价值）确定性合分 A 39 / B 36 / C 30——**以 A 为骨架**（工程最简、单进程最短路径），**嫁接 B 的合规架构与产品增量**（显式红线编号锚定、写权限归属纪律、hash 链台账、T0/T1/T2 事件梯完整接线、模拟盘 M1 即落地 v1、面板崩不连坐盯盘记账的结构保证）**与 C 的边界纪律**（NR 红线最严形态、浏览器 tab 永为完整后备、Tauri 壳留 M2 门口评审）；评审对 A 的三条批评（红线无编号锚定、Web 攻击面与写权限同体、台账无防篡改）在合成中全部修复。架构图见 [docs/diagrams/main-agent/](../diagrams/main-agent/)。
+**前置说明**：本方案基于 [main-agent.md](main-agent.md) 调研报告（646 条 findings、159-agent 三段流水线产出）收敛。四项用户裁定为不可复议前提：①技术主线 Python + headless CLI 子进程（Agent SDK 对照）；②M1 即本地 Web UI 起步；③模拟盘口径盘中限价+滑点（永不真实下单）；④成果沉淀本仓。方案比选：三候选（A FastAPI 单体面板 / B 编排守护与只读面板分体 / C Tauri 桌面壳+sidecar）×三 lens（工程成本/红线合规/产品价值）确定性合分 A 39 / B 36 / C 30——**以 A 为骨架**（工程最简、单进程最短路径），**嫁接 B 的合规架构与产品增量**（显式红线编号锚定、写权限归属纪律、hash 链台账、T0/T1/T2 事件梯完整接线、模拟盘 M1 即落地 v1、面板崩不连坐盯盘记账的结构保证）**与 C 的边界纪律**（NR 红线最严形态、浏览器 tab 永为完整后备、Tauri 壳留 M2 门口评审）；评审对 A 的三条批评（红线无编号锚定、Web 攻击面与写权限同体、台账无防篡改）在合成中全部修复。产品正式定名 **Stock Trading Agent**（2026-11-07 用户裁定，决策点 D1 落定，不含「Claude Code」字样、符合 Anthropic 品牌约束；下文行文沿用「主 Agent」简称指代该产品，vibe-stock Skill 与仓库名不变）。
+
+![架构图](../diagrams/main-agent/main-architecture/main-architecture.svg)。
 
 ## 上篇 产品方案
 
@@ -92,24 +94,39 @@ CCClient 契约（采 B 候选签名级细化）：
 ```python
 @dataclass(frozen=True)
 class CCRequest:
-    task_id: str; session_uuid: str        # UUIDv5(ns, f"{date}:{code}:{kind}")（F-60）
-    prompt: str | Path                     # Skill 入口「/vibe-stock 600519」形态（F-49）
-    schema: dict | None                    # draft-07 扁平子集，意见段必带（F-11/F-12/F-16）
-    budget_usd: float; max_turns: int      # 每任务必填（NR-4）
-    allowed_tools: tuple[str, ...]; permission_mode: str = "dontAsk"  # F-24
-    mcp: str = "strict-empty"              # --strict-mcp-config+空 --mcp-config（D-53：429k→2.8k tokens）
-    timeout_s: int = 900; autocompact: str | None = None
+    task_id: str
+    session_uuid: str  # UUIDv5(ns, f"{date}:{code}:{kind}")（F-60）
+    prompt: str | Path  # Skill 入口「/vibe-stock 600519」形态（F-49）
+    schema: dict | None  # draft-07 扁平子集，意见段必带（F-11/F-12/F-16）
+    budget_usd: float
+    max_turns: int  # 每任务必填（NR-4）
+    allowed_tools: tuple[str, ...]
+    permission_mode: str = "dontAsk"  # F-24
+    mcp: str = (
+        "strict-empty"  # --strict-mcp-config+空 --mcp-config（D-53：429k→2.8k tokens）
+    )
+    timeout_s: int = 900
+    autocompact: str | None = None
+
 
 class CCClient(Protocol):
     def spawn_once(self, req: CCRequest) -> CCResult: ...
-    def resume(self, session_id: str, req: CCRequest) -> CCResult: ...  # 旗标全量重传（D-32）
-    def probe(self) -> ProbeReport: ...    # --version+认证态+init.capabilities（F-10/F-31）
+    def resume(
+        self, session_id: str, req: CCRequest
+    ) -> CCResult: ...  # 旗标全量重传（D-32）
+    def probe(
+        self,
+    ) -> ProbeReport: ...  # --version+认证态+init.capabilities（F-10/F-31）
+
 
 @dataclass
 class CCResult:
-    exit_code: int; envelope: dict | None       # subtype/total_cost_usd/usage/session_id
-    structured_output: dict | None; result_line_present: bool
-    transcript_path: Path; usage_tokens: dict
+    exit_code: int
+    envelope: dict | None  # subtype/total_cost_usd/usage/session_id
+    structured_output: dict | None
+    result_line_present: bool
+    transcript_path: Path
+    usage_tokens: dict
 ```
 
 硬约束：子进程长期持引用防 GC 误杀+`asyncio.wait_for` 超时（I-37）；SIGTERM=143 弃轮、收轮用 SIGINT（D-01）；续话一律 `--resume` 禁 `--continue`（D-37/D-76）；迭代 system prompt 须 `--system-prompt-snapshot off`（F-43）；高频 spawn 固定成本约 $0.20/次（1h cache 写 49k tokens），同日多任务评估 resume 续连摊薄（F-59/D-36）。
@@ -177,7 +194,7 @@ decision log 指标族：意图路由命中率（确定性 vs 兜底）、三段
 
 | # | 决策点 | 推荐默认 | 理由 |
 | :--- | :--- | :--- | :--- |
-| D1 | 产品命名 | 方案 PR 由用户裁定（候选：vibe-pilot / vs-agent；不得含「Claude Code」字样，Anthropic 品牌约束） | 命名属用户裁量 |
+| D1 | 产品命名 | **已裁定（2026-11-07）：Stock Trading Agent**（不含「Claude Code」字样，符合 Anthropic 品牌约束；行文简称「主 Agent」） | 用户已定名 |
 | D2 | M3 预算闸数值 | 按计费形态二选一（已裁定）：①**全部调用走订阅登录态（OAuth）→ 预算数值先完全放开**（`--max-budget-usd` 仍带高位哨兵值满足 NR-4，日/月 USD 信封不设闸、仅记账，硬性次数闸保留）；②**任一调用走 API Usage 计费 → 单会话 $1、日累计 $8、月 $100 量级**（占位 estimated：按含固定开销全成本 $0.3–0.65/次 × 实盘只数日诊推导，对照 §9 固定成本 $0.20/次与 Sidekick $0.35–0.49/条锚；单会话闸压到 $0.5 以内会让常规诊股频繁触顶） | 机制已钉死（NR-4）、数值依计费形态：订阅登录态下 `claude -p` 仍计入订阅额度而非美元计费（官方帮助页，§13）；形态由 `probe()` 认证态机判，不凭配置自述 |
 | D3 | AbandonProcessGroup | true（保留在跑 CC 会话，泄漏由巡检兜底） | 守护重启连杀子进程代价高于泄漏巡检成本（I-57/D-08） |
 | D4 | Tauri 桌面壳 | M2 门口评审、默认不做（浏览器 tab+pywebview 已覆盖） | C 候选自认边际价值存疑（judge value 7） |

@@ -1,4 +1,4 @@
-# 主 Agent（Claude Code 唯一大脑）前期技术与产品调研报告
+# Stock Trading Agent（主 Agent）前期技术与产品调研报告
 
 调研日期：2026-11-06
 

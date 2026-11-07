@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "19b0b1bc-8c09-46d1-8cd6-6937af4ee9c5",
+  "deliveryReceiptId": "e7dcb1dd-d744-4613-b93e-4dff297e3d4a",
   "artifact": {
     "path": "docs/diagrams/main-agent/agent-loop-sequence/agent-loop-sequence.html",
-    "sha256": "0c5a40921ee29c56bce73c1a041eb14f505c606c75e0de33b016ea5fd8d1aa66",
-    "bytes": 773187
+    "sha256": "9300f75537b7d58814980a1107643c5fd877946a5e46a9109049e8d3ecf51c63",
+    "bytes": 773217
   },
   "state": {
     "detail": "read",
@@ -93,20 +93,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1237,
-        "diagramWidth": 1207,
+        "readerWidth": 1212,
+        "diagramWidth": 1182,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 86,
+          "headerPx": 102,
           "diagramChromePx": 84,
-          "svgPx": 754,
+          "svgPx": 739,
           "cardsPx": 0,
           "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 9.86404160475483,
-        "minimumProjectedNonEdgeTextPx": 9.86404160475483,
-        "minimumProjectedEdgeTextPx": 9.86404160475483,
+        "minimumProjectedNodeTextPx": 9.659732540861812,
+        "minimumProjectedNonEdgeTextPx": 9.659732540861812,
+        "minimumProjectedEdgeTextPx": 9.659732540861812,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -354,20 +354,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1237,
-        "diagramWidth": 1207,
+        "readerWidth": 1212,
+        "diagramWidth": 1182,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 86,
+          "headerPx": 102,
           "diagramChromePx": 84,
-          "svgPx": 754,
+          "svgPx": 739,
           "cardsPx": 0,
           "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 9.86404160475483,
-        "minimumProjectedNonEdgeTextPx": 9.86404160475483,
-        "minimumProjectedEdgeTextPx": 9.86404160475483,
+        "minimumProjectedNodeTextPx": 9.659732540861812,
+        "minimumProjectedNonEdgeTextPx": 9.659732540861812,
+        "minimumProjectedEdgeTextPx": 9.659732540861812,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -567,20 +567,20 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1237,
-        "diagramWidth": 1207,
+        "readerWidth": 1212,
+        "diagramWidth": 1182,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 86,
+          "headerPx": 102,
           "diagramChromePx": 84,
-          "svgPx": 754,
+          "svgPx": 739,
           "cardsPx": 0,
           "viewBoxHeight": 841
         },
         "viewBoxWidth": 1346,
-        "minimumProjectedNodeTextPx": 9.86404160475483,
-        "minimumProjectedNonEdgeTextPx": 9.86404160475483,
-        "minimumProjectedEdgeTextPx": 9.86404160475483,
+        "minimumProjectedNodeTextPx": 9.659732540861812,
+        "minimumProjectedNonEdgeTextPx": 9.659732540861812,
+        "minimumProjectedEdgeTextPx": 9.659732540861812,
         "minimumProjectedNodeText": "① 手动触发：全诊 / 批量 / 『盯盘复核 <code>』",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
@@ -928,7 +928,7 @@
     "contactSheet": "agent-loop-sequence.visual-check.html"
   },
   "sidecars": {
-    "directory": ".archify/visual-check-agent-loop-sequence-r4",
+    "directory": ".archify/visual-check-agent-loop-sequence-r2",
     "receipt": "agent-loop-sequence.visual-check.json",
     "contactSheet": "agent-loop-sequence.visual-check.html",
     "files": [
@@ -938,23 +938,23 @@
         "file": "agent-loop-sequence.visual-check.html"
       },
       {
-        "sha256": "99ac6b556b5e9759022b6830e7aac968a31c4303abf52958013988874db13d4d",
-        "bytes": 179000,
+        "sha256": "e4acedaa9864ab0ddb825300fc8d8e5d4135ea45a72e3be66fb126d9d21ed75c",
+        "bytes": 182128,
         "file": "agent-loop-sequence.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "1646ba1d03c037d1c133be7c4e9fa29002b4bef6b56496adfcb33f2fddf5703f",
-        "bytes": 184632,
+        "sha256": "5f09478c12d3ea466d975a875db3627f93f3d1b664514a0e1308a6e62733363e",
+        "bytes": 187710,
         "file": "agent-loop-sequence.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "965338211b5c15986b0e20e6cabebe6eea0df78c34cd27cd734946bdef509504",
-        "bytes": 269943,
+        "sha256": "18d10b0c9d31826585f6c0ef841ba3bf0abd4832585ed44a2426f4df97d09ea9",
+        "bytes": 272779,
         "file": "agent-loop-sequence.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "381fc5de0b228b6972145fd4985b0de3872f03dd2fac10193f3e647173cc3f75",
-        "bytes": 281233,
+        "sha256": "b7abca39123fc613cbda37d990f39f2f16d1fa10d93b4a825e6c9e83562d327b",
+        "bytes": 283926,
         "file": "agent-loop-sequence.visual-check.2048x1320.dark.png"
       }
     ]

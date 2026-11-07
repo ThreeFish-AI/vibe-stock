@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "12bd75fc-8a6f-4ca2-a845-2db1f29ceb2f",
+  "deliveryReceiptId": "a08e97fb-85fd-47d8-9db3-1c3e53a92855",
   "artifact": {
     "path": "docs/diagrams/main-agent/main-architecture/main-architecture.html",
-    "sha256": "f997a15520f154309b0249af3b339fd84024c460eeb52ace7392695256061a29",
-    "bytes": 787764
+    "sha256": "8764e1f3c1ee1fe48b9649272b9834469c21560dbed9c979cddf63957fb1c27e",
+    "bytes": 787794
   },
   "state": {
     "detail": "read",
@@ -32,7 +32,7 @@
         "innerWidth": 1440,
         "innerHeight": 900,
         "scrollWidth": 1440,
-        "scrollHeight": 1105,
+        "scrollHeight": 1121,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -45,7 +45,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 99,
+          "headerPx": 115,
           "diagramChromePx": 78,
           "svgPx": 915,
           "cardsPx": 0,
@@ -84,7 +84,7 @@
         "innerWidth": 1600,
         "innerHeight": 1000,
         "scrollWidth": 1600,
-        "scrollHeight": 1171,
+        "scrollHeight": 1187,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -97,7 +97,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 107,
+          "headerPx": 123,
           "diagramChromePx": 84,
           "svgPx": 915,
           "cardsPx": 0,
@@ -136,7 +136,7 @@
         "innerWidth": 1920,
         "innerHeight": 1080,
         "scrollWidth": 1920,
-        "scrollHeight": 1171,
+        "scrollHeight": 1187,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -149,7 +149,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 107,
+          "headerPx": 123,
           "diagramChromePx": 84,
           "svgPx": 915,
           "cardsPx": 0,
@@ -293,7 +293,7 @@
         "innerWidth": 1440,
         "innerHeight": 900,
         "scrollWidth": 1440,
-        "scrollHeight": 1105,
+        "scrollHeight": 1121,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -306,7 +306,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 99,
+          "headerPx": 115,
           "diagramChromePx": 78,
           "svgPx": 915,
           "cardsPx": 0,
@@ -345,7 +345,7 @@
         "innerWidth": 1600,
         "innerHeight": 1000,
         "scrollWidth": 1600,
-        "scrollHeight": 1171,
+        "scrollHeight": 1187,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -358,7 +358,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 107,
+          "headerPx": 123,
           "diagramChromePx": 84,
           "svgPx": 915,
           "cardsPx": 0,
@@ -397,7 +397,7 @@
         "innerWidth": 1920,
         "innerHeight": 1080,
         "scrollWidth": 1920,
-        "scrollHeight": 1171,
+        "scrollHeight": 1187,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -410,7 +410,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 107,
+          "headerPx": 123,
           "diagramChromePx": 84,
           "svgPx": 915,
           "cardsPx": 0,
@@ -506,7 +506,7 @@
         "innerWidth": 1440,
         "innerHeight": 900,
         "scrollWidth": 1440,
-        "scrollHeight": 1105,
+        "scrollHeight": 1121,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -519,7 +519,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 99,
+          "headerPx": 115,
           "diagramChromePx": 78,
           "svgPx": 915,
           "cardsPx": 0,
@@ -558,7 +558,7 @@
         "innerWidth": 1600,
         "innerHeight": 1000,
         "scrollWidth": 1600,
-        "scrollHeight": 1171,
+        "scrollHeight": 1187,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -571,7 +571,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 107,
+          "headerPx": 123,
           "diagramChromePx": 84,
           "svgPx": 915,
           "cardsPx": 0,
@@ -610,7 +610,7 @@
         "innerWidth": 1920,
         "innerHeight": 1080,
         "scrollWidth": 1920,
-        "scrollHeight": 1171,
+        "scrollHeight": 1187,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -623,7 +623,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 107,
+          "headerPx": 123,
           "diagramChromePx": 84,
           "svgPx": 915,
           "cardsPx": 0,
@@ -719,7 +719,7 @@
         "innerWidth": 1440,
         "innerHeight": 900,
         "scrollWidth": 1440,
-        "scrollHeight": 1105,
+        "scrollHeight": 1121,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -732,7 +732,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 99,
+          "headerPx": 115,
           "diagramChromePx": 78,
           "svgPx": 915,
           "cardsPx": 0,
@@ -772,7 +772,7 @@
         "innerWidth": 1440,
         "innerHeight": 900,
         "scrollWidth": 1440,
-        "scrollHeight": 1105,
+        "scrollHeight": 1121,
         "overflowX": false,
         "overflowY": true,
         "verticalScrollAccepted": true,
@@ -785,7 +785,7 @@
         "diagramWidth": 1034,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 99,
+          "headerPx": 115,
           "diagramChromePx": 78,
           "svgPx": 915,
           "cardsPx": 0,
@@ -928,7 +928,7 @@
     "contactSheet": "main-architecture.visual-check.html"
   },
   "sidecars": {
-    "directory": ".archify/visual-check-main-architecture-r3",
+    "directory": ".archify/visual-check-main-architecture-r4",
     "receipt": "main-architecture.visual-check.json",
     "contactSheet": "main-architecture.visual-check.html",
     "files": [
@@ -938,23 +938,23 @@
         "file": "main-architecture.visual-check.html"
       },
       {
-        "sha256": "e33b1fa40084188b4065060b8b06c89a3ed1d2322cb36853e1a8d68f96aa6cee",
-        "bytes": 143435,
+        "sha256": "123847e1e51bb801c76f5e0cf18c04390e860d9d238352c50e939a75a734d2b5",
+        "bytes": 143058,
         "file": "main-architecture.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "1f76100193d398db3dd6edb3e497a973795bb80750f35eadf8d201aae92e4e17",
-        "bytes": 153537,
+        "sha256": "b0022ce9f55debed628f94604dd598a681eaf017c95fd4e4b9f088192559707e",
+        "bytes": 152536,
         "file": "main-architecture.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "d201f5049f6a43587cec3a1a5dad2c365aa41a3a514ae3510c884bb799d4b401",
-        "bytes": 213896,
+        "sha256": "249c49d907a4c9daaab2318b570f0567389f4e7af22dc05fbf7953bd940a7721",
+        "bytes": 216318,
         "file": "main-architecture.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "7233af65e754d054e73c38e7ca7f10bb70600992cd6e933dd834d891d6004ce4",
-        "bytes": 225875,
+        "sha256": "726b943022cbbdcb22910f892cee5a567c2318713eb722af26a7300f94aee8d2",
+        "bytes": 228270,
         "file": "main-architecture.visual-check.2048x1320.dark.png"
       }
     ]
