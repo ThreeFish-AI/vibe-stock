@@ -685,7 +685,7 @@ DNS rebinding 可让远程网页绕过同源策略读写绑定 localhost/内网�
 
 - findings 总量 646（A 88 / B 73 / C 103 / D 82 / E 81 / F 63 / G 38 / H 50 / I 68）；核验分布：confirmed 583、weakened 4、unverifiable 13、gap_fill_unverified 46、panel 证伪 0；语义归并后有效主张 575 条。
 - 信源层级分布：official 266、repo 96、preprint 56、media 52、community 51、local_probe 48、peer_reviewed 46、regulatory 19、app_store 12；国内竞品专题官方信源占比 1/11 的集中度风险已在第 13 章登记。
-- 冲突台账 20 对：并读 11、降权 7、open_question 1（妙想「自动跟踪并执行」的执行边界与行业「候选/参考」合规口径相抵，A-15 vs A-18，如实披露待官方文档直采定谳）、主循环源码终裁 1（Backtrader 撮合边界 E-69 vs E-78：拉 mementum/backtrader master 源码终裁为触价即成交、含相等，引擎间口径分歧坐实）；qt.gtimg 港股时戳新鲜度一对（E-25 vs E-76）台账处置为并读（「r_hk 通道与旧快照字段之别」假说与重探定谳要求记于 note，E-76 未核验），实盘港股的 T2 限价批在重探定谳前一律回落收盘复核成交。
+- 冲突台账 20 对：并读 11、降权 7、open_question 1（妙想「自动跟踪并执行」的执行边界与行业「候选/参考」合规口径相抵，A-15 vs A-18，如实披露待官方文档直采定谳）、主循环源码终裁 1（Backtrader 撮合边界 E-69 vs E-78：拉 mementum/backtrader master 源码终裁为触价即成交、含相等，引擎间口径分歧坐实）；qt.gtimg 港股时戳新鲜度一对（E-25 vs E-76）台账处置为并读（「r_hk 通道与旧快照字段之别」假说与重探定谳要求记于 note，E-76 未核验），港股标的的 T2 限价批在重探定谳前一律回落收盘复核成交。
 - 全部竞品功能口径以各 finding 的 as_of 日期为准（信源内容日期非抓取日）；调研执行日 2026-11-06。
 - 语料与过程台账：`.temp/wf-mainagent/`（r1 全量语料与 digest、r2 归并/章节映射/冲突台账、r3 章节草稿与方案候选、grounding 背景锚），gitignore 内不入库；本报告正文每条结论的 finding_id 可在该语料中回溯原文与信源。
 
