@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "4a10f451-0284-41b7-bbcd-736f4810a200",
+  "deliveryReceiptId": "edd97c17-9225-4d45-8ce6-ba273276e7c1",
   "artifact": {
     "path": "docs/diagrams/main-agent/paper-trading-lifecycle/paper-trading-lifecycle.html",
-    "sha256": "0606e96977beb031ef75ac69bc327c64a940bf2187d021acf0285c3bc6247215",
-    "bytes": 760082
+    "sha256": "e114f03785a6faad6f791b4c97f41342ccd91aa004163dc278187c2802052028",
+    "bytes": 760201
   },
   "state": {
     "detail": "read",
@@ -906,23 +906,23 @@
         "file": "paper-trading-lifecycle.visual-check.html"
       },
       {
-        "sha256": "06499e25191c3346085b916bef8e4f91739d383c834d17b0bf12ef4fa6db082e",
-        "bytes": 110852,
+        "sha256": "1089264516fcfc9b519ba40057c9d7f28a9e098fd2629738671998aec1958ff8",
+        "bytes": 111649,
         "file": "paper-trading-lifecycle.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "f83051cddd19abd863866a0a4a03d86f6e35d4748f4784a098eb8d5cdf96d619",
-        "bytes": 117303,
+        "sha256": "531aa26f7ed35079d95dae129cd527214d575ad08ca5c1e8b0313cca3a7f1508",
+        "bytes": 118045,
         "file": "paper-trading-lifecycle.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "36069f8bd1bd4b7015531b7d35a97ff42c78badf6bd2a7f012e13f954d9a6c48",
-        "bytes": 176772,
+        "sha256": "a9919c04cc5fa49f78b3c5ff03e5b333ea9dc6e99df66c7621baf329d6ab0ebf",
+        "bytes": 177928,
         "file": "paper-trading-lifecycle.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "b9bef751991dec1605b850509600391e132f199af44d1d9b6d675dc8a400a83f",
-        "bytes": 187746,
+        "sha256": "63fbed7963a391c7589d297c8fc8a4bf0b98f08a403552ff7fe25128edac1b8f",
+        "bytes": 189184,
         "file": "paper-trading-lifecycle.visual-check.2048x1320.dark.png"
       }
     ]

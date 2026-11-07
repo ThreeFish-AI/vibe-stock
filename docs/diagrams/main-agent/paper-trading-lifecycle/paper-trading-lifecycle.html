@@ -5036,7 +5036,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </g>
         <g data-graph-role="automatic-crossover" style="--step:3">
           <path data-graph-role="automatic-crossover-underlay" d="M 541 304 L 541 424" fill="none" stroke="var(--mask)" stroke-width="5.1" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="tranche" data-edge-to="expired" data-edge-label="三批均 expired" data-edge-key="3" data-edge-id="t4" data-composition-points="541,304;541,424" data-composition-crossover="halo" d="M 541 304 L 541 424" class="a-default" stroke-width="1.1" marker-end="url(#arrowhead)"/>
+          <path data-edge-from="tranche" data-edge-to="expired" data-edge-label="所有批均 expired" data-edge-key="3" data-edge-id="t4" data-composition-points="541,304;541,424" data-composition-crossover="halo" d="M 541 304 L 541 424" class="a-default" stroke-width="1.1" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:4">
           <path data-graph-role="automatic-crossover-underlay" d="M 611 279 L 686 279" fill="none" stroke="var(--mask)" stroke-width="5.1" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
@@ -5119,8 +5119,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="756" y="292" class="t-cloud" font-size="8" text-anchor="middle">回落成交</text>
         </g>
 
-        <g id="node-expired" data-node-id="expired" data-node-label="建仓失败" tabindex="0" role="button" aria-label="聚焦建仓失败，三批均 expired · 无持仓, 终态" aria-pressed="false" data-node-kind="failure" data-node-sublabel="三批均 expired · 无持仓" data-node-context="终态">
-          <title>建仓失败 · 三批均 expired · 无持仓 · 终态</title>
+        <g id="node-expired" data-node-id="expired" data-node-label="建仓失败" tabindex="0" role="button" aria-label="聚焦建仓失败，所有存在的批均 expired · 无持仓, 终态" aria-pressed="false" data-node-kind="failure" data-node-sublabel="所有存在的批均 expired · 无持仓" data-node-context="终态">
+          <title>建仓失败 · 所有存在的批均 expired · 无持仓 · 终态</title>
           <rect x="471" y="424" width="140" height="64" rx="7" class="c-mask"/>
           <rect x="471" y="424" width="140" height="64" rx="7" class="c-security" stroke-width="1.5"/>
           <rect x="474" y="427" width="134" height="58" rx="4" class="c-security" style="fill: none" stroke-width="1"/>
@@ -5129,7 +5129,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="m5.7 5.7 4.6 4.6m0-4.6-4.6 4.6"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="541" y="447" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">建仓失败</text>
-          <text data-detail="context" x="541" y="464" class="t-muted" font-size="8" text-anchor="middle">三批均 expired · 无持仓</text>
+          <text data-detail="context" x="541" y="464" class="t-muted" font-size="7" text-anchor="middle">所有存在的批均 expired · 无持仓</text>
         </g>
 
         <g id="node-closed" data-node-id="closed" data-node-label="closed" tabindex="0" role="button" aria-label="聚焦closed，清仓 · 全部了结, 终态" aria-pressed="false" data-node-kind="success" data-node-sublabel="清仓 · 全部了结" data-node-context="终态">
@@ -5158,9 +5158,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <rect x="568" y="196.5" width="61" height="16" rx="4" class="c-mask"/>
           <text x="598.5" y="207.5" class="t-edge-emphasis" font-size="8" text-anchor="middle">任一批成交</text>
         </g>
-        <g data-detail="context" data-edge-from="tranche" data-edge-to="expired" data-edge-label="三批均 expired" data-edge-key="3" data-edge-id="t4">
-          <rect x="454.4" y="356" width="80.60000000000001" height="16" rx="4" class="c-mask"/>
-          <text x="494.7" y="367" class="t-edge-default" font-size="8" text-anchor="middle">三批均 expired</text>
+        <g data-detail="context" data-edge-from="tranche" data-edge-to="expired" data-edge-label="所有批均 expired" data-edge-key="3" data-edge-id="t4">
+          <rect x="444.6" y="356" width="90.4" height="16" rx="4" class="c-mask"/>
+          <text x="489.8" y="367" class="t-edge-default" font-size="8" text-anchor="middle">所有批均 expired</text>
         </g>
         <g data-detail="context" data-edge-from="tranche" data-edge-to="hk" data-edge-label="新鲜度未过闸" data-edge-key="4" data-edge-id="t5">
           <rect x="613.1" y="296" width="70.80000000000001" height="16" rx="4" class="c-mask"/>
@@ -5387,7 +5387,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <ul>
           <li>T1_open 次日开盘批：按次日开盘价成交</li>
           <li>T2_limit 限价批：low&lt;limit 严格穿价 · 成交价=min(open, entry_ref) · 触价写回经用户逐笔确认 record_fill</li>
-          <li>T3_trigger 确认批：触发条件确认后才计成交；各批独立 pending→filled/expired，任一批成交即进 holding（余批继续 pending）</li>
+          <li>T3_trigger 确认批：触发条件确认后才计成交；各批独立 pending→filled/expired，任一批成交即进 holding（余批继续 pending）；T3 补足必转 filled，仅无 T3 批（≤2 手）才会全部 expired</li>
         </ul>
       </div>
 
