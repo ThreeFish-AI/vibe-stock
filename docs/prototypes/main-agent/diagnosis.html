@@ -177,7 +177,7 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
       <div class="sub">标的 601234 示例电子 · 全诊模式 · 会话 sid diag-20261109-601234-a1f3</div>
     </div>
     <div class="hero-r">
-      <span class="metachip">五段流水线 · 第 ③ 段进行中</span>
+      <span class="metachip">五段流水线 · 第 ⑤ 段进行中</span>
       <span class="metachip">预算闸 --max-budget-usd 1.50</span>
     </div>
   </div>
@@ -198,7 +198,7 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
 
   <!-- 五段流水线 -->
   <section class="card">
-    <div class="card-h"><span class="ct">五段流水线</span><span class="cm">elapsed 03:41 · 取数串行锁已释放</span></div>
+    <div class="card-h"><span class="ct">五段流水线</span><span class="cm">elapsed 05:26 · 取数串行锁已释放</span></div>
     <div class="pipe">
       <div class="step done">
         <div class="sc"><svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5L5.5 10.5L11.5 3.5" stroke="#5EE0AC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -208,17 +208,17 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
         <div class="sc"><svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5L5.5 10.5L11.5 3.5" stroke="#5EE0AC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
         <div class="sl">② 上下文包</div><div class="ss">质量分 0.74 · 置信帽 0.58</div>
       </div>
+      <div class="step done">
+        <div class="sc"><svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5L5.5 10.5L11.5 3.5" stroke="#5EE0AC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="sl">③ 意见</div><div class="ss">CC 会话已结束 · 10/10 已返回</div>
+      </div>
+      <div class="step done">
+        <div class="sc"><svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5L5.5 10.5L11.5 3.5" stroke="#5EE0AC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="sl">④ 裁决</div><div class="ss">RiskGuard 降档 · final sell</div>
+      </div>
       <div class="step cur">
-        <div class="sc">3</div>
-        <div class="sl">③ 意见</div><div class="ss">CC 会话运行中 · 7/10 已返回</div>
-      </div>
-      <div class="step pend">
-        <div class="sc">4</div>
-        <div class="sl">④ 裁决</div><div class="ss">待意见齐</div>
-      </div>
-      <div class="step pend">
         <div class="sc">5</div>
-        <div class="sl">⑤ 报告</div><div class="ss">待裁决完成</div>
+        <div class="sl">⑤ 报告</div><div class="ss">渲染中</div>
       </div>
     </div>
   </section>
@@ -226,7 +226,7 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
   <div class="split">
     <!-- 意见板 -->
     <section class="card">
-      <div class="card-h"><span class="ct">意见板</span><span class="cm">7/10 已返回 · 零权重参考</span></div>
+      <div class="card-h"><span class="ct">意见板</span><span class="cm">10/10 已返回 · 零权重参考</span></div>
       <div class="opins">
         <div class="op"><div class="op-src">role:技术</div><div class="op-row"><span class="sig sig-b"><span class="d"></span>buy</span><span class="op-conf">0.68</span></div></div>
         <div class="op"><div class="op-src">role:情报</div><div class="op-row"><span class="sig sig-h"><span class="d"></span>hold</span><span class="op-conf">0.55</span></div></div>
@@ -236,8 +236,8 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
         <div class="op"><div class="op-src">strategy:超跌反弹</div><div class="op-row"><span class="sig sig-s"><span class="d"></span>sell</span><span class="op-conf">0.58</span></div></div>
         <div class="op"><div class="op-src">strategy:趋势跟随</div><div class="op-row"><span class="sig sig-h"><span class="d"></span>hold</span><span class="op-conf">0.60</span></div></div>
         <div class="op"><div class="op-src">strategy:波动率收缩</div><div class="op-row"><span class="sig sig-b"><span class="d"></span>buy</span><span class="op-conf">0.66</span></div></div>
-        <div class="op loading"><div class="op-load-tx"><span class="spin"></span>strategy:打板资金 · 生成中</div></div>
-        <div class="op loading"><div class="op-load-tx"><span class="spin"></span>strategy:北向资金 · 生成中</div></div>
+        <div class="op"><div class="op-src">strategy:打板资金</div><div class="op-row"><span class="sig sig-h"><span class="d"></span>hold</span><span class="op-conf">0.50</span></div></div>
+        <div class="op"><div class="op-src">strategy:北向资金</div><div class="op-row"><span class="sig sig-h"><span class="d"></span>hold</span><span class="op-conf">0.54</span></div></div>
         <div class="op" style="grid-column:span 1;border-style:dashed;background:transparent;display:flex;align-items:center;justify-content:center">
           <div class="op-load-tx" style="color:var(--t4)">+ 15 策略轨折叠 …</div>
         </div>

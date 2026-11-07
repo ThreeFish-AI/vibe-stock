@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1440">
-<title>主 Agent 面板 · 今日总览（盘前）</title>
+<title>主 Agent 面板 · 今日总览（盘中）</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -36,9 +36,10 @@ body{min-height:100vh;display:flex;flex-direction:column;background-color:var(--
 .top-r{display:flex;align-items:center;gap:10px;white-space:nowrap}
 .date{font:500 12px var(--mono);color:var(--t2)}
 .phase{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 11px;border-radius:999px}
-.phase-pre{color:var(--warn);border:1px solid var(--warnln);background:var(--warnbg)}
+.phase-live{color:var(--up2);border:1px solid var(--upln);background:var(--upbg)}
 .pd{width:7px;height:7px;border-radius:50%}
-.pd-amber{background:var(--warn);box-shadow:0 0 8px rgba(240,179,92,.6)}
+.pd-live{background:var(--up);box-shadow:0 0 8px rgba(255,107,107,.7);animation:pu 2.2s ease-out infinite}
+@keyframes pu{0%{box-shadow:0 0 0 0 rgba(255,107,107,.4)}70%{box-shadow:0 0 0 6px rgba(255,107,107,0)}100%{box-shadow:0 0 8px rgba(255,107,107,.7)}}
 /* ── 布局 ── */
 main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;display:flex;flex-direction:column;gap:13px}
 .hero{display:flex;align-items:flex-end;justify-content:space-between;gap:14px}
@@ -162,7 +163,7 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
   </nav>
   <div class="top-r">
     <span class="date">2026-11-09 周一</span>
-    <span class="phase phase-pre"><span class="pd pd-amber"></span>盘前</span>
+    <span class="phase phase-live"><span class="pd pd-live"></span>盘中</span>
   </div>
 </header>
 
@@ -170,10 +171,10 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
   <div class="hero">
     <div>
       <h1>今日总览</h1>
-      <div class="sub">盘前 08:52 · 事件 7 条（2 条降档高亮）· 盘后待办 3 项 · 本页为合成数据快照</div>
+      <div class="sub">盘中 10:08 · 事件 7 条（2 条降档高亮）· 盘后待办 3 项 · 本页为合成数据快照</div>
     </div>
     <div class="hero-r">
-      <span class="metachip">上次刷新 08:52:14 · 180s 轮询</span>
+      <span class="metachip">上次刷新 10:08:14 · 180s 轮询</span>
       <span class="metachip">CC 大脑 就绪</span>
     </div>
   </div>
@@ -184,52 +185,52 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
       <div class="card-h"><span class="ct">今日事件流</span><span class="cm">7 条 · 09:15 起接 monitor</span></div>
       <div class="card-b" style="padding:6px 8px">
         <div class="ev risk">
-          <div class="ev-time">08:12</div><div class="ev-rail"><span class="ev-dot"></span></div>
+          <div class="ev-time">09:18</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
             <div class="ev-top"><span class="ev-stock"><b>601234</b> 示例电子</span><span class="lv lv1">T1</span><span class="tag">止损复核</span></div>
             <div class="ev-name">止损击穿 · 15.82 &lt; 15.90<span class="riskchip">mech_risk high</span></div>
           </div>
         </div>
         <div class="ev risk">
-          <div class="ev-time">08:18</div><div class="ev-rail"><span class="ev-dot"></span></div>
+          <div class="ev-time">09:24</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
             <div class="ev-top"><span class="ev-stock"><b>000567</b> 示例消费</span><span class="lv lv1">T1</span><span class="tag">破位复核</span></div>
             <div class="ev-name">MA20 破位降档 buy → hold<span class="riskchip">mech_risk high</span></div>
           </div>
         </div>
         <div class="ev">
-          <div class="ev-time">08:25</div><div class="ev-rail"><span class="ev-dot"></span></div>
+          <div class="ev-time">09:31</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
             <div class="ev-top"><span class="ev-stock"><b>300866</b> 示例新能源</span><span class="lv lv2">T2</span><span class="tag">触价复核</span></div>
             <div class="ev-name">T2 限价批触价 · 模拟盘待逐笔确认</div>
           </div>
         </div>
         <div class="ev">
-          <div class="ev-time">08:31</div><div class="ev-rail"><span class="ev-dot"></span></div>
+          <div class="ev-time">09:36</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
-            <div class="ev-top"><span class="ev-stock"><b>HK 示例·互联</b></span><span class="lv lv0">T0</span><span class="tag">盘后复核</span></div>
-            <div class="ev-name">今日盘后业绩公告 · 收盘后补全诊证据</div>
+            <div class="ev-top"><span class="ev-stock"><b>HK 示例·互联</b></span><span class="lv lv0">T0</span><span class="tag">知情确认</span></div>
+            <div class="ev-name">11-13 盘后业绩公告临近 · 提前补全诊证据</div>
           </div>
         </div>
         <div class="ev">
-          <div class="ev-time">08:36</div><div class="ev-rail"><span class="ev-dot"></span></div>
+          <div class="ev-time">09:42</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
             <div class="ev-top"><span class="ev-stock"><b>688517</b> 示例半导体</span><span class="lv lv0">T0</span><span class="tag">知情确认</span></div>
             <div class="ev-name">11-11 解禁临近提示 · 2.1% 流通盘</div>
           </div>
         </div>
         <div class="ev">
-          <div class="ev-time">08:42</div><div class="ev-rail"><span class="ev-dot"></span></div>
+          <div class="ev-time">09:49</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
             <div class="ev-top"><span class="ev-stock"><b>601789</b> 示例医药</span><span class="lv lv2">T2</span><span class="tag">资格复核</span></div>
             <div class="ev-name">加仓轨资格冻结到期 · 待重估三道门</div>
           </div>
         </div>
         <div class="ev">
-          <div class="ev-time">08:47</div><div class="ev-rail"><span class="ev-dot"></span></div>
+          <div class="ev-time">09:55</div><div class="ev-rail"><span class="ev-dot"></span></div>
           <div>
             <div class="ev-top"><span class="ev-stock"><b>大盘</b> 市场级</span><span class="lv lv0">T0</span><span class="tag">无需复核</span></div>
-            <div class="ev-name">隔夜外盘与汇率快照已注入上下文包</div>
+            <div class="ev-name">盘中指数与汇率快照已注入上下文包</div>
           </div>
         </div>
       </div>
@@ -316,7 +317,7 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
             <span class="sys-st st-wait"><span class="sdot sdot-wait"></span>待触发</span>
           </div>
           <div class="sys-row">
-            <div class="sys-l"><span class="sys-name">CC 大脑</span><span class="sys-desc">claude headless · 探针 08:50 ok</span></div><span class="sys-sched">—</span>
+            <div class="sys-l"><span class="sys-name">CC 大脑</span><span class="sys-desc">claude headless · 探针 09:12 ok</span></div><span class="sys-sched">—</span>
             <span class="sys-st st-ok"><span class="sdot sdot-ok"></span>就绪</span>
           </div>
         </div>
@@ -350,8 +351,8 @@ main{width:100%;max-width:1400px;margin:0 auto;padding:18px 22px 16px;flex:1;dis
       <div class="cal-r"><span class="cd">11-13 盘后</span><span>HK 示例·互联 · 业绩公告</span></div>
     </div>
     <div class="dawn-sec warn-sec">
-      <div class="dawn-t">昨日未处理降档事件</div>
-      <div class="warnlist">2 条 mech_risk 降档待盘前复核：<b>601234</b> 止损击穿 · <b>000567</b> 破位降档</div>
+      <div class="dawn-t">待收盘复核降档事件</div>
+      <div class="warnlist">2 条 mech_risk 降档待收盘复核（R9）：<b>601234</b> 止损击穿 · <b>000567</b> 破位降档</div>
       <span class="go">去处理 →</span>
     </div>
   </section>
