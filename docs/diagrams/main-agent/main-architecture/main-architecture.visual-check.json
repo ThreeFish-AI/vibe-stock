@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "1bbea97e-9e40-4504-889c-e614626e0f45",
+  "deliveryReceiptId": "12bd75fc-8a6f-4ca2-a845-2db1f29ceb2f",
   "artifact": {
     "path": "docs/diagrams/main-agent/main-architecture/main-architecture.html",
-    "sha256": "b5a8ae27f8f6d9f4c3d08358ea478620ed8a942e254e9e9c120096177df09b76",
-    "bytes": 787596
+    "sha256": "f997a15520f154309b0249af3b339fd84024c460eeb52ace7392695256061a29",
+    "bytes": 787764
   },
   "state": {
     "detail": "read",
@@ -928,7 +928,7 @@
     "contactSheet": "main-architecture.visual-check.html"
   },
   "sidecars": {
-    "directory": ".archify/visual-check-main-architecture-r2",
+    "directory": ".archify/visual-check-main-architecture-r3",
     "receipt": "main-architecture.visual-check.json",
     "contactSheet": "main-architecture.visual-check.html",
     "files": [
@@ -943,18 +943,18 @@
         "file": "main-architecture.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "177647d19d4ca32f629dada6cafae97e99f7bc52b8b352020ff603715697a7c8",
-        "bytes": 153538,
+        "sha256": "1f76100193d398db3dd6edb3e497a973795bb80750f35eadf8d201aae92e4e17",
+        "bytes": 153537,
         "file": "main-architecture.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "a06bbd0902405ee8512b303ddf127dc08997b5ebba088c1b9125c76ea86b5411",
-        "bytes": 213895,
+        "sha256": "d201f5049f6a43587cec3a1a5dad2c365aa41a3a514ae3510c884bb799d4b401",
+        "bytes": 213896,
         "file": "main-architecture.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "ce3d1cbe951e5b12bcfe18911373d9163fb9a144f3de204cf00293aee9e273d3",
-        "bytes": 225876,
+        "sha256": "7233af65e754d054e73c38e7ca7f10bb70600992cd6e933dd834d891d6004ce4",
+        "bytes": 225875,
         "file": "main-architecture.visual-check.2048x1320.dark.png"
       }
     ]

@@ -5054,8 +5054,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="100" y="181" class="t-database" font-size="7" text-anchor="middle">写者=report/postmortem</text>
         </g>
 
-        <g id="node-monitor" data-node-id="monitor" data-node-label="monitor/" tabindex="0" role="button" aria-label="聚焦monitor/，盯盘台账 · advice/, 01 / 既有 SSOT" aria-pressed="false" data-node-kind="database" data-node-sublabel="盯盘台账 · advice/" data-node-tag="写者=watch.py" data-node-context="01 / 既有 SSOT">
-          <title>monitor/ · 盯盘台账 · advice/ · 01 / 既有 SSOT · 写者=watch.py</title>
+        <g id="node-monitor" data-node-id="monitor" data-node-label="monitor/" tabindex="0" role="button" aria-label="聚焦monitor/，盯盘台账 · advice/ 建议卡, 01 / 既有 SSOT" aria-pressed="false" data-node-kind="database" data-node-sublabel="盯盘台账 · advice/ 建议卡" data-node-tag="台账=watch.py · 卡=例外" data-node-context="01 / 既有 SSOT">
+          <title>monitor/ · 盯盘台账 · advice/ 建议卡 · 01 / 既有 SSOT · 台账=watch.py · 卡=例外</title>
           <rect x="25" y="242" width="150" height="64" rx="6" class="c-mask"/>
           <rect x="25" y="242" width="150" height="64" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(31 248) scale(0.6875)">
@@ -5063,8 +5063,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="100" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">monitor/</text>
-          <text data-detail="context" x="100" y="279" class="t-muted" font-size="7" text-anchor="middle">盯盘台账 · advice/</text>
-        <text data-detail="fine" x="100" y="295" class="t-database" font-size="7" text-anchor="middle">写者=watch.py</text>
+          <text data-detail="context" x="100" y="279" class="t-muted" font-size="7" text-anchor="middle">盯盘台账 · advice/ 建议卡</text>
+        <text data-detail="fine" x="100" y="295" class="t-database" font-size="7" text-anchor="middle">台账=watch.py · 卡=例外</text>
         </g>
 
         <g id="node-slotfiles" data-node-id="slotfiles" data-node-label="outlook/ · reports/" tabindex="0" role="button" aria-label="聚焦outlook/ · reports/，走势参考 · 分级报告, 01 / 既有 SSOT" aria-pressed="false" data-node-kind="database" data-node-sublabel="走势参考 · 分级报告" data-node-tag="写者=批量槽/report" data-node-context="01 / 既有 SSOT">
@@ -5449,7 +5449,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>signals.json / ledger.json / ledger.position.json 的写者永远是 report / postmortem 确定性脚本，主 Agent 全部只读</li>
-          <li>monitor/ 写者=watch.py；outlook/ 写者=17:35 批量槽；reports/ 写者=report；各节点边均标注读写者与方向</li>
+          <li>monitor/ 台账写者=watch.py（advice/ 建议卡例外：主 Agent 经断言器放行后原子写、落盘零数量）；outlook/ 写者=17:35 批量槽；reports/ 写者=report；各节点边均标注读写者与方向</li>
           <li>portfolio.json 用户手维 · 全员只读；fetch_state.lock 保证全诊取数串行互斥</li>
         </ul>
       </div>

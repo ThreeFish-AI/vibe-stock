@@ -42,8 +42,8 @@
       "id": "monitor",
       "type": "database",
       "label": "monitor/",
-      "sublabel": "盯盘台账 · advice/",
-      "tag": "写者=watch.py",
+      "sublabel": "盯盘台账 · advice/ 建议卡",
+      "tag": "台账=watch.py · 卡=例外",
       "stage": 0,
       "row": 1,
       "width": 150,
@@ -305,7 +305,7 @@
       "title": "既有件写者不变",
       "items": [
         "signals.json / ledger.json / ledger.position.json 的写者永远是 report / postmortem 确定性脚本，主 Agent 全部只读",
-        "monitor/ 写者=watch.py；outlook/ 写者=17:35 批量槽；reports/ 写者=report；各节点边均标注读写者与方向",
+        "monitor/ 台账写者=watch.py（advice/ 建议卡例外：主 Agent 经断言器放行后原子写、落盘零数量）；outlook/ 写者=17:35 批量槽；reports/ 写者=report；各节点边均标注读写者与方向",
         "portfolio.json 用户手维 · 全员只读；fetch_state.lock 保证全诊取数串行互斥"
       ]
     },

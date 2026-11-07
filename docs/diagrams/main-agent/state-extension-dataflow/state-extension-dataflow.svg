@@ -473,8 +473,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="100" y="181" class="t-database" font-size="7" text-anchor="middle">写者=report/postmortem</text>
         </g>
 
-        <g id="node-monitor" data-node-id="monitor" data-node-label="monitor/" tabindex="0" role="button" aria-label="聚焦monitor/，盯盘台账 · advice/, 01 / 既有 SSOT" aria-pressed="false" data-node-kind="database" data-node-sublabel="盯盘台账 · advice/" data-node-tag="写者=watch.py" data-node-context="01 / 既有 SSOT">
-          <title>monitor/ · 盯盘台账 · advice/ · 01 / 既有 SSOT · 写者=watch.py</title>
+        <g id="node-monitor" data-node-id="monitor" data-node-label="monitor/" tabindex="0" role="button" aria-label="聚焦monitor/，盯盘台账 · advice/ 建议卡, 01 / 既有 SSOT" aria-pressed="false" data-node-kind="database" data-node-sublabel="盯盘台账 · advice/ 建议卡" data-node-tag="台账=watch.py · 卡=例外" data-node-context="01 / 既有 SSOT">
+          <title>monitor/ · 盯盘台账 · advice/ 建议卡 · 01 / 既有 SSOT · 台账=watch.py · 卡=例外</title>
           <rect x="25" y="242" width="150" height="64" rx="6" class="c-mask"/>
           <rect x="25" y="242" width="150" height="64" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(31 248) scale(0.6875)">
@@ -482,8 +482,8 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" x="100" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">monitor/</text>
-          <text x="100" y="279" class="t-muted" font-size="7" text-anchor="middle">盯盘台账 · advice/</text>
-        <text x="100" y="295" class="t-database" font-size="7" text-anchor="middle">写者=watch.py</text>
+          <text x="100" y="279" class="t-muted" font-size="7" text-anchor="middle">盯盘台账 · advice/ 建议卡</text>
+        <text x="100" y="295" class="t-database" font-size="7" text-anchor="middle">台账=watch.py · 卡=例外</text>
         </g>
 
         <g id="node-slotfiles" data-node-id="slotfiles" data-node-label="outlook/ · reports/" tabindex="0" role="button" aria-label="聚焦outlook/ · reports/，走势参考 · 分级报告, 01 / 既有 SSOT" aria-pressed="false" data-node-kind="database" data-node-sublabel="走势参考 · 分级报告" data-node-tag="写者=批量槽/report" data-node-context="01 / 既有 SSOT">

@@ -513,8 +513,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="152.5" y="162" class="t-messagebus" font-size="7" text-anchor="middle">周一至五</text>
         </g>
 
-        <g id="node-ld-outlook" data-node-id="ld-outlook" data-node-label="launchd 17:35 走势批量槽" tabindex="0" role="button" aria-label="聚焦launchd 17:35 走势批量槽，outlook 收盘批量（09 规约）, 层 1 · 确定性层（既有 · 零改动）" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="outlook 收盘批量（09 规约）" data-node-tag="每日" data-node-context="层 1 · 确定性层（既有 · 零改动）">
-          <title>launchd 17:35 走势批量槽 · outlook 收盘批量（09 规约） · 层 1 · 确定性层（既有 · 零改动） · 每日</title>
+        <g id="node-ld-outlook" data-node-id="ld-outlook" data-node-label="launchd 17:35 走势批量槽" tabindex="0" role="button" aria-label="聚焦launchd 17:35 走势批量槽，outlook 收盘批量（09 规约）, 层 1 · 确定性层（既有 · 零改动）" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="outlook 收盘批量（09 规约）" data-node-tag="周一至五" data-node-context="层 1 · 确定性层（既有 · 零改动）">
+          <title>launchd 17:35 走势批量槽 · outlook 收盘批量（09 规约） · 层 1 · 确定性层（既有 · 零改动） · 周一至五</title>
           <rect x="50" y="190" width="205" height="60" rx="6" class="c-mask"/>
           <rect x="50" y="190" width="205" height="60" rx="6" class="c-messagebus" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(56 196) scale(0.6875)">
@@ -525,11 +525,11 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
           <text data-node-label="" x="152.5" y="218" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">launchd 17:35 走势批量槽</text>
         <text x="152.5" y="234" class="t-muted" font-size="9" text-anchor="middle">outlook 收盘批量（09 规约）</text>
-        <text x="152.5" y="242" class="t-messagebus" font-size="7" text-anchor="middle">每日</text>
+        <text x="152.5" y="242" class="t-messagebus" font-size="7" text-anchor="middle">周一至五</text>
         </g>
 
-        <g id="node-ld-post" data-node-id="ld-post" data-node-label="launchd 18:05 后验槽" tabindex="0" role="button" aria-label="聚焦launchd 18:05 后验槽，postmortem 信号记分, 层 1 · 确定性层（既有 · 零改动）" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="postmortem 信号记分" data-node-tag="每日" data-node-context="层 1 · 确定性层（既有 · 零改动）">
-          <title>launchd 18:05 后验槽 · postmortem 信号记分 · 层 1 · 确定性层（既有 · 零改动） · 每日</title>
+        <g id="node-ld-post" data-node-id="ld-post" data-node-label="launchd 18:05 后验槽" tabindex="0" role="button" aria-label="聚焦launchd 18:05 后验槽，postmortem 信号记分, 层 1 · 确定性层（既有 · 零改动）" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="postmortem 信号记分" data-node-tag="周一至五" data-node-context="层 1 · 确定性层（既有 · 零改动）">
+          <title>launchd 18:05 后验槽 · postmortem 信号记分 · 层 1 · 确定性层（既有 · 零改动） · 周一至五</title>
           <rect x="50" y="270" width="205" height="60" rx="6" class="c-mask"/>
           <rect x="50" y="270" width="205" height="60" rx="6" class="c-messagebus" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(56 276) scale(0.6875)">
@@ -540,7 +540,7 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
           <text data-node-label="" x="152.5" y="298" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">launchd 18:05 后验槽</text>
         <text x="152.5" y="314" class="t-muted" font-size="9" text-anchor="middle">postmortem 信号记分</text>
-        <text x="152.5" y="322" class="t-messagebus" font-size="7" text-anchor="middle">每日</text>
+        <text x="152.5" y="322" class="t-messagebus" font-size="7" text-anchor="middle">周一至五</text>
         </g>
 
         <g id="node-scripts" data-node-id="scripts" data-node-label="scripts 确定性件" tabindex="0" role="button" aria-label="聚焦scripts 确定性件，adjudicate · diagnose · postmortem · lens · addon · outlook, 层 1 · 确定性层（既有 · 零改动）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="adjudicate · diagnose · postmortem · lens · addon · outlook" data-node-tag="uv run --no-project · 含 fetch" data-node-context="层 1 · 确定性层（既有 · 零改动）">

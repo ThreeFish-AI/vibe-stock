@@ -10,8 +10,8 @@
   },
   "components": [
     { "id": "ld-monitor", "type": "messagebus", "label": "launchd 09:15 盯盘槽", "sublabel": "watch.py --loop · 180s/轮", "tag": "周一至五", "pos": [50, 110], "size": [205, 60] },
-    { "id": "ld-outlook", "type": "messagebus", "label": "launchd 17:35 走势批量槽", "sublabel": "outlook 收盘批量（09 规约）", "tag": "每日", "pos": [50, 190], "size": [205, 60] },
-    { "id": "ld-post", "type": "messagebus", "label": "launchd 18:05 后验槽", "sublabel": "postmortem 信号记分", "tag": "每日", "pos": [50, 270], "size": [205, 60] },
+    { "id": "ld-outlook", "type": "messagebus", "label": "launchd 17:35 走势批量槽", "sublabel": "outlook 收盘批量（09 规约）", "tag": "周一至五", "pos": [50, 190], "size": [205, 60] },
+    { "id": "ld-post", "type": "messagebus", "label": "launchd 18:05 后验槽", "sublabel": "postmortem 信号记分", "tag": "周一至五", "pos": [50, 270], "size": [205, 60] },
     { "id": "scripts", "type": "backend", "label": "scripts 确定性件", "sublabel": "adjudicate · diagnose · postmortem · lens · addon · outlook", "tag": "uv run --no-project · 含 fetch", "pos": [350, 130], "size": [350, 130] },
     { "id": "batch", "type": "backend", "label": "batch/ 编排", "sublabel": "06 批量 · 07 盯盘参考", "pos": [730, 240], "size": [190, 64] },
     { "id": "web", "type": "frontend", "label": "Web 面板", "sublabel": "StaticFiles · 七页", "tag": "本地读+命令通道", "pos": [40, 420], "size": [155, 64] },
@@ -76,7 +76,8 @@
       "items": [
         "~/.vibe-stock/agent/：queue（幂等键+WAL）· sessions · decisions（agent: 前缀 + hash 链）· audit · budget",
         "sim-portfolio.json：07 P3 schema，写者仅为 paper 引擎（穿价撮合 · 费用 · T+1）",
-        "全部落盘原子写；预算闸 --max-budget-usd 双重约束 spawn 与台账"
+        "全部落盘原子写；预算闸 --max-budget-usd 双重约束 spawn 与台账",
+        "例外：monitor/advice/ 建议卡经断言器放行后由主 Agent 原子写，落盘零数量（方案 §11）"
       ]
     }
   ]
