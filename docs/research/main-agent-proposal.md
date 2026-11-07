@@ -33,13 +33,13 @@
 
 图 2-2 诊股工作台（诊股域）：五段流水线进度、双轨意见板、裁决卡（RiskGuard 降档链）与报告渲染位。
 
-诊股工作台把五段流水线做成可观测过程而非黑箱结果，对应支柱①可解释与支柱④确定性安全壳：流水线五节点逐步点亮（图示截取第 ⑤ 段报告渲染中，①–④ 已完成），第 ③ 段意见生成期间意见板逐卡以「生成中」占位卡展示十策略双轨意见的返回进度（LLM 只产意见的面板化呈现）；裁决卡完整披露 initial 聚合→RiskGuard 降档→final signal 的裁决链与同向/分歧/冲突三计数，用户能看到「为什么从 hold 0.58 降为 sell」；报告区按 04 规约结构渲染并保留免责段占位；会话头部钉 `--session-id` 与预算标签，单次诊股的成本与归档可回溯。
+诊股工作台把五段流水线做成可观测过程而非黑箱结果，对应支柱①可解释与支柱④确定性安全壳：流水线五节点逐步点亮（图示截取第 ⑤ 段报告渲染中，①–④ 已完成），第 ③ 段意见生成期间意见板逐卡以「生成中」占位卡展示短线轨三角色与十策略共 13 条意见的返回进度，中线轨五策略另跑一次裁决、折叠展示（LLM 只产意见的面板化呈现）；裁决卡完整披露 initial 聚合→RiskGuard 降档→final signal 的裁决链与同向/分歧/冲突三计数，用户能看到「为什么从 hold 0.58 降为 sell」；报告区按 04 规约结构渲染并保留免责段占位；会话头部钉 `--session-id` 与预算标签，单次诊股的成本与归档可回溯。
 
 ![盯盘事件与 T2 复核](../prototypes/main-agent/monitor-advice.png)
 
 图 2-3 盯盘事件与 T2 复核（盯盘+操作策略域）：事件表（复核短语列）+ T2 建议卡 monitor-advice/1 + 本地通知预览。
 
-盯盘页承接 07 规约的事件语义并在其上叠 T2 决策闭环：事件表每行带「××复核」级短语（措辞限定「复核」、禁指令词，R7 只提示不执行），头部标注 watch.py 心跳与「零 LLM」标识，盯盘轮询本身不花模型钱的机制卖点直接可读；T2 建议卡按 monitor-advice/1 契约呈现候选动作、T+1 可卖份额、与上一裁决差异、σ√h 预测带四块——其中「与上一裁决差异」块是 NR-1 的用户可见面：建议卡必经原命令重裁决，差异由裁决器产出而非模型口述；本地通知预览呼应「告警主通道留在服务端、面板只做前台展示」的红线 7 落点。
+盯盘页承接 07 规约的事件语义并在其上叠 T2 决策闭环：事件表中 07 `_REVIEW_HINT` 登记规则的事件行带「××复核」级短语（措辞限定「复核」、禁指令词，R7 只提示不执行；资金流、解禁与公告临近、加仓轨等非 watch.py 规则的行不带短语，该列留空），头部标注 watch.py 心跳与「零 LLM」标识，盯盘轮询本身不花模型钱的机制卖点直接可读；T2 建议卡按 monitor-advice/1 契约呈现候选动作、T+1 可卖份额、与上一裁决差异、σ√h 预测带四块（份额原值只在面板呈现态显示，原型取模拟盘持仓与合成股数；卡落盘与导出按 07 脱敏边界降为百分比与档位词，存放与写者见 §11）——其中「与上一裁决差异」块是 NR-1 的用户可见面：建议卡必经原命令重裁决，差异由裁决器产出而非模型口述；本地通知预览呼应「告警主通道留在服务端、面板只做前台展示」的红线 7 落点。
 
 ![模拟盘](../prototypes/main-agent/paper.png)
 
@@ -81,7 +81,7 @@ launchd 关系：三份 plist（monitor 09:15 / outlook 17:35 / postmortem 18:05
 
 图 8-1 双层架构四层组件图：确定性层零改动可独活，LLM 零直写裁决面为分层铁律。
 
-四层：确定性层（launchd 三槽+scripts 六件+batch，零改动、可独活——CC 不可达时盯盘/台账/后验全部照常：launchd 三槽直接调起脚本、不经主 Agent 进程，此为结构保证）；主 Agent 层（FastAPI 单体：面板/路由/队列/CCClient/断言器/paper 引擎）；CC 大脑层（claude headless 子进程，唯一 LLM 通道）；状态层（既有 SSOT + `agent/` 唯一新写区）。分层铁律（图上醒目标注）：**LLM 零直写裁决面**——signals/ledger 的写者永远是既有确定性脚本（R3/R8 的写权限归属实现：单进程内以模块级写者纪律+断言器扫描落地，M3 无人值守开启时评估升级为 B 候选的进程级分离）。单进程单点风险处置：第四 LaunchAgent KeepAlive{Crashed} 自动重启+台账幂等断点重放+显式 AbandonProcessGroup 防守护重启连杀在跑 CC 子进程（I-57/I-59）。
+四层：确定性层（launchd 三槽+scripts 六件+batch，零改动、可独活——CC 不可达时盯盘/台账/后验全部照常：launchd 三槽直接调起脚本、不经主 Agent 进程，此为结构保证）；主 Agent 层（FastAPI 单体：面板/路由/队列/CCClient/断言器/paper 引擎）；CC 大脑层（claude headless 子进程，唯一 LLM 通道）；状态层（既有 SSOT + `agent/` 唯一新写区，另有 `monitor/advice/` 建议卡一处受限写者例外，见 §11）。分层铁律（图上醒目标注）：**LLM 零直写裁决面**——signals/ledger 的写者永远是既有确定性脚本（R3/R8 的写权限归属实现：单进程内以模块级写者纪律+断言器扫描落地，M3 无人值守开启时评估升级为 B 候选的进程级分离）。单进程单点风险处置：第四 LaunchAgent KeepAlive{Crashed} 自动重启+台账幂等断点重放+显式 AbandonProcessGroup 防守护重启连杀在跑 CC 子进程（I-57/I-59）。
 
 ### 9 Claude Code 集成通道选型
 
@@ -137,8 +137,9 @@ class CCResult:
 | agent/decisions.jsonl | decision log（`agent:` 前缀，hash 链防篡改） | 追加写 | 读 | postmortem 消费 |
 | agent/audit/<date>/ | stream-json 原始归档（官方转录默认 30 天清理，F-38） | 写 | 读 | — |
 | agent/budget.json | token+等效美元台账（订阅轨双口径，F-34） | 写 | 读写 | — |
+| monitor/advice/<date>/<code>.md | T2 建议卡 monitor-advice/1（07 P2 契约路径，写者例外） | 写（断言器放行后原子写） | 读 | — |
 
-sim-portfolio.json 留 `~/.vibe-stock/` 根（07 P3 schema 原样，写者=paper 引擎）；既有 SSOT 对主 Agent 全部只读或既有写者不变（R3/R8 的状态层实现）。锁纪律：agent/daemon.lock 单实例；尊重 fetch_state.lock 取数串行与 watch.lock。
+sim-portfolio.json 留 `~/.vibe-stock/` 根（07 P3 schema 原样，写者=paper 引擎）；`monitor/advice/` 沿用 07 已钉死的建议卡落位，是 `agent/` 之外唯一的写者例外：卡由 T2 会话产出、经断言器放行后由主 Agent 原子写入，`watch.py` 不产卡，`monitor/` 其余产物（events/ticks/day-summary）写者仍为 `watch.py`；卡面落盘形态遵 07 脱敏边界，只落百分比与档位词，T+1 可卖份额原值仅在面板与会话呈现态给值，导出卡片同口径降级（R2/NR-5）；既有 SSOT 对主 Agent 全部只读或既有写者不变（R3/R8 的状态层实现）。锁纪律：agent/daemon.lock 单实例；尊重 fetch_state.lock 取数串行与 watch.lock。
 
 ### 12 模拟盘引擎设计
 
