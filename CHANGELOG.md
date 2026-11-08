@@ -4,6 +4,12 @@
 
 > 版本序列说明（2026-10-30 起）：项目未到稳定发布，版本号统一回归 **0.0.x** patch 序列；存量 0.1.0–0.2.1 六版已按发布顺序一一重编号为 0.0.1–0.0.6，合并时又把并行合入的 0.2.2/0.2.3 两版重编号为 0.0.7/0.0.8（仅改 header，条目正文维持原样），此后默认只升 0.0.x patch，minor（0.1.0）预留给语义级变更。
 
+## [0.0.30] - 2026-11-08
+
+### Added
+
+- **agent: 前缀独立画像（07 L118 预留位落地；主 Agent decision log 的 T2 建议卡后验记分）**：新增 [scripts/agent_postmortem.py](scripts/agent_postmortem.py)——只读 `~/.vibe-stock/agent/decisions.jsonl`（写者=[stock-trading-agent](https://github.com/ThreeFish-AI/stock-trading-agent) 主 Agent）的 `advice_card_written` 决策行，T+1/3/5 收盘 ±2% 同式判定（**import postmortem.score/NEUTRAL_BAND 禁复制**，06「聚合分复算逐字同步」同类纪律）；I-016 到期收盘门同判（末根盘中未完成不评、收盘后补评）；非交易日登记回退最近一根日 K（与 postmortem 非交易日信号同判）；独立台账 `ledger.agent.json`（沿 monitor: 前缀先例不进 ledger.json/ledger.position.json；归因子 `agent:<final_signal>` 五词；evaluated 索引幂等防重评）；signal_to_action 为 score() 的 SCORABLE 家族语义最小桥（bull/bear，hold 只观察——非复制 ACTION_OF）。运行形态：手动或与 18:05 postmortem 槽串联（plist 串联命令登记于脚本 docstring，暂不装独立槽）；advice_refused 风险提示类方向语义不同构（避开回撤即有效），攒样本后经 RSI 评审再入回路（07 P3 先例同款留位）。selftest 四例（信号桥/到期窗含 I-016 门/decisions 坏行容错/score 同式 import 契约）全绿；真实干跑（无到期卡）如实「无新到期 horizon」不空写台账。
+
 ## [0.0.29] - 2026-11-07
 
 ### Changed

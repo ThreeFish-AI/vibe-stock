@@ -12,6 +12,7 @@
 | [references/03-synthesis.md](../../references/03-synthesis.md) | 聚合、分歧、RiskGuard | Agent |
 | [references/04-report.md](../../references/04-report.md) | 报告模板、落盘布局与时间线索引 | Agent |
 | [references/05-postmortem.md](../../references/05-postmortem.md) | 信号登记与后验自校准 | Agent |
+| [scripts/agent_postmortem.py](../../scripts/agent_postmortem.py) | agent: 前缀独立画像（主 Agent 建议卡后验记分，07 L118） | Agent |
 | [references/PIPELINE.md](../../references/PIPELINE.md) | 五段流水线与命令速查 | Agent / 用户 |
 | [references/06-batch-scan.md](../../references/06-batch-scan.md) | 批量子技能：指数成分精选与资金配置 | Agent |
 | [batch/README.md](../../batch/README.md) | 批量参考实现命令序与文件清单 | Agent |
