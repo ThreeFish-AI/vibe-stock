@@ -27,7 +27,8 @@
 - `uv run --no-project scripts/lens.py --selftest`：基本面锚纯函数回归全绿。
 - `uv run --no-project scripts/addon.py --selftest`：加仓轨判据回归全绿（冻结族/触发族/三段状态机/破坏性实验，0.0.22 起）。
 - `uv run --no-project scripts/outlook.py --selftest`：走势参考卡纯函数回归全绿（0.0.18 起）。
-- 任何 `scripts/` 改动，上述 scripts/ 六件全绿后才算完成（与 evals/README.md 口径一致，只收严）。
+- `uv run --no-project scripts/agent_postmortem.py --selftest`：agent: 前缀独立画像回归全绿（主 Agent 建议卡 T+1/3/5 后验记分，0.0.30 起、0.0.31 入硬门禁）。
+- 任何 `scripts/` 改动，上述 scripts/ 七件全绿后才算完成（与 evals/README.md 口径一致，只收严）。
 - `uv run --no-project batch/monitor/rules.py --selftest` 与 `uv run --no-project batch/monitor/watch.py --selftest`：盯盘件离线回归（非阻塞旁路门禁，不卡 scripts/ 提交；改 `batch/monitor/` 后必须全绿，判据只收严）。
 ## 目录速查
 
@@ -47,8 +48,8 @@
 | references/11-tactical-swing.md | 高抛低吸战术仓执行规约：用户裁量层预案（价区来源/分账/回补纪律/五门/仓位与失效位/越权声明），不进裁决链（0.0.27 起） |
 | references/PIPELINE.md | 五段流水线与命令速查 |
 | strategies/ | 策略 YAML 库 |
-| scripts/ | fetch / adjudicate / diagnose / postmortem / lens / addon / outlook / archive（裁决 · 诊断 · 基本面锚透镜 · 加仓轨 · 走势参考卡 · 报告归档与索引） |
-| batch/ | 批量子技能参考实现（口径以对应规约为准——06 批量 / 09 走势参考收盘批量 / 05 收盘评估 launchd 模板 batch/postmortem/；除 monitor/ 外不设 selftest 门禁——以 scripts/ 六件全绿 + 口径复核为准） |
+| scripts/ | fetch / adjudicate / diagnose / postmortem / agent_postmortem / lens / addon / outlook / archive（裁决 · 诊断 · 后验 · 主 Agent 建议卡后验 · 基本面锚透镜 · 加仓轨 · 走势参考卡 · 报告归档与索引） |
+| batch/ | 批量子技能参考实现（口径以对应规约为准——06 批量 / 09 走势参考收盘批量 / 05 收盘评估 launchd 模板 batch/postmortem/；除 monitor/ 外不设 selftest 门禁——以 scripts/ 七件全绿 + 口径复核为准） |
 | batch/monitor/ | 盯盘参考实现 watch/rules（口径以 references/07 为准，自带 --selftest 非阻塞旁路门禁） |
 | evals/ | 合成 Fixture 与黄金样本 |
 | docs/.agents/ | [Issue 记录](docs/.agents/issue.md) 与 [知识索引](docs/.agents/knowledge-map.md) |

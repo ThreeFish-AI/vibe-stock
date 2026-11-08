@@ -1,6 +1,6 @@
 # vibe-stock
 
-诊股 Skill：给一只 A 股 / 港股，产出带证据状态、分歧摘要与单向风险裁决的专业决策报告。机制蓝本取自开源项目 [daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis)（MIT，下称 DSA）并经精读提炼（见 negentropy 仓 `docs/research/agent-harness/178`）。
+诊股 Skill：给一只 A 股 / 港股，产出带证据状态、分歧摘要与单向风险裁决的专业决策报告。机制蓝本取自开源项目 [daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis)（MIT，下称 DSA）并经精读提炼。
 
 ## 它从 DSA 学到了什么
 
@@ -63,7 +63,7 @@ uv run --no-project scripts/diagnose.py report --stock 600519 --workdir .vs
 
 对在册股票（实盘持仓 + 模拟配置 + 观察票）做盘中价格面轮询：确定性规则锚定每日报告的止损/目标/参考买点三价位，击穿/收回/触目标/异动/触板/停牌等事件落台账并发本地通知；0.0.25 起事件附「××复核」级短语（止盈/止损/均线/低吸/高抛复核等，措辞限定「复核」、禁指令词），新增机械判据族（MA20 破位降档、+15% 跟踪止损武装/退出、position 波段带三键、收盘权重 >16% 分桶提示），收盘复核终判后日报出「操作复核」节（事件 × 既有纪律映射 + 持仓五档投影，只投影不重裁决）；launchd 每个交易日 09:15 主槽自动拉起，交易时段内每 30min 补拉槽兜底（重启/开机/被杀后由下一补拉槽恢复，交易盲窗 ≤30min；收盘复核由 16:15 盘后槽兜底）。边界：只发本地事实告警与复核短语，不接第三方推送、不执行任何交易，盘中结论以收盘复核为准，当日信号登记仍归每晚全诊。见 [references/07-monitor.md](references/07-monitor.md) 与 [batch/monitor/](batch/monitor/)。
 
-文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（十篇规约 + PIPELINE）→ [batch/](batch/)（批量子技能参考实现）→ [batch/monitor/](batch/monitor/)（盯盘参考实现）→ [strategies/](strategies/)（策略库）。回归：`scripts/*.py --selftest` 六件全绿（硬门禁）+ `batch/monitor/*.py --selftest` 两件全绿（非阻塞旁路门禁）。
+文档：[SKILL.md](SKILL.md)（路由壳）→ [references/](references/)（十一篇规约 + PIPELINE）→ [batch/](batch/)（批量子技能参考实现）→ [batch/monitor/](batch/monitor/)（盯盘参考实现）→ [strategies/](strategies/)（策略库）。回归：`scripts/*.py --selftest` 七件全绿（硬门禁）+ `batch/monitor/*.py --selftest` 两件全绿（非阻塞旁路门禁）。
 
 ## 在册股走势参考（09 规约，0.0.18 起）
 

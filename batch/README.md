@@ -49,4 +49,4 @@ uv run --no-project $SK/batch/render_index.py --scan-root $SCAN --pool hs300
 - 批量层只做编排，单股裁决链（opinions/risk → adjudicate → verdict）零改动；版本要求 ≥0.0.6（聚合分语义修复后直接消费管线口径）。
 - 门限档、降级惩罚、R_sel/合分权重、仓位带与三价纪律的数值与取舍理由见 [06](../references/06-batch-scan.md) 各节；脚本参数（--g1-steps/--min-pass/--w-min/--w-max/--industry-cap 等）是其可调面，改参数不改规约语义。
 - 深评摘要 `digest.py` 与主报告 `render_index.py` 不写运行日志类 json；各产物文件的唯一事实源地位与「勿手改」纪律见 [06「产物 SSOT 布局」](../references/06-batch-scan.md)。
-- 本目录属参考实现，不设 `--selftest` 门禁：改动以 scripts/ 六件 selftest 全绿（AGENTS.md 测试口径）+ `py_compile`/`node --check` 语法冒烟 + 06 口径复核为准。
+- 本目录属参考实现，不设 `--selftest` 门禁：改动以 scripts/ 七件 selftest 全绿（AGENTS.md 测试口径）+ `py_compile`/`node --check` 语法冒烟 + 06 口径复核为准。

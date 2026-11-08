@@ -57,5 +57,5 @@
 
 ## 门禁
 
-- `uv run --no-project scripts/addon.py --selftest`：冻结族/缺证据 skip/触发族/手数取整/三段状态机/包络/破坏性实验（拿掉门 2 买点判据结论须翻转）全绿；与 scripts/ 其余五件同列组成六件提交前置（AGENTS.md）。
+- `uv run --no-project scripts/addon.py --selftest`：冻结族/缺证据 skip/触发族/手数取整/三段状态机/包络/破坏性实验（拿掉门 2 买点判据结论须翻转）全绿；与 scripts/ 其余六件同列组成七件提交前置（AGENTS.md）。
 - 判据只许收严：放宽任一门槛须人工评审并在 CHANGELOG 记录（AGENTS.md 红线）。
