@@ -19,7 +19,7 @@
 
 ## 信号登记（report 时）
 
-- 信号动作九态：buy / add / hold / reduce / sell / watch / avoid / alert / add_on（0.0.18 起，仅 addon 轨经 action_override 产生，按 bull 记分；最终信号映射：strong_buy→buy、buy→buy、hold→watch、sell→reduce、strong_sell→sell）。
+- 信号动作九态：buy / add / hold / reduce / sell / watch / avoid / alert / add_on（0.0.22 起，仅 addon 轨经 action_override 产生，按 bull 记分；最终信号映射：strong_buy→buy、buy→buy、hold→watch、sell→reduce、strong_sell→sell）。
 - 身份键 (report_id, source_type, market, code, profile, action, horizon, regime) 即八元组；**去重未实现**：同日重跑每版各登记一条信号（挂起项见 [docs/.agents/issue.md](../docs/.agents/issue.md) I-004）。
 - **对立失效**：同 market+code+profile 下，新对立族信号（bull/bear）把旧 pending 对立信号标 invalidated——不同 profile 可并存相反动作；比对按读时归一（港股补 5 位；快照符号两侧同口径归一），存量 4 位港码/带后缀旧形态信号同样互通。
 - **置信门**：buy 族置信 <0.5 → 登记 watch（不算可执行建议）。

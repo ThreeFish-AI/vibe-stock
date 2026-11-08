@@ -111,11 +111,12 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
 
 - **批状态机**（条件：`tranches[].status`；做法：`pending → filled`（写 `filled_price/filled_at`，T2/T3 成交经用户逐笔确认）或 `pending → expired`，两个终态互斥且不可逆，各批独立、互不连坐；`expired` 只有两个来源：该批自身到期（以 [06](06-batch-scan.md) Stage D 载明的窗口为准，T1 为 5 日、T2 为 10 日 GTC）与仓位清仓时仍 pending 的批一并撤单置 `expired`；坑位：T3「20 日内未触发按收盘补足」是转 `filled`（补足成交）而非 `expired`；T1 在窗内未等到回落同属自身到期而非撤单；T2/T3 成交请求在用户确认前批保持 `pending`、不记成交，「驳回」只作废该次请求、不产生状态迁移（T1/T2 仍按自身窗口到期；T3 无窗口，保持 `pending` 并在收盘重新生成补足请求），长期未确认的仓位如实停在 `pending_open`，人工出口是人工清仓，余批按上述撤单口径一并置 `expired`）。
 - **仓位状态由批状态机械推导，禁手写**（条件：`positions[].status`；做法：`pending_open` = 无任一批 filled 且至少一批 pending；`holding` = 至少一批 filled 且未清仓，余批可为 pending 或 expired；`closed` = 清仓（止盈/止损/人工）后，或所有存在的批均 expired 且无成交（建仓失败：`lots` 为 0、`operations` 无记录，不另设 status 值）；坑位：T3 补足经用户确认转 `filled` 且无自身到期，故拆出 T3 批（`lots` ≥ 3）的仓位不会因各批到期而建仓失败（人工清仓不在此列），只有无 T3 批（`lots` ≤ 2，仅 T1/T2 或仅 T1）的仓位才会因各批到期走到该终态；进入 holding 的条件是「任一批成交」而非「三批全 filled」，T1 已成交、T2 过期（T3 仍 pending 或已补足）的真实持仓必须有状态归属且可卖份额按 T+1 计；面板的「建仓中/持有/清仓待结算」是展示标签，不得回写 status）。
-- **成交判据与提示判据分两把尺**（条件：T1 回落单与 T2 限价批判成交；做法：`t2_pending_fill` 的 `low ≤ entry_ref` 只是提示口径（推演不写回，见上表；收盘终判「T2 触价坐实」同取该式，「坐实」只表示触价、不是成交确认，P3 实施时随成交判据改为严格穿价），sim 成交判据取严格穿价 `low < limit`、成交价 = min(open, limit)，同为 T1 回落单与 T2 限价批所用，paper 引擎（[stock-trading-agent 仓](https://github.com/ThreeFish-AI/stock-trading-agent) 方案 §12，0.0.29 迁仓后落位）与之同式；坑位：边界日 `low = limit` 时提示与终判照报、但不成交，用户逐笔确认时须以穿价口径核对，不得因提示或「坐实」已报而补记成交；本条是相对提示口径的收严，判据只许收严）。
+- **成交判据与提示判据分两把尺**（条件：T1 回落单与 T2 限价批判成交；做法：`t2_pending_fill` 的 `low ≤ entry_ref` 只是提示口径（推演不写回，见上表；收盘终判「T2 触价坐实」同取该式，「坐实」只表示触价、不是成交确认，P3 实施时随成交判据改为严格穿价），sim 成交判据取严格穿价 `low < limit`、成交价 = min(open, limit)，同为 T1 回落单与 T2 限价批所用，paper 引擎（[stock-trading-agent 仓方案 §12](https://github.com/ThreeFish-AI/stock-trading-agent/blob/main/docs/research/main-agent-proposal.md)，0.0.29 迁仓后落位）与之同式；坑位：边界日 `low = limit` 时提示与终判照报、但不成交，用户逐笔确认时须以穿价口径核对，不得因提示或「坐实」已报而补记成交；本条是相对提示口径的收严，判据只许收严）。
 
-## 后验（P3 预留）
+## 后验
 
-事件按 `monitor:` 前缀独立画像：T+1/3/5 收盘 ±2% 同式判定 **import**`scripts/postmortem.py` 的 score/常量（禁复制实现——06「聚合分复算逐字同步」同类教训）；风险提示类方向语义单独定义（提示后 N 日最大回撤避开 X% 即有效，与信号 hit/miss 不同构），攒样本后经 RSI 评审钉死再并入 ledger 回路。whipsaw 路径判据用日 K high/low（tick 缺口不影响判定）。
+- **`monitor:` 前缀（P3 预留）**：事件按 `monitor:` 前缀独立画像：T+1/3/5 收盘 ±2% 同式判定 **import**`scripts/postmortem.py` 的 score/常量（禁复制实现——06「聚合分复算逐字同步」同类教训）；风险提示类方向语义单独定义（提示后 N 日最大回撤避开 X% 即有效，与信号 hit/miss 不同构），攒样本后经 RSI 评审钉死再并入 ledger 回路。whipsaw 路径判据用日 K high/low（tick 缺口不影响判定）。
+- **`agent:` 前缀（0.0.30 落地，[scripts/agent_postmortem.py](../scripts/agent_postmortem.py)）**：只读 `~/.vibe-stock/agent/decisions.jsonl`（写者=[stock-trading-agent](https://github.com/ThreeFish-AI/stock-trading-agent) 主 Agent）的 `advice_card_written` 决策行，T+1/3/5 收盘 ±2% 同式判定 **import** `scripts/postmortem.py` 的 score/NEUTRAL_BAND（禁复制）；I-016 到期收盘门同判（末根盘中未完成不评、收盘后补评），非交易日登记回退最近一根日 K；独立台账 `~/.vibe-stock/ledger.agent.json`（沿 monitor: 前缀先例不进 ledger.json/ledger.position.json；归因子 `agent:<final_signal>`，evaluated 索引幂等防重评）；运行形态手动或与 18:05 postmortem 槽串联（plist 串联命令登记于脚本 docstring，暂不装独立槽）；`advice_refused` 风险提示类方向语义不同构（避开回撤即有效），攒样本后经 RSI 评审再入回路（monitor: 同款留位）。
 
 ## 分期
 
@@ -129,4 +130,4 @@ watch.lock / ../fetch_state.lock   单实例锁 / 全局取数锁
 
 ## 回归门禁
 
-`batch/monitor/rules.py --selftest`（57 checks）与 `watch.py --selftest`（74 checks，含 launchd 模板回归钉、outlook 17:35 槽模板钉、走势参考附件钉、position 轨 profile 过滤钉、复核短语文案钉（含运维类负断言）、运行期注入零落盘钉、technical 前置门钉、收盘终判新分支钉、操作复核/权重分桶渲染钉与 trailing 跨日保留钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非 scripts/ 六件硬门禁成员（AGENTS.md 测试段非阻塞旁路门禁），P4 机械判据合流 scripts/ 后归六件 selftest 接管。判据只许收严（门禁只收严红线）。
+`batch/monitor/rules.py --selftest`（57 checks）与 `watch.py --selftest`（74 checks，含 launchd 模板回归钉、outlook 17:35 槽模板钉、走势参考附件钉、position 轨 profile 过滤钉、复核短语文案钉（含运维类负断言）、运行期注入零落盘钉、technical 前置门钉、收盘终判新分支钉、操作复核/权重分桶渲染钉与 trailing 跨日保留钉）（离线合成 fixture，零网络）是盯盘件的回归底线：改 `batch/monitor/` 后必须全绿；非 scripts/ 七件硬门禁成员（AGENTS.md 测试段非阻塞旁路门禁），P4 机械判据合流 scripts/ 后归七件 selftest 接管。判据只许收严（门禁只收严红线）。

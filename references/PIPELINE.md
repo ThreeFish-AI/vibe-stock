@@ -78,11 +78,12 @@ uv run --no-project $T/scripts/postmortem.py --selftest
 uv run --no-project $T/scripts/lens.py --selftest
 uv run --no-project $T/scripts/addon.py --selftest
 uv run --no-project $T/scripts/outlook.py --selftest
+uv run --no-project $T/scripts/agent_postmortem.py --selftest
 ```
 
 ## akshare 版本纪律
 
-命令面统一锁 `akshare==1.20.*`（minor 锁：拿补丁修复、不吃破坏性迁移——上游小版本内即发生接口文件迁移与列名随年份动态生成，2026-10 实证）。升版流程：①探活候选版本四源（日K/新闻/财务/板块）；②scripts 六件 selftest 全绿；③ CHANGELOG 记录并同步本文件锁版本。
+命令面统一锁 `akshare==1.20.*`（minor 锁：拿补丁修复、不吃破坏性迁移——上游小版本内即发生接口文件迁移与列名随年份动态生成，2026-10 实证）。升版流程：①探活候选版本四源（日K/新闻/财务/板块）；②scripts 七件 selftest 全绿；③ CHANGELOG 记录并同步本文件锁版本。
 
 ## 港股速查
 
